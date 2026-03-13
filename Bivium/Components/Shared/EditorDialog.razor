@@ -1,0 +1,26 @@
+@inject IJSRuntime JSRuntime
+
+<div id="editor-window" class="editor-window @(this._isVisible ? "visible" : "")">
+
+    <!-- Title bar (draggable) -->
+    <div class="editor-titlebar" id="editor-titlebar">
+        <span class="editor-titlebar-title">Edit: @this._fileName</span>
+        <div class="editor-titlebar-actions">
+            <span class="editor-close" @onclick="this.HandleClose" title="Close">X</span>
+        </div>
+    </div>
+
+    <!-- Monaco editor container -->
+    <div id="monaco-container" class="editor-body"></div>
+
+    <!-- Status bar -->
+    <div class="editor-statusbar">
+        <span>@this._statusText</span>
+        <span>
+            <button @onclick="this.HandleSave">Save</button>
+        </span>
+    </div>
+
+    <!-- Resize handle -->
+    <div class="editor-resize-handle" id="editor-resize-handle">/</div>
+</div>

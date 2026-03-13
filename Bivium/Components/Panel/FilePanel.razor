@@ -1,0 +1,66 @@
+@using Bivium.Components.Shared
+
+<div class="file-panel @(this.IsActive ? "active" : "")" @onclick="this.OnPanelClick">
+    <!-- Panel header with editable path bar -->
+    <div class="panel-header">
+        @if (this._isEditingPath)
+        {
+            <div class="path-bar-edit">
+                <input type="text"
+                       id="@(this.PanelId + "-path-input")"
+                       class="path-bar-input"
+                       value="@this._editPath"
+                       @oninput="this.HandlePathInput"
+                       @onkeydown="this.HandlePathKeyDown"
+                       @onblur="this.HandlePathBlur" />
+                @if (this._autocompleteMatches.Count > 1)
+                {
+                    <div class="path-autocomplete">
+                        @for (int i = 0; i < this._autocompleteMatches.Count; i++)
+                        {
+                            int idx = i;
+                            <div class="path-autocomplete-item @(idx == this._autocompleteIndex ? "active" : "")"
+                                 @onmousedown="() => this.SelectAutocompleteItem(idx)">
+                                @this._autocompleteMatches[idx]
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="path-bar-display" @onclick="this.StartPathEdit">@this.State.CurrentPath</div>
+        }
+    </div>
+
+    <!-- Tree section -->
+    <div class="panel-tree">
+        <Bivium.Components.Tree.DirectoryTree
+            RootPath="@this.State.CurrentPath"
+            CurrentPath="@this.State.CurrentPath"
+            OnDirectorySelected="this.HandleTreeNavigation" />
+    </div>
+
+    <!-- Horizontal splitter between tree and file list -->
+    <ResizableSplitter Direction="horizontal"
+                       SplitterId="@(this.PanelId + "-hsplit")"
+                       CssVariable="--tree-height" />
+
+    <!-- File list section -->
+    <div class="panel-filelist"
+         @oncontextmenu="this.HandlePanelContextMenu"
+         @oncontextmenu:preventDefault="true">
+        <Bivium.Components.FileList.FileListTable
+            Entries="@this.State.Entries"
+            CurrentSort="@this.State.CurrentSort"
+            SelectedPaths="@this.State.SelectedPaths"
+            CursorIndex="@this.State.CursorIndex"
+            CurrentPath="@this.State.CurrentPath"
+            OnSortChanged="this.HandleSortChanged"
+            OnSelectionChanged="this.HandleSelectionChanged"
+            OnNavigate="this.HandleFileListNavigation"
+            OnCursorChanged="this.HandleCursorChanged"
+            OnContextMenu="this.HandleContextMenu" />
+    </div>
+</div>

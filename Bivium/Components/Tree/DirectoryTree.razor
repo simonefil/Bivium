@@ -1,0 +1,15 @@
+@inject Bivium.Services.IFileSystemService FileSystemService
+
+<div class="dir-tree">
+    @if (this._roots != null)
+    {
+        @foreach (FileSystemEntry root in this._roots)
+        {
+            <Bivium.Components.Tree.DirectoryTreeNode
+                Entry="@root"
+                CurrentPath="@this.CurrentPath"
+                OnDirectorySelected="this.HandleDirectorySelected"
+                Depth="0" />
+        }
+    }
+</div>

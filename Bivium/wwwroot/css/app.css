@@ -1,0 +1,34 @@
+/* WebTUI layer ordering - must be first */
+@layer base, utils, components;
+
+/* WebTUI full bundle (base + all components + all utils) */
+@import '../lib/webtui/dist/full.css';
+
+/* WebTUI themes */
+@import '../lib/webtui-theme-nord/dist/index.css';
+@import '../lib/webtui-theme-catppuccin/dist/index.css';
+
+/* xterm.js styles */
+@import '../lib/xterm/css/xterm.css';
+
+/* Custom themes */
+@import 'themes.css';
+
+/* Application styles */
+@import 'layout.css';
+@import 'tree.css';
+@import 'filelist.css';
+@import 'contextmenu.css';
+@import 'menubar.css';
+@import 'statusbar.css';
+@import 'terminal.css';
+@import 'editor.css';
+
+/* Global overrides */
+html, body {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+}

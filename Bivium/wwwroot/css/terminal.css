@@ -1,0 +1,86 @@
+/* Terminal window styles - floating draggable window */
+.terminal-window {
+    display: none;
+    position: fixed;
+    z-index: 100;
+    border: 1px solid var(--foreground0);
+    background-color: var(--background0);
+    box-shadow: 2px 2px 0 var(--background3);
+    flex-direction: column;
+    min-width: 40ch;
+    min-height: 10lh;
+}
+
+.terminal-window.visible {
+    display: flex;
+}
+
+/* Terminal title bar (draggable) */
+.terminal-titlebar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: var(--foreground0);
+    color: var(--background0);
+    padding: 0 1ch;
+    line-height: 1lh;
+    cursor: move;
+    user-select: none;
+    flex-shrink: 0;
+}
+
+.terminal-titlebar-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.terminal-titlebar-actions {
+    display: flex;
+    gap: 1ch;
+    flex-shrink: 0;
+}
+
+.terminal-titlebar-btn {
+    cursor: pointer;
+    color: var(--background0);
+    background: none;
+    border: none;
+    font-family: var(--font-family);
+    font-size: var(--font-size);
+    padding: 0 0.5ch;
+    height: 1lh;
+    line-height: 1lh;
+}
+
+.terminal-titlebar-btn:hover {
+    background-color: var(--background2);
+    color: var(--foreground0);
+}
+
+/* xterm container */
+.terminal-body {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    background-color: #000;
+}
+
+/* Resize handle (bottom-right corner) */
+.terminal-resize-handle {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 2ch;
+    height: 1lh;
+    cursor: nwse-resize;
+    text-align: right;
+    color: var(--foreground2);
+    user-select: none;
+    line-height: 1lh;
+}
+
+/* Override xterm.js viewport to remove scrollbar gap */
+.terminal-body .xterm-viewport {
+    overflow-y: auto;
+}

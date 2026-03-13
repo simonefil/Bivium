@@ -1,0 +1,131 @@
+/* Editor floating window styles */
+.editor-window {
+    display: none;
+    position: fixed;
+    left: 10vw;
+    top: 15vh;
+    width: 80vw;
+    height: 70vh;
+    z-index: 2000;
+    background-color: var(--background0);
+    border: 1px solid var(--foreground2);
+    box-shadow: 2px 2px 0 var(--background3);
+    flex-direction: column;
+    min-width: 40ch;
+    min-height: 10lh;
+}
+
+.editor-window.visible {
+    display: flex;
+}
+
+/* Editor title bar (draggable) */
+.editor-titlebar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: var(--foreground0);
+    color: var(--background0);
+    padding: 0 1ch;
+    line-height: 1lh;
+    cursor: move;
+    user-select: none;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--foreground2);
+}
+
+.editor-titlebar-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.editor-titlebar-actions {
+    display: flex;
+    gap: 1ch;
+    flex-shrink: 0;
+}
+
+.editor-close {
+    cursor: pointer;
+    color: var(--background0);
+    background: none;
+    border: none;
+    font-family: var(--font-family);
+    font-size: var(--font-size);
+    padding: 0 0.5ch;
+    height: 1lh;
+    line-height: 1lh;
+}
+
+.editor-close:hover {
+    background-color: var(--background2);
+    color: var(--foreground0);
+}
+
+/* Monaco editor container */
+.editor-body {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* Status bar */
+.editor-statusbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: var(--background1);
+    padding: 0 1ch;
+    line-height: 1lh;
+    border-top: 1px solid var(--foreground2);
+    flex-shrink: 0;
+}
+
+/* TUI-style button in status bar */
+.editor-statusbar button {
+    background: none;
+    background-image: none;
+    color: var(--foreground0);
+    border: none;
+    padding: 0;
+    height: 1lh;
+    line-height: 1lh;
+    font-family: var(--font-family);
+    font-size: var(--font-size);
+    cursor: pointer;
+}
+
+.editor-statusbar button::before {
+    content: "[ ";
+    color: var(--foreground2);
+}
+
+.editor-statusbar button::after {
+    content: " ]";
+    color: var(--foreground2);
+}
+
+.editor-statusbar button:hover {
+    background-color: var(--foreground0);
+    color: var(--background0);
+}
+
+.editor-statusbar button:hover::before,
+.editor-statusbar button:hover::after {
+    color: var(--background0);
+}
+
+/* Resize handle (bottom-right corner) */
+.editor-resize-handle {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 2ch;
+    height: 1lh;
+    cursor: nwse-resize;
+    text-align: right;
+    color: var(--foreground2);
+    user-select: none;
+    line-height: 1lh;
+}

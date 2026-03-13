@@ -1,0 +1,33 @@
+/* Directory tree styles */
+.dir-tree {
+    padding: 0;
+    font-size: var(--font-size);
+}
+
+/* Tree node row (clickable) */
+.tree-node-row {
+    cursor: pointer;
+    padding: 0 1ch;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1lh;
+}
+
+/* Toggle icon */
+.tree-toggle {
+    color: var(--foreground2);
+    cursor: pointer;
+    user-select: none;
+}
+
+/* Hover */
+.tree-node-row:hover {
+    background-color: var(--background1);
+}
+
+/* Active/selected node */
+.tree-node-row.tree-active {
+    background-color: var(--background2);
+    color: var(--foreground0);
+}

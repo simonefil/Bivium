@@ -1,0 +1,129 @@
+/* Context menu styles */
+.context-menu-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 999;
+}
+
+.context-menu {
+    position: fixed;
+    z-index: 1000;
+    background-color: var(--background0);
+    border: 1px solid var(--foreground2);
+    min-width: 30ch;
+    padding: 0;
+}
+
+.context-menu-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 0 1ch;
+    line-height: 1lh;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.context-menu-item:hover {
+    background-color: var(--background2);
+    color: var(--foreground0);
+}
+
+.context-menu-item .shortcut {
+    color: var(--foreground2);
+    margin-left: 2ch;
+}
+
+.context-menu hr {
+    border: none;
+    border-top: 1px solid var(--foreground2);
+    margin: 0;
+}
+
+/* Reset WebTUI table decorations inside dialogs */
+.context-menu table:before {
+    display: none;
+}
+
+.context-menu table tr th:before,
+.context-menu table tr th:after,
+.context-menu table tr td:before,
+.context-menu table tr td:after {
+    display: none;
+}
+
+.context-menu table :first-child > tr:first-child > td,
+.context-menu table :first-child > tr:first-child > th {
+    padding-top: 0;
+}
+
+.context-menu table tr th,
+.context-menu table tr td {
+    padding-bottom: 0;
+    padding-right: 1ch;
+    line-height: 1lh;
+}
+
+/* TUI-style checkboxes inside dialogs: [x] / [ ] */
+.context-menu input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 3ch;
+    height: 1lh;
+    margin: 0;
+    padding: 0;
+    background: none;
+    border: none;
+    font-family: var(--font-family);
+    font-size: var(--font-size);
+    color: var(--foreground0);
+    cursor: pointer;
+    vertical-align: bottom;
+}
+
+.context-menu input[type="checkbox"]::before {
+    content: "[ ]";
+}
+
+.context-menu input[type="checkbox"]:checked::before {
+    content: "[x]";
+}
+
+/* TUI-style buttons inside dialogs: [ OK ] [ Cancel ] */
+.context-menu button {
+    background: none;
+    background-image: none;
+    color: var(--foreground0);
+    border: none;
+    padding: 0;
+    height: 1lh;
+    line-height: 1lh;
+    font-family: var(--font-family);
+    font-size: var(--font-size);
+    cursor: pointer;
+}
+
+.context-menu button::before {
+    content: "[ ";
+    color: var(--foreground2);
+}
+
+.context-menu button::after {
+    content: " ]";
+    color: var(--foreground2);
+}
+
+.context-menu button:hover,
+.context-menu button.dialog-btn-focused {
+    background-color: var(--foreground0);
+    color: var(--background0);
+}
+
+.context-menu button:hover::before,
+.context-menu button:hover::after,
+.context-menu button.dialog-btn-focused::before,
+.context-menu button.dialog-btn-focused::after {
+    color: var(--background0);
+}

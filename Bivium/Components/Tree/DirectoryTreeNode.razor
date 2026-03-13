@@ -1,0 +1,27 @@
+@inject Bivium.Services.IFileSystemService FileSystemService
+
+<div class="tree-node">
+    <div class="tree-node-row @(this.IsCurrentPath() ? "tree-active" : "")"
+         style="padding-left: @(this.Depth * 2)ch"
+         @onclick="this.OnClick"
+         @onclick:stopPropagation="true">
+        <span class="tree-toggle" @onclick="this.OnToggleClick" @onclick:stopPropagation="true">@(this._isExpanded ? "- " : "+ ")</span>@this.Entry.Name
+    </div>
+
+    @if (this._isExpanded && this._children != null)
+    {
+        @foreach (FileSystemEntry child in this._children)
+        {
+            <Bivium.Components.Tree.DirectoryTreeNode
+                Entry="@child"
+                CurrentPath="@this.CurrentPath"
+                OnDirectorySelected="this.OnDirectorySelected"
+                Depth="@(this.Depth + 1)" />
+        }
+
+        @if (this._children.Count == 0)
+        {
+            <div style="padding-left: @((this.Depth + 1) * 2)ch; color: var(--foreground2);">(empty)</div>
+        }
+    }
+</div>

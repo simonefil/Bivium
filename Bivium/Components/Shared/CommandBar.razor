@@ -1,0 +1,12 @@
+<div class="command-bar">
+    <span class="cmd-key" @onclick="() => this.OnCopy.InvokeAsync()"><span class="key-label">Ctrl+C</span> Copy</span>
+    <span class="cmd-key" @onclick="() => this.OnCut.InvokeAsync()"><span class="key-label">Ctrl+X</span> Cut</span>
+    <span class="cmd-key" @onclick="() => this.OnPaste.InvokeAsync()"><span class="key-label">Ctrl+V</span> Paste</span>
+    <span class="cmd-key" @onclick="() => this.OnDelete.InvokeAsync()"><span class="key-label">Del</span> Delete</span>
+    <span class="cmd-key" @onclick="() => this.OnRename.InvokeAsync()"><span class="key-label">F2</span> Rename</span>
+    <span class="cmd-key" @onclick="() => this.OnNewFolder.InvokeAsync()"><span class="key-label">Ctrl+Shift+N</span> New Folder</span>
+    <span class="cmd-key" @onclick="() => this.OnRefresh.InvokeAsync()"><span class="key-label">F5</span> Refresh</span>
+    <span class="cmd-key" @onclick="() => this.OnProperties.InvokeAsync()"><span class="key-label">Alt+Enter</span> Properties</span>
+    <span class="cmd-key" @onclick="() => this.OnTerminal.InvokeAsync()"><span class="key-label">F12</span> Terminal</span>
+    <span class="cmd-key" style="margin-left: auto;" @onclick="() => this.OnAbout.InvokeAsync()"><span class="key-label">Ctrl+?</span> About</span>
+</div>

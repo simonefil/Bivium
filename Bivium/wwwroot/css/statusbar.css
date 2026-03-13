@@ -1,0 +1,59 @@
+/* Status bar */
+.status-bar {
+    display: flex;
+    justify-content: space-between;
+    background-color: var(--background1);
+    padding: 0 1ch;
+    line-height: 1lh;
+    border-top: 1px solid var(--box-border-color, var(--foreground2));
+    color: var(--foreground1);
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.status-bar-left {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.status-bar-center {
+    flex: 0 0 auto;
+    padding: 0 1ch;
+}
+
+.status-bar-right {
+    flex: 1;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Command bar (bottom) */
+.command-bar {
+    display: flex;
+    background-color: var(--background0);
+    border-top: 1px solid var(--box-border-color, var(--foreground2));
+    line-height: 1lh;
+    overflow: hidden;
+}
+
+.cmd-key {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    padding: 0 1ch;
+    white-space: nowrap;
+}
+
+.cmd-key:hover {
+    background-color: var(--background1);
+}
+
+/* Key label with inverted colors */
+.key-label {
+    background-color: var(--foreground0);
+    color: var(--background0);
+    padding: 0 0.5ch;
+    margin-right: 0.5ch;
+}

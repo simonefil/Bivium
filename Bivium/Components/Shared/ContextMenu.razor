@@ -1,0 +1,82 @@
+@if (this.IsVisible)
+{
+    <!-- Transparent overlay to catch clicks outside menu -->
+    <div class="context-menu-overlay" @onclick="this.HandleClose"></div>
+
+    <!-- Context menu positioned at click coordinates -->
+    <div class="context-menu" style="left: @(this.X)px; top: @(this.Y)px;">
+        <div class="context-menu-item" @onclick="this.HandleOpen">
+            <span>Open</span>
+            <span class="shortcut">Enter</span>
+        </div>
+        <hr />
+        <div class="context-menu-item" @onclick="this.HandleCopy">
+            <span>Copy</span>
+            <span class="shortcut">Ctrl+C</span>
+        </div>
+        <div class="context-menu-item" @onclick="this.HandleCut">
+            <span>Cut</span>
+            <span class="shortcut">Ctrl+X</span>
+        </div>
+        <div class="context-menu-item" @onclick="this.HandlePaste">
+            <span>Paste</span>
+            <span class="shortcut">Ctrl+V</span>
+        </div>
+        <hr />
+        <div class="context-menu-item" @onclick="this.HandleNewFile">
+            <span>New File</span>
+            <span class="shortcut">Ctrl+N</span>
+        </div>
+        <div class="context-menu-item" @onclick="this.HandleNewFolder">
+            <span>New Folder</span>
+            <span class="shortcut">Ctrl+Shift+N</span>
+        </div>
+        <div class="context-menu-item" @onclick="this.HandleRename">
+            <span>Rename</span>
+            <span class="shortcut">F2</span>
+        </div>
+        <hr />
+        <div class="context-menu-item" @onclick="this.HandleEdit">
+            <span>Edit</span>
+            <span class="shortcut">F4</span>
+        </div>
+        <hr />
+        <div class="context-menu-item" @onclick="this.HandleDownload">
+            <span>Download</span>
+            <span class="shortcut"></span>
+        </div>
+        <div class="context-menu-item" @onclick="this.HandleUpload">
+            <span>Upload</span>
+            <span class="shortcut"></span>
+        </div>
+        <hr />
+        @if (this.IsArchive)
+        {
+            <div class="context-menu-item" @onclick="this.HandleExtract">
+                <span>Extract Here</span>
+                <span class="shortcut"></span>
+            </div>
+        }
+        @if (this.HasSelection)
+        {
+            <div class="context-menu-item" @onclick="this.HandleCompress">
+                <span>Compress to...</span>
+                <span class="shortcut"></span>
+            </div>
+        }
+        <hr />
+        <div class="context-menu-item" @onclick="this.HandleDelete">
+            <span>Delete</span>
+            <span class="shortcut">Del</span>
+        </div>
+        <hr />
+        <div class="context-menu-item" @onclick="this.HandlePermissions">
+            <span>Permissions</span>
+            <span class="shortcut">Ctrl+P</span>
+        </div>
+        <div class="context-menu-item" @onclick="this.HandleProperties">
+            <span>Properties</span>
+            <span class="shortcut">Alt+Enter</span>
+        </div>
+    </div>
+}

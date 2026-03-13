@@ -1,0 +1,47 @@
+@inject IJSRuntime JSRuntime
+
+@if (this._isVisible)
+{
+    <div class="context-menu-overlay" @onclick="this.HandleCancel">
+        <div class="context-menu" style="position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 50ch;"
+             @onclick:stopPropagation="true">
+            <div style="background-color: var(--background1); padding: 0 1ch; border-bottom: 1px solid var(--foreground2);">
+                Upload File
+            </div>
+            <div style="padding: 1lh 1ch;">
+                <div style="margin-bottom: 0.5lh;">
+                    <span style="color: var(--foreground2);">Destination:</span> @this._destinationDir
+                </div>
+
+                <!-- Hidden file input -->
+                <input type="file" id="upload-file-input" style="display: none;" />
+
+                <!-- Browse button and file name -->
+                <div style="display: flex; align-items: center; gap: 1ch; margin-bottom: 0.5lh;">
+                    <button @ref="this._browseButton" @onclick="this.HandleBrowse" disabled="@this._isUploading">Browse...</button>
+                    <span>@(string.IsNullOrEmpty(this._fileName) ? "(no file selected)" : this._fileName)</span>
+                </div>
+
+                <!-- Progress bar -->
+                @if (this._isUploading)
+                {
+                    <div style="margin-bottom: 0.5lh; font-family: monospace;">
+                        @this.RenderProgressBar()
+                    </div>
+                }
+
+                <!-- Status text -->
+                @if (!string.IsNullOrEmpty(this._statusText))
+                {
+                    <div style="color: var(--foreground2); margin-top: 0.5lh;">
+                        @this._statusText
+                    </div>
+                }
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 2ch; padding: 0 1ch 1lh 1ch;">
+                <button @onclick="this.HandleCancel" disabled="@this._isUploading">Cancel</button>
+                <button @onclick="this.HandleUpload" disabled="@(this._isUploading || string.IsNullOrEmpty(this._fileName))">Upload</button>
+            </div>
+        </div>
+    </div>
+}

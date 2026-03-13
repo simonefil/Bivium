@@ -1,0 +1,169 @@
+<!-- Top menu bar with dropdown menus -->
+<div class="menu-bar">
+    <!-- File menu -->
+    <div class="menu-bar-item @(this._activeMenu == "file" ? "active" : "")"
+         @onclick="@(() => this.ToggleMenu("file"))"
+         @onmouseenter="@(() => this.HoverMenu("file"))">
+        File
+    </div>
+
+    <!-- Edit menu -->
+    <div class="menu-bar-item @(this._activeMenu == "edit" ? "active" : "")"
+         @onclick="@(() => this.ToggleMenu("edit"))"
+         @onmouseenter="@(() => this.HoverMenu("edit"))">
+        Edit
+    </div>
+
+    <!-- View menu -->
+    <div class="menu-bar-item @(this._activeMenu == "view" ? "active" : "")"
+         @onclick="@(() => this.ToggleMenu("view"))"
+         @onmouseenter="@(() => this.HoverMenu("view"))">
+        View
+    </div>
+
+    <!-- Settings menu -->
+    <div class="menu-bar-item @(this._activeMenu == "settings" ? "active" : "")"
+         @onclick="@(() => this.ToggleMenu("settings"))"
+         @onmouseenter="@(() => this.HoverMenu("settings"))">
+        Settings
+    </div>
+
+    <!-- Help menu -->
+    <div class="menu-bar-item @(this._activeMenu == "help" ? "active" : "")"
+         @onclick="@(() => this.ToggleMenu("help"))"
+         @onmouseenter="@(() => this.HoverMenu("help"))">
+        Help
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(this._activeMenu))
+{
+    <!-- Transparent overlay to catch clicks outside menu -->
+    <div class="context-menu-overlay" @onclick="this.CloseMenu"></div>
+
+    <!-- File dropdown -->
+    @if (this._activeMenu == "file")
+    {
+        <div class="context-menu menu-bar-dropdown" style="left: 0;">
+            <div class="context-menu-item" @onclick="this.HandleNewFile">
+                <span>New File</span>
+                <span class="shortcut">Ctrl+N</span>
+            </div>
+            <div class="context-menu-item" @onclick="this.HandleNewFolder">
+                <span>New Folder</span>
+                <span class="shortcut">Ctrl+Shift+N</span>
+            </div>
+            <hr />
+            <div class="context-menu-item" @onclick="this.HandleDownload">
+                <span>Download</span>
+                <span class="shortcut"></span>
+            </div>
+            <div class="context-menu-item" @onclick="this.HandleUpload">
+                <span>Upload</span>
+                <span class="shortcut"></span>
+            </div>
+            <hr />
+            <div class="context-menu-item" @onclick="this.HandleExtract">
+                <span>Extract Here</span>
+                <span class="shortcut"></span>
+            </div>
+            <div class="context-menu-item" @onclick="this.HandleCompress">
+                <span>Compress to...</span>
+                <span class="shortcut"></span>
+            </div>
+            <hr />
+            <div class="context-menu-item" @onclick="this.HandleExit">
+                <span>Exit</span>
+                <span class="shortcut"></span>
+            </div>
+        </div>
+    }
+
+    <!-- Edit dropdown -->
+    @if (this._activeMenu == "edit")
+    {
+        <div class="context-menu menu-bar-dropdown" style="left: calc(1ch + 4ch);">
+            <div class="context-menu-item" @onclick="this.HandleCopy">
+                <span>Copy</span>
+                <span class="shortcut">Ctrl+C</span>
+            </div>
+            <div class="context-menu-item" @onclick="this.HandleCut">
+                <span>Cut</span>
+                <span class="shortcut">Ctrl+X</span>
+            </div>
+            <div class="context-menu-item" @onclick="this.HandlePaste">
+                <span>Paste</span>
+                <span class="shortcut">Ctrl+V</span>
+            </div>
+            <hr />
+            <div class="context-menu-item" @onclick="this.HandleDelete">
+                <span>Delete</span>
+                <span class="shortcut">Del</span>
+            </div>
+            <div class="context-menu-item" @onclick="this.HandleRename">
+                <span>Rename</span>
+                <span class="shortcut">F2</span>
+            </div>
+            <hr />
+            <div class="context-menu-item" @onclick="this.HandleSelectAll">
+                <span>Select All</span>
+                <span class="shortcut">Ctrl+A</span>
+            </div>
+        </div>
+    }
+
+    <!-- View dropdown -->
+    @if (this._activeMenu == "view")
+    {
+        <div class="context-menu menu-bar-dropdown" style="left: calc(2 * (1ch + 4ch) + 1ch);">
+            <div class="context-menu-item" @onclick="this.HandleRefresh">
+                <span>Refresh</span>
+                <span class="shortcut">F5</span>
+            </div>
+            <hr />
+            <div class="context-menu-item" @onclick="this.HandleTerminal">
+                <span>Terminal</span>
+                <span class="shortcut">F12</span>
+            </div>
+        </div>
+    }
+
+    <!-- Settings dropdown -->
+    @if (this._activeMenu == "settings")
+    {
+        <div class="context-menu menu-bar-dropdown" style="left: calc(3 * (1ch + 4ch) + 2 * 1ch + 1ch);">
+            <div style="display: flex; align-items: center; padding: 0 1ch; line-height: 1lh;">
+                <span style="margin-right: 1ch;">Theme:</span>
+                <select @onchange="this.HandleThemeChange" value="@this._currentTheme"
+                        style="background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2); font-size: inherit; font-family: inherit; flex: 1;">
+                    <option value="dark">Dark</option>
+                    <option value="light">Light</option>
+                    <option value="nord">Nord</option>
+                    <option value="solarized-dark">Solarized Dark</option>
+                    <option value="everforest">Everforest</option>
+                    <option value="cyberpunk">Cyberpunk</option>
+                    <option value="cybergum">CyberGum</option>
+                    <option value="dos">DOS</option>
+                    <option value="retro-green">Retro Green</option>
+                    <option value="retro-amber">Retro Amber</option>
+                </select>
+            </div>
+            <hr />
+            <div class="context-menu-item" @onclick="this.HandleEditorExtensions">
+                <span>Editor Extensions...</span>
+                <span class="shortcut"></span>
+            </div>
+        </div>
+    }
+
+    <!-- Help dropdown -->
+    @if (this._activeMenu == "help")
+    {
+        <div class="context-menu menu-bar-dropdown" style="left: calc(4 * (1ch + 4ch) + 3 * 1ch + 5ch);">
+            <div class="context-menu-item" @onclick="this.HandleAbout">
+                <span>About</span>
+                <span class="shortcut">Ctrl+?</span>
+            </div>
+        </div>
+    }
+}

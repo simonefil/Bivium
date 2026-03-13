@@ -1,0 +1,150 @@
+/* Main commander layout - 4 rows: menu bar, panels area, status bar, command bar */
+.commander-layout {
+    display: grid;
+    grid-template-rows: auto 1fr auto auto;
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+}
+
+/* Panels area - 2 columns with vertical splitter */
+.panels-area {
+    display: grid;
+    grid-template-columns: var(--left-panel-width, 1fr) 1ch var(--right-panel-width, 1fr);
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* Single panel - 4 rows: header, tree, splitter, file list */
+.file-panel {
+    display: grid;
+    grid-template-rows: 1lh var(--tree-height, 30%) 1lh 1fr;
+    min-height: 0;
+    overflow: hidden;
+    border: 1px solid var(--box-border-color, var(--foreground0));
+    user-select: none;
+}
+
+/* Active panel indicator */
+.file-panel.active {
+    border: 2px solid var(--foreground0);
+}
+
+.file-panel:not(.active) {
+    border-color: var(--foreground2);
+}
+
+/* Panel header with current path */
+.panel-header {
+    padding: 0 1ch;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    line-height: 1lh;
+    border-bottom: 1px solid var(--box-border-color, var(--foreground2));
+}
+
+/* Active panel header */
+.file-panel.active .panel-header {
+    background-color: var(--background2);
+    color: var(--foreground0);
+}
+
+/* Inactive panel header */
+.file-panel:not(.active) .panel-header {
+    background-color: var(--background1);
+    color: var(--foreground2);
+}
+
+/* Path bar display mode */
+.path-bar-display {
+    cursor: text;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+/* Path bar edit mode */
+.path-bar-edit {
+    position: relative;
+    width: 100%;
+}
+
+/* Path bar input */
+.path-bar-input {
+    width: 100%;
+    background-color: var(--background0);
+    color: var(--foreground0);
+    border: none;
+    outline: none;
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* Autocomplete dropdown */
+.path-autocomplete {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    width: 100%;
+    max-height: 10lh;
+    overflow-y: auto;
+    background-color: var(--background1);
+    border: 1px solid var(--box-border-color, var(--foreground2));
+    z-index: 100;
+}
+
+/* Autocomplete item */
+.path-autocomplete-item {
+    padding: 0 1ch;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    color: var(--foreground1);
+}
+
+/* Autocomplete item hover and active */
+.path-autocomplete-item:hover,
+.path-autocomplete-item.active {
+    background-color: var(--background2);
+    color: var(--foreground0);
+}
+
+/* Tree section */
+.panel-tree {
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-height: 0;
+}
+
+/* File list section */
+.panel-filelist {
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-height: 0;
+}
+
+/* Resizable splitter bar */
+.splitter {
+    background-color: var(--background1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--foreground2);
+}
+
+.splitter-vertical {
+    cursor: col-resize;
+    width: 1ch;
+}
+
+.splitter-horizontal {
+    cursor: row-resize;
+    height: 1lh;
+    border-top: 1px solid var(--box-border-color, var(--foreground2));
+    border-bottom: 1px solid var(--box-border-color, var(--foreground2));
+}

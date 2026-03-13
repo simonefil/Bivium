@@ -1,0 +1,19 @@
+@inject IJSRuntime JSRuntime
+
+<div id="terminal-window" class="terminal-window @(this._isVisible ? "visible" : "")"
+     style="left: @(this._windowLeft)px; top: @(this._windowTop)px; width: @(this._windowWidth)px; height: @(this._windowHeight)px;">
+
+    <!-- Title bar (draggable) -->
+    <div class="terminal-titlebar" id="terminal-titlebar">
+        <span class="terminal-titlebar-title">Terminal - @this._shellName</span>
+        <div class="terminal-titlebar-actions">
+            <span class="terminal-titlebar-btn" @onclick="this.HandleClose" title="Close (F12)">X</span>
+        </div>
+    </div>
+
+    <!-- xterm.js container -->
+    <div id="terminal-container" class="terminal-body"></div>
+
+    <!-- Resize handle -->
+    <div class="terminal-resize-handle" id="terminal-resize-handle">/</div>
+</div>

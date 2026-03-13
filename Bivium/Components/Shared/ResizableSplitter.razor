@@ -1,0 +1,14 @@
+@inject IJSRuntime JSRuntime
+
+<div id="@this.SplitterId"
+     class="splitter @(this.Direction == "vertical" ? "splitter-vertical" : "splitter-horizontal")"
+     title="Drag to resize">
+    @if (this.Direction == "vertical")
+    {
+        <span>│</span>
+    }
+    else
+    {
+        <span>─</span>
+    }
+</div>

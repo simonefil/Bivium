@@ -1,0 +1,138 @@
+@page "/"
+@rendermode InteractiveServer
+@inject IJSRuntime JSRuntime
+
+<PageTitle>Bivium File Manager</PageTitle>
+
+<div class="commander-layout">
+    <!-- Top menu bar -->
+    <Bivium.Components.Shared.MenuBar
+        OnNewFile="this.DoNewFile"
+        OnNewFolder="this.DoNewFolder"
+        OnDownload="this.DoDownload"
+        OnUpload="this.DoUpload"
+        OnExit="this.DoExit"
+        OnCopy="this.DoCopy"
+        OnCut="this.DoCut"
+        OnPaste="this.DoPaste"
+        OnDelete="this.DoDelete"
+        OnRename="this.DoRename"
+        OnSelectAll="this.DoSelectAll"
+        OnRefresh="this.DoRefresh"
+        OnTerminal="this.DoToggleTerminal"
+        OnEditorExtensions="this.DoEditorExtensions"
+        OnExtract="this.DoExtract"
+        OnCompress="this.DoCompress"
+        OnAbout="() => this._aboutDialog.Show()" />
+
+    <!-- Panels area -->
+    <div class="panels-area">
+        <!-- Left panel -->
+        <Bivium.Components.Panel.FilePanel
+            State="@this._leftPanel"
+            IsActive="@(this._activePanel == 0)"
+            PanelId="left"
+            OnNavigate="this.HandleLeftNavigate"
+            OnSelectionChanged="this.HandleLeftSelectionChanged"
+            OnSortChanged="this.HandleLeftSortChanged"
+            OnCursorChanged="this.HandleLeftCursorChanged"
+            OnActivated="() => this.SetActivePanel(0)"
+            OnContextMenu="this.HandleContextMenuRequest" />
+
+        <!-- Vertical splitter -->
+        <Bivium.Components.Shared.ResizableSplitter
+            Direction="vertical"
+            SplitterId="vsplit"
+            CssVariable="--left-panel-width" />
+
+        <!-- Right panel -->
+        <Bivium.Components.Panel.FilePanel
+            State="@this._rightPanel"
+            IsActive="@(this._activePanel == 1)"
+            PanelId="right"
+            OnNavigate="this.HandleRightNavigate"
+            OnSelectionChanged="this.HandleRightSelectionChanged"
+            OnSortChanged="this.HandleRightSortChanged"
+            OnCursorChanged="this.HandleRightCursorChanged"
+            OnActivated="() => this.SetActivePanel(1)"
+            OnContextMenu="this.HandleContextMenuRequest" />
+    </div>
+
+    <!-- Status bar -->
+    <Bivium.Components.Shared.StatusBar
+        SelectedPaths="@this.GetActivePanel().SelectedPaths"
+        CurrentPath="@this.GetActivePanel().CurrentPath"
+        Entries="@this.GetActivePanel().Entries"
+        ProgressText="@this._progressText" />
+
+    <!-- Command bar -->
+    <Bivium.Components.Shared.CommandBar
+        OnAbout="() => this._aboutDialog.Show()"
+        OnCopy="this.DoCopy"
+        OnCut="this.DoCut"
+        OnPaste="this.DoPaste"
+        OnDelete="this.DoDelete"
+        OnRename="this.DoRename"
+        OnNewFolder="this.DoNewFolder"
+        OnRefresh="this.DoRefresh"
+        OnProperties="this.DoProperties"
+        OnTerminal="this.DoToggleTerminal" />
+</div>
+
+<!-- Context menu -->
+<Bivium.Components.Shared.ContextMenu
+    IsVisible="@this._contextMenuVisible"
+    X="@this._contextMenuX"
+    Y="@this._contextMenuY"
+    OnClose="this.CloseContextMenu"
+    OnOpen="this.DoOpen"
+    OnCopy="this.DoCopy"
+    OnCut="this.DoCut"
+    OnPaste="this.DoPaste"
+    OnNewFile="this.DoNewFile"
+    OnNewFolder="this.DoNewFolder"
+    OnEdit="this.DoEdit"
+    OnDownload="this.DoDownload"
+    OnUpload="this.DoUpload"
+    OnRename="this.DoRename"
+    OnDelete="this.DoDelete"
+    OnPermissions="this.DoPermissions"
+    OnProperties="this.DoProperties"
+    OnExtract="this.DoExtract"
+    OnCompress="this.DoCompress"
+    IsArchive="@this._contextMenuIsArchive"
+    HasSelection="@this._contextMenuHasSelection" />
+
+<!-- Modal dialogs -->
+<Bivium.Components.Shared.ConfirmDialog @ref="this._confirmDialog"
+    OnClose="this.HandleConfirmDialogClose" />
+
+<Bivium.Components.Shared.InputDialog @ref="this._inputDialog"
+    OnClose="this.HandleInputDialogClose" />
+
+<Bivium.Components.Shared.PropertiesDialog @ref="this._propertiesDialog"
+    OnClose="this.HandlePropertiesDialogClose" />
+
+<Bivium.Components.Shared.PermissionsDialog @ref="this._permissionsDialog"
+    OnClose="this.HandlePermissionsDialogClose" />
+
+<Bivium.Components.Shared.AboutDialog @ref="this._aboutDialog"
+    OnClose="this.HandleAboutDialogClose" />
+
+<Bivium.Components.Shared.UploadDialog @ref="this._uploadDialog"
+    OnClose="this.HandleUploadDialogClose" />
+
+<Bivium.Components.Shared.CompressDialog @ref="this._compressDialog"
+    OnClose="this.HandleCompressDialogClose" />
+
+<Bivium.Components.Shared.SettingsDialog @ref="this._settingsDialog"
+    OnClose="this.HandleSettingsDialogClose" />
+
+<!-- Floating windows -->
+<Bivium.Components.Shared.EditorDialog @ref="this._editorDialog"
+    OnSave="this.HandleEditorSave"
+    OnClose="this.HandleEditorDialogClose" />
+
+<Bivium.Components.Shared.TerminalPanel @ref="this._terminalPanel"
+    WorkingDirectory="@this.GetActivePanel().CurrentPath"
+    OnClose="this.HandleTerminalClose" />

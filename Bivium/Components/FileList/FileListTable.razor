@@ -1,0 +1,64 @@
+<table class="file-list-table">
+    <thead>
+        <tr>
+            <th @onclick="() => this.ToggleSort(SortField.Name)">
+                Name @this.GetSortIndicator(SortField.Name)
+            </th>
+            <th @onclick="() => this.ToggleSort(SortField.Size)">
+                Size @this.GetSortIndicator(SortField.Size)
+            </th>
+            <th @onclick="() => this.ToggleSort(SortField.Date)">
+                Date @this.GetSortIndicator(SortField.Date)
+            </th>
+            <th @onclick="() => this.ToggleSort(SortField.Attributes)">
+                Attr @this.GetSortIndicator(SortField.Attributes)
+            </th>
+            <th @onclick="() => this.ToggleSort(SortField.Owner)">
+                Owner @this.GetSortIndicator(SortField.Owner)
+            </th>
+        </tr>
+    </thead>
+    <tbody>
+        @* Parent directory row *@
+        @if (this._hasParent)
+        {
+            <tr class="entry-parent"
+                @ondblclick="this.NavigateToParent">
+                <td>[..] ..</td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+            </tr>
+        }
+
+        @* File/directory rows *@
+        @for (int idx = 0; idx < this.Entries.Count; idx++)
+        {
+            int localIdx = idx;
+            FileSystemEntry entry = this.Entries[localIdx];
+            bool isSelected = this.SelectedPaths.Contains(entry.FullPath);
+            bool isCursor = localIdx == this.CursorIndex;
+
+            <tr class="@(isSelected ? "selected" : "") @(isCursor ? "cursor" : "") @(entry.IsDirectory ? "entry-dir" : "entry-file")"
+                @onclick="(e) => this.HandleRowClick(localIdx, e)"
+                @ondblclick="() => this.HandleRowDoubleClick(localIdx)"
+                @oncontextmenu="(e) => this.HandleRowContextMenu(localIdx, e)"
+                @oncontextmenu:preventDefault="true">
+                <td title="@entry.Name">@entry.Name@(entry.IsSymLink ? " @" : "")</td>
+                <td>@entry.FormatSize()</td>
+                <td>@entry.FormatDate()</td>
+                <td>@entry.Attributes</td>
+                <td>@entry.Owner</td>
+            </tr>
+        }
+
+        @* Empty directory message *@
+        @if (this.Entries.Count == 0)
+        {
+            <tr>
+                <td colspan="5" style="color: var(--foreground2); text-align: center;">Empty directory</td>
+            </tr>
+        }
+    </tbody>
+</table>

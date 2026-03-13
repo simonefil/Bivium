@@ -1,0 +1,34 @@
+@inject IJSRuntime JSRuntime
+
+@if (this._isVisible)
+{
+    <div class="context-menu-overlay" @onclick="this.HandleCancel">
+        <div class="context-menu" style="position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 40ch;"
+             @onclick:stopPropagation="true">
+            <div style="background-color: var(--background1); padding: 0 1ch; border-bottom: 1px solid var(--foreground2);">
+                Editor Extensions
+            </div>
+            <div style="padding: 1lh 1ch;">
+                <div style="margin-bottom: 0.5lh; color: var(--foreground2);">
+                    One extension per line, including the dot (e.g. .txt)
+                </div>
+                <textarea @ref="this._textareaElement"
+                          @bind="this._extensionsText"
+                          rows="12"
+                          style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2); padding: 0.5ch; font-family: monospace; resize: vertical;">
+                </textarea>
+
+                @if (!string.IsNullOrEmpty(this._statusText))
+                {
+                    <div style="color: var(--foreground2); margin-top: 0.5lh;">
+                        @this._statusText
+                    </div>
+                }
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 2ch; padding: 0 1ch 1lh 1ch;">
+                <button @onclick="this.HandleCancel">Cancel</button>
+                <button @onclick="this.HandleSave">Save</button>
+            </div>
+        </div>
+    </div>
+}

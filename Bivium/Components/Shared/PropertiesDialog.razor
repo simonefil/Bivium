@@ -1,0 +1,88 @@
+@if (this._isVisible)
+{
+    <div class="context-menu-overlay" @onclick="this.HandleClose">
+        <div class="context-menu" style="position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 50ch;"
+             @onclick:stopPropagation="true">
+            <div style="background-color: var(--background1); padding: 0 1ch; border-bottom: 1px solid var(--foreground2);">
+                Properties - @this._entry.Name
+            </div>
+            <div style="padding: 1lh 1ch;">
+                <table style="width: 100%;">
+                    <tr>
+                        <td style="width: 12ch; color: var(--foreground2);">Name:</td>
+                        <td>@this._entry.Name</td>
+                    </tr>
+                    <tr>
+                        <td style="color: var(--foreground2);">Path:</td>
+                        <td style="word-break: break-all;">@this._entry.FullPath</td>
+                    </tr>
+                    <tr>
+                        <td style="color: var(--foreground2);">Type:</td>
+                        <td>@(this._entry.IsDirectory ? "Directory" : "File")</td>
+                    </tr>
+                    <tr>
+                        <td style="color: var(--foreground2);">Size:</td>
+                        <td>
+                            @if (this._entry.IsDirectory)
+                            {
+                                @if (this._isCalculating)
+                                {
+                                    <span>Calculating...</span>
+                                }
+                                else if (this._calculatedSize >= 0)
+                                {
+                                    <span>@this.FormatCalculatedSize() (@this._calculatedFileCount.ToString("N0") files, @this._calculatedDirCount.ToString("N0") folders)</span>
+                                }
+                                else
+                                {
+                                    <span>&lt;DIR&gt;</span>
+                                    <button style="margin-left: 2ch;" @onclick="this.HandleCalculateSize">Calculate</button>
+                                }
+                            }
+                            else
+                            {
+                                <span>@this._entry.FormatSize() (@this._entry.SizeBytes.ToString("N0") bytes)</span>
+                            }
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="color: var(--foreground2);">Modified:</td>
+                        <td>@this._entry.FormatDate()</td>
+                    </tr>
+                    <tr>
+                        <td style="color: var(--foreground2);">Attributes:</td>
+                        <td>@this._entry.Attributes</td>
+                    </tr>
+                    @if (this._entry.IsSymLink)
+                    {
+                        <tr>
+                            <td style="color: var(--foreground2);">Symlink:</td>
+                            <td>Yes</td>
+                        </tr>
+                    }
+                    @if (this._permissions != null)
+                    {
+                        <tr>
+                            <td style="color: var(--foreground2);">Owner:</td>
+                            <td>@this._permissions.Owner</td>
+                        </tr>
+                        @if (this._permissions.IsUnix)
+                        {
+                            <tr>
+                                <td style="color: var(--foreground2);">Group:</td>
+                                <td>@this._permissions.Group</td>
+                            </tr>
+                        }
+                        <tr>
+                            <td style="color: var(--foreground2);">Permissions:</td>
+                            <td>@this._permissions.ToDisplayString()</td>
+                        </tr>
+                    }
+                </table>
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 2ch; padding: 0 1ch 1lh 1ch;">
+                <button @ref="this._okButton" @onclick="this.HandleClose">OK</button>
+            </div>
+        </div>
+    </div>
+}

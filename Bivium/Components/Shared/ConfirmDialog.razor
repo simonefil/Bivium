@@ -1,0 +1,26 @@
+@if (this._isVisible)
+{
+    <div class="context-menu-overlay" @onclick="this.HandleCancel">
+        <div class="context-menu" style="position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 40ch; outline: none;"
+             tabindex="0"
+             @ref="this._dialogElement"
+             @onclick:stopPropagation="true"
+             @onkeydown="this.HandleKeyDown">
+            <div style="background-color: var(--background1); padding: 0 1ch; border-bottom: 1px solid var(--foreground2);">
+                @this._title
+            </div>
+            <div style="padding: 1lh 1ch; white-space: pre-wrap;">
+                @this._message
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 2ch; padding: 0 1ch 1lh 1ch;">
+                @if (!string.IsNullOrEmpty(this._cancelText))
+                {
+                    <button class="@(this._focusedButton == 0 ? "dialog-btn-focused" : "")"
+                            @onclick="this.HandleCancel">@this._cancelText</button>
+                }
+                <button class="@(this._focusedButton == 1 ? "dialog-btn-focused" : "")"
+                        @onclick="this.HandleConfirm">@this._confirmText</button>
+            </div>
+        </div>
+    </div>
+}

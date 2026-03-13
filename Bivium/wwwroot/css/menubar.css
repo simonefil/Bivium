@@ -1,0 +1,33 @@
+/* Menu bar styles */
+.menu-bar {
+    display: flex;
+    flex-direction: row;
+    background-color: var(--background1);
+    border-bottom: 1px solid var(--foreground2);
+    line-height: 1lh;
+    z-index: 100;
+    position: relative;
+}
+
+.menu-bar-item {
+    padding: 0 1ch;
+    cursor: pointer;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.menu-bar-item:hover {
+    background-color: var(--background2);
+}
+
+.menu-bar-item.active {
+    background-color: var(--foreground0);
+    color: var(--background0);
+}
+
+/* Dropdown positioned below menu bar */
+.menu-bar-dropdown {
+    position: absolute;
+    top: 1lh;
+    z-index: 1001;
+}

@@ -1,0 +1,42 @@
+@if (this._isVisible)
+{
+    <div class="context-menu-overlay" @onclick="this.HandleClose">
+        <div class="context-menu" style="position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 44ch;"
+             @onclick:stopPropagation="true">
+            <div style="background-color: var(--background1); padding: 0 1ch; border-bottom: 1px solid var(--foreground2);">
+                About
+            </div>
+            <div style="padding: 1lh 1ch;">
+                <table style="width: 100%;">
+                    <tr>
+                        <td style="width: 12ch; color: var(--foreground2);">Name:</td>
+                        <td>Bivium File Manager</td>
+                    </tr>
+                    <tr>
+                        <td style="color: var(--foreground2);">Version:</td>
+                        <td>@this._version</td>
+                    </tr>
+                    <tr>
+                        <td style="color: var(--foreground2);">License:</td>
+                        <td>GNU General Public License v3.0</td>
+                    </tr>
+                    <tr>
+                        <td style="color: var(--foreground2);">Repository:</td>
+                        <td><a href="https://github.com/user/Bivium" target="_blank" style="color: var(--foreground1);">github.com/user/Bivium</a></td>
+                    </tr>
+                    <tr>
+                        <td style="color: var(--foreground2);">Runtime:</td>
+                        <td>@this._runtime</td>
+                    </tr>
+                    <tr>
+                        <td style="color: var(--foreground2);">Platform:</td>
+                        <td>@this._platform</td>
+                    </tr>
+                </table>
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 2ch; padding: 0 1ch 1lh 1ch;">
+                <button @ref="this._okButton" @onclick="this.HandleClose">OK</button>
+            </div>
+        </div>
+    </div>
+}

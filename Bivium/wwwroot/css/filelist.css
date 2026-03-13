@@ -1,0 +1,122 @@
+/* File list table styles - reset WebTUI table decorations */
+.file-list-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+
+/* Remove WebTUI outer table border */
+.file-list-table:before {
+    display: none;
+}
+
+/* Remove WebTUI cell pseudo-element decorations */
+.file-list-table tr th:before,
+.file-list-table tr th:after,
+.file-list-table tr td:before,
+.file-list-table tr td:after {
+    display: none;
+}
+
+/* Remove WebTUI extra padding */
+.file-list-table :first-child > tr:first-child > td,
+.file-list-table :first-child > tr:first-child > th {
+    padding-top: 0;
+}
+
+.file-list-table tr th,
+.file-list-table tr td {
+    padding-bottom: 0;
+}
+
+/* Column widths */
+.file-list-table th:nth-child(1),
+.file-list-table td:nth-child(1) {
+    width: auto;
+}
+
+.file-list-table th:nth-child(2),
+.file-list-table td:nth-child(2) {
+    width: 12ch;
+    text-align: right;
+}
+
+.file-list-table th:nth-child(3),
+.file-list-table td:nth-child(3) {
+    width: 18ch;
+    text-align: right;
+}
+
+.file-list-table th:nth-child(4),
+.file-list-table td:nth-child(4) {
+    width: 12ch;
+    text-align: center;
+}
+
+/* Header row */
+.file-list-table thead th {
+    background-color: var(--background1);
+    cursor: pointer;
+    user-select: none;
+    padding: 0 1ch;
+    white-space: nowrap;
+    line-height: 1lh;
+    border-bottom: 1px solid var(--box-border-color, var(--foreground2));
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.file-list-table thead th:hover {
+    background-color: var(--background2);
+}
+
+/* Sort indicator */
+.sort-indicator {
+    color: var(--foreground2);
+    margin-left: 0.5ch;
+}
+
+/* Data rows */
+.file-list-table tbody {
+    user-select: none;
+}
+
+.file-list-table tbody td {
+    padding: 0 1ch;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1lh;
+}
+
+/* Row hover */
+.file-list-table tbody tr:hover {
+    background-color: var(--background1);
+}
+
+/* Row selection */
+.file-list-table tbody tr.selected {
+    background-color: var(--background2);
+    color: var(--foreground0);
+}
+
+/* Cursor row (keyboard navigation) */
+.file-list-table tbody tr.cursor {
+    outline: 1px solid var(--foreground2);
+    outline-offset: -1px;
+}
+
+/* Directory prefix */
+.entry-dir {
+    color: var(--foreground1);
+}
+
+.entry-file {
+    color: var(--foreground0);
+}
+
+/* Parent directory row */
+.entry-parent {
+    color: var(--foreground2);
+}

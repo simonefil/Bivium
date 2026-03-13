@@ -1,0 +1,58 @@
+{
+  "version": "1.0",
+  "defaultProvider": "jsdelivr",
+  "libraries": [
+    {
+      "library": "@webtui/css@0.1.6",
+      "destination": "wwwroot/lib/webtui/",
+      "files": [
+        "dist/base.css",
+        "dist/full.css",
+        "dist/utils/box.css",
+        "dist/components/accordion.css",
+        "dist/components/badge.css",
+        "dist/components/button.css",
+        "dist/components/dialog.css",
+        "dist/components/input.css",
+        "dist/components/popover.css",
+        "dist/components/pre.css",
+        "dist/components/separator.css",
+        "dist/components/spinner.css",
+        "dist/components/table.css",
+        "dist/components/tooltip.css",
+        "dist/components/typography.css",
+        "dist/components/view.css"
+      ]
+    },
+    {
+      "library": "@webtui/theme-nord@0.0.2",
+      "destination": "wwwroot/lib/webtui-theme-nord/"
+    },
+    {
+      "library": "@webtui/theme-catppuccin@0.0.2",
+      "destination": "wwwroot/lib/webtui-theme-catppuccin/"
+    },
+    {
+      "library": "@xterm/xterm@6.0.0",
+      "destination": "wwwroot/lib/xterm/",
+      "files": [
+        "css/xterm.css",
+        "lib/xterm.js",
+        "lib/xterm.mjs"
+      ]
+    },
+    {
+      "library": "@xterm/addon-fit@0.11.0",
+      "destination": "wwwroot/lib/xterm-addon-fit/",
+      "files": [
+        "lib/addon-fit.js",
+        "lib/addon-fit.mjs"
+      ]
+    },
+    {
+      "library": "monaco-editor@0.52.2",
+      "provider": "cdnjs",
+      "destination": "wwwroot/lib/monaco-editor/"
+    }
+  ]
+}

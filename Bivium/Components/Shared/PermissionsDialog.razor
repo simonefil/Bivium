@@ -1,0 +1,95 @@
+@if (this._isVisible)
+{
+    <div class="context-menu-overlay" @onclick="this.HandleCancel">
+        <div class="context-menu" style="position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 50ch; outline: none;"
+             tabindex="0"
+             @ref="this._dialogElement"
+             @onclick:stopPropagation="true">
+            <div style="background-color: var(--background1); padding: 0 1ch; border-bottom: 1px solid var(--foreground2);">
+                Permissions - @this._entryName
+            </div>
+            <div style="padding: 1lh 1ch;">
+                @if (this._model.IsUnix)
+                {
+                    <!-- Unix permissions -->
+                    <table style="width: 100%;">
+                        <tr>
+                            <td style="width: 12ch; color: var(--foreground2);">Owner:</td>
+                            <td><input type="text" @bind="this._model.Owner" style="width: 20ch; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2); padding: 0 0.5ch;" /></td>
+                        </tr>
+                        <tr>
+                            <td style="color: var(--foreground2);">Group:</td>
+                            <td><input type="text" @bind="this._model.Group" style="width: 20ch; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2); padding: 0 0.5ch;" /></td>
+                        </tr>
+                    </table>
+
+                    <div style="margin-top: 1lh;">
+                        <table style="width: 100%;">
+                            <tr>
+                                <td style="width: 12ch;"></td>
+                                <td style="width: 6ch; text-align: center; color: var(--foreground2);">Read</td>
+                                <td style="width: 6ch; text-align: center; color: var(--foreground2);">Write</td>
+                                <td style="width: 6ch; text-align: center; color: var(--foreground2);">Exec</td>
+                            </tr>
+                            <tr>
+                                <td style="color: var(--foreground2);">Owner:</td>
+                                <td style="text-align: center;"><input type="checkbox" @bind="this._model.OwnerRead" /></td>
+                                <td style="text-align: center;"><input type="checkbox" @bind="this._model.OwnerWrite" /></td>
+                                <td style="text-align: center;"><input type="checkbox" @bind="this._model.OwnerExecute" /></td>
+                            </tr>
+                            <tr>
+                                <td style="color: var(--foreground2);">Group:</td>
+                                <td style="text-align: center;"><input type="checkbox" @bind="this._model.GroupRead" /></td>
+                                <td style="text-align: center;"><input type="checkbox" @bind="this._model.GroupWrite" /></td>
+                                <td style="text-align: center;"><input type="checkbox" @bind="this._model.GroupExecute" /></td>
+                            </tr>
+                            <tr>
+                                <td style="color: var(--foreground2);">Others:</td>
+                                <td style="text-align: center;"><input type="checkbox" @bind="this._model.OthersRead" /></td>
+                                <td style="text-align: center;"><input type="checkbox" @bind="this._model.OthersWrite" /></td>
+                                <td style="text-align: center;"><input type="checkbox" @bind="this._model.OthersExecute" /></td>
+                            </tr>
+                        </table>
+                    </div>
+
+                    <div style="margin-top: 1lh; color: var(--foreground2);">
+                        Octal: @this.GetOctalString()
+                    </div>
+                }
+                else
+                {
+                    <!-- Windows attributes -->
+                    <table style="width: 100%;">
+                        <tr>
+                            <td style="width: 12ch; color: var(--foreground2);">Owner:</td>
+                            <td>@this._model.Owner</td>
+                        </tr>
+                    </table>
+
+                    <div style="margin-top: 1lh;">
+                        <div><label><input type="checkbox" @bind="this._model.WinReadOnly" /> Read-only</label></div>
+                        <div><label><input type="checkbox" @bind="this._model.WinHidden" /> Hidden</label></div>
+                        <div><label><input type="checkbox" @bind="this._model.WinSystem" /> System</label></div>
+                        <div><label><input type="checkbox" @bind="this._model.WinArchive" /> Archive</label></div>
+                    </div>
+                }
+
+                @if (this._isDirectory)
+                {
+                    <div style="margin-top: 1lh;">
+                        <label><input type="checkbox" @bind="this._recursive" /> Apply recursively</label>
+                    </div>
+                }
+
+                @if (!string.IsNullOrEmpty(this._errorMessage))
+                {
+                    <div style="margin-top: 1lh; color: red;">@this._errorMessage</div>
+                }
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 2ch; padding: 0 1ch 1lh 1ch;">
+                <button @onclick="this.HandleCancel">Cancel</button>
+                <button @onclick="this.HandleSave">Save</button>
+            </div>
+        </div>
+    </div>
+}
