@@ -1,4 +1,4 @@
-# Bivium
+# Bivium File Manager
 
 A web-based dual-panel file manager inspired by Norton Commander and Midnight Commander. Built with Blazor Server on .NET 10, styled with [WebTUI](https://github.com/nicholasgasior/webtui) to look like a classic terminal application.
 
@@ -47,6 +47,8 @@ Runs on Linux, Windows and macOS. Accessible from any browser.
 
 ## Running with Docker
 
+Example `docker-compose.yml` — adjust volumes, environment variables and user to match your setup:
+
 ```yaml
 services:
   bivium:
@@ -65,57 +67,23 @@ services:
 
 Then open `http://your-host:5000` in your browser.
 
-### Configuration
-
-| Variable | Default | Description |
-|---|---|---|
-| `BIVIUM_PORT` | `5000` | Port the web server listens on |
-| `BIVIUM_HOME` | `/data` | Initial directory shown in both panels |
-
 The `user` directive controls which UID/GID the process runs as inside the container. Set it to match the owner of the directory you're mounting, otherwise you'll get permission errors. For example, if `/srv` is owned by root, use `"0:0"`.
-
-The `volumes` entry maps a host directory into the container. In the example above, `/srv` on the host becomes `/data` inside the container, which is where `BIVIUM_HOME` points to.
-
-To change the port to 8080:
-
-```yaml
-ports:
-  - "8080:8080"
-environment:
-  - BIVIUM_PORT=8080
-```
-
-Both values must match — the first is the host port, the second is the container port where Bivium actually listens.
 
 ## Running standalone
 
-Requires the [.NET 10 runtime](https://dotnet.microsoft.com/download/dotnet/10.0).
-
-```bash
-dotnet Bivium.dll
-```
-
-Optional flags:
-
-```bash
-dotnet Bivium.dll --port 8080
-```
-
-Or via environment variable:
-
-```bash
-export BIVIUM_PORT=8080
-export BIVIUM_HOME=/home/user
-dotnet Bivium.dll
-```
-
-When no `BIVIUM_HOME` is set, the panels default to the current user's home directory.
-
-## Building from source
+Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 ```bash
 dotnet publish Bivium/Bivium.csproj -c Release -o dist
 ```
+
+Then run the compiled binary:
+
+```bash
+./dist/Bivium --port 5000
+```
+
+The port can also be set via the `BIVIUM_PORT` environment variable. `BIVIUM_HOME` controls which directory the panels open on startup — when not set, it defaults to the current user's home directory.
 
 To build the Docker image:
 
