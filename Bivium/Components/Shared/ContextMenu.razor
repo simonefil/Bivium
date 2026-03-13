@@ -5,10 +5,13 @@
 
     <!-- Context menu positioned at click coordinates -->
     <div class="context-menu" style="left: @(this.X)px; top: @(this.Y)px;">
-        <div class="context-menu-item" @onclick="this.HandleOpen">
-            <span>Open</span>
-            <span class="shortcut">Enter</span>
-        </div>
+        @if (this.IsDirectory)
+        {
+            <div class="context-menu-item" @onclick="this.HandleOpen">
+                <span>Open</span>
+                <span class="shortcut">Enter</span>
+            </div>
+        }
         <div class="context-menu-item" @onclick="this.HandleEdit">
             <span>Edit</span>
             <span class="shortcut">F4</span>

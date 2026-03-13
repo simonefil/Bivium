@@ -151,6 +151,13 @@ function configureAndCreateEditor(container, content, language) {
             renderWhitespace: 'selection',
             tabSize: 4
         });
+
+        // Register Ctrl+S keybinding if a .NET callback is set
+        if (window._editorSaveDotNetRef) {
+            editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function () {
+                window._editorSaveDotNetRef.invokeMethodAsync('OnEditorSave');
+            });
+        }
     });
 }
 
@@ -176,6 +183,14 @@ export function setEditorContent(content) {
 }
 
 /**
+ * Set the .NET object reference for Ctrl+S save callback
+ * @param {object} dotNetRef - .NET DotNetObjectReference
+ */
+export function setSaveCallback(dotNetRef) {
+    window._editorSaveDotNetRef = dotNetRef;
+}
+
+/**
  * Dispose the Monaco editor instance and clean up
  */
 export function disposeEditor() {
@@ -183,4 +198,5 @@ export function disposeEditor() {
         editor.dispose();
         editor = null;
     }
+    window._editorSaveDotNetRef = null;
 }

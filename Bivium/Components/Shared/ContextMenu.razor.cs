@@ -131,6 +131,12 @@ namespace Bivium.Components.Shared
         public EventCallback OnExtractToFolder { get; set; }
 
         /// <summary>
+        /// Whether the cursor is on a directory
+        /// </summary>
+        [Parameter]
+        public bool IsDirectory { get; set; } = false;
+
+        /// <summary>
         /// Whether the cursor is on an archive file
         /// </summary>
         [Parameter]

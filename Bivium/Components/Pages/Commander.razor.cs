@@ -158,6 +158,11 @@ namespace Bivium.Components.Pages
         private string _progressText = "";
 
         /// <summary>
+        /// Whether the context menu cursor is on a directory
+        /// </summary>
+        private bool _contextMenuIsDirectory = false;
+
+        /// <summary>
         /// Whether the context menu cursor is on an archive file
         /// </summary>
         private bool _contextMenuIsArchive = false;
@@ -425,13 +430,14 @@ namespace Bivium.Components.Pages
             // Determine context flags for archive/compress menu items
             PanelState active = this.GetActivePanel();
             this._contextMenuHasSelection = active.SelectedPaths.Count > 0;
+            this._contextMenuIsDirectory = false;
             this._contextMenuIsArchive = false;
-
             this._contextMenuArchiveBaseName = "";
 
             if (active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count)
             {
                 FileSystemEntry entry = active.Entries[active.CursorIndex];
+                this._contextMenuIsDirectory = entry.IsDirectory;
                 if (!entry.IsDirectory)
                 {
                     this._contextMenuIsArchive = this._archiveService.IsArchive(entry.FullPath);

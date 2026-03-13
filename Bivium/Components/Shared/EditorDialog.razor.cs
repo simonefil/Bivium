@@ -57,6 +57,11 @@ namespace Bivium.Components.Shared
         private IJSObjectReference _interopModule = null;
 
         /// <summary>
+        /// .NET reference for JS save callback
+        /// </summary>
+        private DotNetObjectReference<EditorDialog> _dotNetRef = null;
+
+        /// <summary>
         /// Whether the JS editor has been initialized
         /// </summary>
         private bool _jsInitialized = false;
@@ -143,12 +148,28 @@ namespace Bivium.Components.Shared
             string extension = System.IO.Path.GetExtension(this._filePath).ToLowerInvariant();
             string language = await this._jsModule.InvokeAsync<string>("getLanguageFromExtension", extension);
 
+            // Register Ctrl+S callback before editor init
+            if (this._dotNetRef == null)
+            {
+                this._dotNetRef = DotNetObjectReference.Create(this);
+            }
+            await this._jsModule.InvokeVoidAsync("setSaveCallback", this._dotNetRef);
+
             // Initialize Monaco editor
             await this._jsModule.InvokeVoidAsync("initEditor", "monaco-container", content, language);
             this._jsInitialized = true;
 
             // Initialize drag and resize for the window
             await this._interopModule.InvokeVoidAsync("initWindowDrag", "editor-window", "editor-titlebar", "editor-resize-handle");
+        }
+
+        /// <summary>
+        /// Called from JS when Ctrl+S is pressed in the editor
+        /// </summary>
+        [JSInvokable]
+        public void OnEditorSave()
+        {
+            this.HandleSave();
         }
 
         /// <summary>
@@ -220,6 +241,12 @@ namespace Bivium.Components.Shared
             if (this._jsModule != null && this._jsInitialized)
             {
                 _ = this._jsModule.InvokeVoidAsync("disposeEditor");
+            }
+
+            if (this._dotNetRef != null)
+            {
+                this._dotNetRef.Dispose();
+                this._dotNetRef = null;
             }
         }
 
