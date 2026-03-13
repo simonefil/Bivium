@@ -3,6 +3,9 @@
 ##
 ## Get latest from `dotnet new gitignore`
 
+# LibMan client-side libraries (restored via libman restore)
+**/wwwroot/lib/
+
 # dotenv files
 .env
 
