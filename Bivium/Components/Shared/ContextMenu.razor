@@ -60,6 +60,10 @@
                 <span>Extract Here</span>
                 <span class="shortcut"></span>
             </div>
+            <div class="context-menu-item" @onclick="this.HandleExtractToFolder">
+                <span>Extract to @(this.ArchiveBaseName)/</span>
+                <span class="shortcut"></span>
+            </div>
         }
         @if (this.HasSelection)
         {

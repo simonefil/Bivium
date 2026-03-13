@@ -125,10 +125,22 @@ namespace Bivium.Components.Shared
         public EventCallback OnCompress { get; set; }
 
         /// <summary>
+        /// Callback for Extract To Folder action
+        /// </summary>
+        [Parameter]
+        public EventCallback OnExtractToFolder { get; set; }
+
+        /// <summary>
         /// Whether the cursor is on an archive file
         /// </summary>
         [Parameter]
         public bool IsArchive { get; set; } = false;
+
+        /// <summary>
+        /// Base name of the archive file (without extension) for display
+        /// </summary>
+        [Parameter]
+        public string ArchiveBaseName { get; set; } = "";
 
         /// <summary>
         /// Whether items are selected for compression
@@ -272,6 +284,15 @@ namespace Bivium.Components.Shared
         {
             this.OnClose.InvokeAsync();
             this.OnExtract.InvokeAsync();
+        }
+
+        /// <summary>
+        /// Handles Extract To Folder action
+        /// </summary>
+        private void HandleExtractToFolder()
+        {
+            this.OnClose.InvokeAsync();
+            this.OnExtractToFolder.InvokeAsync();
         }
 
         /// <summary>

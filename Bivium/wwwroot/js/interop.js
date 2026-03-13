@@ -71,6 +71,12 @@ export function captureKeyboard(dotNetRef) {
             return;
         }
 
+        // If a dialog overlay is visible, let the dialog handle keyboard events
+        const hasDialog = document.querySelector('.context-menu-overlay');
+        if (hasDialog) {
+            return;
+        }
+
         // If an input or textarea has focus, don't intercept (path bar, dialogs)
         const tagName = activeEl ? activeEl.tagName : '';
         if (tagName === 'INPUT' || tagName === 'TEXTAREA') {
@@ -166,6 +172,25 @@ export async function putJson(url, jsonBody) {
         return response.ok;
     } catch (err) {
         return false;
+    }
+}
+
+/**
+ * Adjust context menu position to keep it within viewport
+ */
+export function adjustContextMenuPosition() {
+    const menu = document.querySelector('.context-menu-overlay + .context-menu');
+    if (!menu) return;
+
+    const rect = menu.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+    const viewportWidth = window.innerWidth;
+
+    if (rect.bottom > viewportHeight) {
+        menu.style.top = Math.max(0, viewportHeight - rect.height) + 'px';
+    }
+    if (rect.right > viewportWidth) {
+        menu.style.left = Math.max(0, viewportWidth - rect.width) + 'px';
     }
 }
 

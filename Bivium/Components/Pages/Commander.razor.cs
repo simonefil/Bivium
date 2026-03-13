@@ -163,6 +163,11 @@ namespace Bivium.Components.Pages
         private bool _contextMenuIsArchive = false;
 
         /// <summary>
+        /// Base name of the archive file for "Extract to" display
+        /// </summary>
+        private string _contextMenuArchiveBaseName = "";
+
+        /// <summary>
         /// Whether there are selected items for compression
         /// </summary>
         private bool _contextMenuHasSelection = false;
@@ -422,13 +427,51 @@ namespace Bivium.Components.Pages
             this._contextMenuHasSelection = active.SelectedPaths.Count > 0;
             this._contextMenuIsArchive = false;
 
+            this._contextMenuArchiveBaseName = "";
+
             if (active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count)
             {
                 FileSystemEntry entry = active.Entries[active.CursorIndex];
                 if (!entry.IsDirectory)
                 {
                     this._contextMenuIsArchive = this._archiveService.IsArchive(entry.FullPath);
+                    if (this._contextMenuIsArchive)
+                    {
+                        // Strip archive extensions (.tar.gz, .tar.bz2, etc.)
+                        string name = entry.Name;
+                        string lower = name.ToLowerInvariant();
+                        string[] doubleExts = { ".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst" };
+                        bool found = false;
+                        foreach (string ext in doubleExts)
+                        {
+                            if (lower.EndsWith(ext))
+                            {
+                                this._contextMenuArchiveBaseName = name.Substring(0, name.Length - ext.Length);
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (!found)
+                        {
+                            this._contextMenuArchiveBaseName = Path.GetFileNameWithoutExtension(name);
+                        }
+                    }
                 }
+            }
+
+            // Adjust menu position after render to keep it within viewport
+            _ = this.AdjustContextMenuAsync();
+        }
+
+        /// <summary>
+        /// Adjusts context menu position after render
+        /// </summary>
+        private async System.Threading.Tasks.Task AdjustContextMenuAsync()
+        {
+            await System.Threading.Tasks.Task.Delay(50);
+            if (this._jsModule != null)
+            {
+                await this._jsModule.InvokeVoidAsync("adjustContextMenuPosition");
             }
         }
 
@@ -773,6 +816,73 @@ namespace Bivium.Components.Pages
 
             // Show initial progress
             this._progressText = "Extracting...";
+
+            // Progress callback
+            Action<int, int, string> onProgress = (current, total, fileName) =>
+            {
+                this._progressText = "Extracting " + current + "/" + total + ": " + fileName;
+                _ = this.InvokeAsync(() => this.StateHasChanged());
+            };
+
+            // Run on background thread
+            Thread worker = new Thread(() =>
+            {
+                FileOperationResult result = this._archiveService.ExtractArchive(archivePath, destinationDir, onProgress);
+
+                _ = this.InvokeAsync(() =>
+                {
+                    this._progressText = "";
+                    this.LoadPanelContents(this._leftPanel);
+                    this.LoadPanelContents(this._rightPanel);
+
+                    if (!result.Success)
+                    {
+                        this._pendingOperation = "";
+                        this._confirmDialog.Show("Error", result.ErrorMessage, "OK", "");
+                    }
+
+                    this.StateHasChanged();
+                });
+            });
+
+            worker.IsBackground = true;
+            worker.Start();
+        }
+
+        /// <summary>
+        /// Extracts archive into a subfolder named after the archive
+        /// </summary>
+        private void DoExtractToFolder()
+        {
+            PanelState active = this.GetActivePanel();
+
+            if (active.CursorIndex < 0 || active.CursorIndex >= active.Entries.Count)
+            {
+                return;
+            }
+
+            FileSystemEntry entry = active.Entries[active.CursorIndex];
+
+            if (entry.IsDirectory || !this._archiveService.IsArchive(entry.FullPath))
+            {
+                this._confirmDialog.Show("Extract", "Selected file is not a supported archive.", "OK", "");
+                return;
+            }
+
+            string archivePath = entry.FullPath;
+            string folderName = this._contextMenuArchiveBaseName;
+            string destinationDir = Path.Combine(active.CurrentPath, folderName);
+
+            // Create the destination folder
+            FileOperationResult dirResult = this._fileOperationService.CreateDirectory(active.CurrentPath, folderName);
+            if (!dirResult.Success)
+            {
+                this._confirmDialog.Show("Error", dirResult.ErrorMessage, "OK", "");
+                return;
+            }
+
+            // Show initial progress
+            this._progressText = "Extracting to " + folderName + "/...";
 
             // Progress callback
             Action<int, int, string> onProgress = (current, total, fileName) =>
