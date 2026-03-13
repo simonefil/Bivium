@@ -50,7 +50,7 @@ Runs on Linux, Windows and macOS. Accessible from any browser.
 ```yaml
 services:
   bivium:
-    image: simone/bivium:latest
+    image: draknodd/bivium:latest
     container_name: bivium
     restart: unless-stopped
     user: "1000:1000"
