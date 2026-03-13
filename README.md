@@ -67,8 +67,6 @@ services:
 
 Then open `http://your-host:5000` in your browser.
 
-The `user` directive controls which UID/GID the process runs as inside the container. Set it to match the owner of the directory you're mounting, otherwise you'll get permission errors. For example, if `/srv` is owned by root, use `"0:0"`.
-
 ## Running standalone
 
 Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
