@@ -26,11 +26,8 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 // Set listening URL
 builder.WebHost.UseUrls("http://0.0.0.0:" + port);
 
-// Persist DataProtection keys to survive container restarts
-string homePath = Environment.GetEnvironmentVariable("BIVIUM_HOME") ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-string keysDir = Path.Combine(homePath, ".bivium", "keys");
-Directory.CreateDirectory(keysDir);
-builder.Services.AddDataProtection().SetApplicationName("Bivium").PersistKeysToFileSystem(new DirectoryInfo(keysDir));
+// Ephemeral DataProtection keys - no file persistence needed
+builder.Services.AddDataProtection().SetApplicationName("Bivium").UseEphemeralDataProtectionProvider();
 
 // Register configuration
 builder.Services.Configure<CommanderSettings>(builder.Configuration.GetSection("CommanderSettings"));
