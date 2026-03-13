@@ -9,18 +9,31 @@
             <span>Open</span>
             <span class="shortcut">Enter</span>
         </div>
-        <hr />
-        <div class="context-menu-item" @onclick="this.HandleCopy">
-            <span>Copy</span>
-            <span class="shortcut">Ctrl+C</span>
+        <div class="context-menu-item" @onclick="this.HandleEdit">
+            <span>Edit</span>
+            <span class="shortcut">F4</span>
         </div>
+        <hr />
         <div class="context-menu-item" @onclick="this.HandleCut">
             <span>Cut</span>
             <span class="shortcut">Ctrl+X</span>
         </div>
+        <div class="context-menu-item" @onclick="this.HandleCopy">
+            <span>Copy</span>
+            <span class="shortcut">Ctrl+C</span>
+        </div>
         <div class="context-menu-item" @onclick="this.HandlePaste">
             <span>Paste</span>
             <span class="shortcut">Ctrl+V</span>
+        </div>
+        <hr />
+        <div class="context-menu-item" @onclick="this.HandleRename">
+            <span>Rename</span>
+            <span class="shortcut">F2</span>
+        </div>
+        <div class="context-menu-item" @onclick="this.HandleDelete">
+            <span>Delete</span>
+            <span class="shortcut">Del</span>
         </div>
         <hr />
         <div class="context-menu-item" @onclick="this.HandleNewFile">
@@ -30,15 +43,6 @@
         <div class="context-menu-item" @onclick="this.HandleNewFolder">
             <span>New Folder</span>
             <span class="shortcut">Ctrl+Shift+N</span>
-        </div>
-        <div class="context-menu-item" @onclick="this.HandleRename">
-            <span>Rename</span>
-            <span class="shortcut">F2</span>
-        </div>
-        <hr />
-        <div class="context-menu-item" @onclick="this.HandleEdit">
-            <span>Edit</span>
-            <span class="shortcut">F4</span>
         </div>
         <hr />
         <div class="context-menu-item" @onclick="this.HandleDownload">
@@ -64,12 +68,10 @@
                 <span class="shortcut"></span>
             </div>
         }
-        <hr />
-        <div class="context-menu-item" @onclick="this.HandleDelete">
-            <span>Delete</span>
-            <span class="shortcut">Del</span>
-        </div>
-        <hr />
+        @if (this.IsArchive || this.HasSelection)
+        {
+            <hr />
+        }
         <div class="context-menu-item" @onclick="this.HandlePermissions">
             <span>Permissions</span>
             <span class="shortcut">Ctrl+P</span>
