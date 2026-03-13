@@ -963,6 +963,18 @@ namespace Bivium.Components.Pages
                 active.SelectedPaths.Clear();
                 this.LoadPanelContents(active);
 
+                // Clamp cursor to valid range after deletion
+                if (active.CursorIndex >= active.Entries.Count && active.Entries.Count > 0)
+                {
+                    active.CursorIndex = active.Entries.Count - 1;
+                }
+
+                // Select the entry at cursor position
+                if (active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count)
+                {
+                    active.SelectedPaths.Add(active.Entries[active.CursorIndex].FullPath);
+                }
+
                 if (!result.Success)
                 {
                     this._pendingOperation = "";
