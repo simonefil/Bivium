@@ -137,6 +137,62 @@ export function captureKeyboard(dotNetRef) {
 }
 
 /**
+ * Initialize long-press touch handler for context menu
+ * Fires a synthetic contextmenu event after 500ms hold
+ */
+export function initLongPress() {
+    let timer = null;
+    let startX = 0;
+    let startY = 0;
+    const HOLD_DURATION = 500;
+    const MOVE_THRESHOLD = 10;
+
+    document.addEventListener('touchstart', function (e) {
+        const touch = e.touches[0];
+        startX = touch.clientX;
+        startY = touch.clientY;
+
+        timer = setTimeout(function () {
+            timer = null;
+
+            // Find the closest table row or panel-filelist
+            const target = document.elementFromPoint(startX, startY);
+            if (!target) return;
+
+            // Dispatch synthetic contextmenu event
+            const contextEvent = new MouseEvent('contextmenu', {
+                bubbles: true,
+                cancelable: true,
+                clientX: startX,
+                clientY: startY
+            });
+            target.dispatchEvent(contextEvent);
+        }, HOLD_DURATION);
+    }, { passive: true });
+
+    document.addEventListener('touchmove', function (e) {
+        if (timer === null) return;
+
+        const touch = e.touches[0];
+        const dx = Math.abs(touch.clientX - startX);
+        const dy = Math.abs(touch.clientY - startY);
+
+        // Cancel if finger moved too far (user is scrolling)
+        if (dx > MOVE_THRESHOLD || dy > MOVE_THRESHOLD) {
+            clearTimeout(timer);
+            timer = null;
+        }
+    }, { passive: true });
+
+    document.addEventListener('touchend', function () {
+        if (timer !== null) {
+            clearTimeout(timer);
+            timer = null;
+        }
+    });
+}
+
+/**
  * Set the WebTUI theme attribute on the html element
  * @param {string} themeName - Theme name (dark, nord, catppuccin-mocha, etc.)
  */

@@ -1220,6 +1220,7 @@ namespace Bivium.Components.Pages
             this._dotNetRef = DotNetObjectReference.Create(this);
             this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js");
             await this._jsModule.InvokeVoidAsync("captureKeyboard", this._dotNetRef);
+            await this._jsModule.InvokeVoidAsync("initLongPress");
         }
 
         /// <summary>
