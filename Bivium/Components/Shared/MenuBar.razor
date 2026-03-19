@@ -120,6 +120,10 @@
                 <span>Refresh</span>
                 <span class="shortcut">F5</span>
             </div>
+            <div class="context-menu-item" @onclick="this.HandleToggleSinglePanel">
+                <span>@(this.SinglePanelMode ? "Dual Panel" : "Single Panel")</span>
+                <span class="shortcut">Ctrl+O</span>
+            </div>
             <hr />
             <div class="context-menu-item" @onclick="this.HandleTerminal">
                 <span>Terminal</span>

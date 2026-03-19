@@ -131,6 +131,12 @@ namespace Bivium.Components.Shared
         public EventCallback OnExtractToFolder { get; set; }
 
         /// <summary>
+        /// Callback for Refresh action
+        /// </summary>
+        [Parameter]
+        public EventCallback OnRefresh { get; set; }
+
+        /// <summary>
         /// Whether the cursor is on a directory
         /// </summary>
         [Parameter]
@@ -308,6 +314,15 @@ namespace Bivium.Components.Shared
         {
             this.OnClose.InvokeAsync();
             this.OnCompress.InvokeAsync();
+        }
+
+        /// <summary>
+        /// Handles Refresh action
+        /// </summary>
+        private void HandleRefresh()
+        {
+            this.OnClose.InvokeAsync();
+            this.OnRefresh.InvokeAsync();
         }
 
         #endregion

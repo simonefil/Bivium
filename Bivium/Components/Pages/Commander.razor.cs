@@ -177,6 +177,11 @@ namespace Bivium.Components.Pages
         /// </summary>
         private bool _contextMenuHasSelection = false;
 
+        /// <summary>
+        /// Single panel mode (hides right panel)
+        /// </summary>
+        private bool _singlePanelMode = false;
+
         #endregion
 
         #region Overrides
@@ -421,8 +426,12 @@ namespace Bivium.Components.Pages
         /// Handles context menu request from a panel
         /// </summary>
         /// <param name="args">Context menu event data</param>
-        private void HandleContextMenuRequest(ContextMenuEventArgs args)
+        /// <param name="panelIndex">Panel index (0=left, 1=right)</param>
+        private void HandleContextMenuRequest(ContextMenuEventArgs args, int panelIndex)
         {
+            // Switch focus to the panel that was right-clicked
+            this._activePanel = panelIndex;
+
             this._contextMenuX = args.X;
             this._contextMenuY = args.Y;
             this._contextMenuVisible = true;
@@ -744,6 +753,20 @@ namespace Bivium.Components.Pages
         }
 
         /// <summary>
+        /// Toggles single/dual panel mode
+        /// </summary>
+        private void DoToggleSinglePanel()
+        {
+            this._singlePanelMode = !this._singlePanelMode;
+
+            // In single panel mode, ensure active panel is always left
+            if (this._singlePanelMode)
+            {
+                this._activePanel = 0;
+            }
+        }
+
+        /// <summary>
         /// Shows properties dialog for the selected entry
         /// </summary>
         private void DoProperties()
@@ -1021,6 +1044,22 @@ namespace Bivium.Components.Pages
 
                 this.LoadPanelContents(active);
 
+                // Move cursor to the created/renamed entry and scroll to it
+                if (result.Success)
+                {
+                    for (int i = 0; i < active.Entries.Count; i++)
+                    {
+                        if (active.Entries[i].Name == value)
+                        {
+                            active.CursorIndex = i;
+                            active.SelectedPaths.Clear();
+                            active.SelectedPaths.Add(active.Entries[i].FullPath);
+                            _ = this._jsModule.InvokeVoidAsync("scrollCursorIntoView");
+                            break;
+                        }
+                    }
+                }
+
                 if (!result.Success && !string.IsNullOrEmpty(result.ErrorMessage))
                 {
                     this._pendingOperation = "";
@@ -1209,10 +1248,18 @@ namespace Bivium.Components.Pages
                 return;
             }
 
-            // Tab: switch panels
-            if (key == "Tab" && !ctrl && !shift && !alt)
+            // Tab: switch panels (only in dual panel mode)
+            if (key == "Tab" && !ctrl && !shift && !alt && !this._singlePanelMode)
             {
                 this._activePanel = this._activePanel == 0 ? 1 : 0;
+                this.StateHasChanged();
+                return;
+            }
+
+            // Ctrl+O: toggle single/dual panel mode
+            if (key == "o" && ctrl && !shift && !alt)
+            {
+                this.DoToggleSinglePanel();
                 this.StateHasChanged();
                 return;
             }

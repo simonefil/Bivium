@@ -101,6 +101,16 @@ export function captureKeyboard(dotNetRef) {
             e.preventDefault();
         }
 
+        // Intercept Ctrl+A to prevent browser select all
+        if (key === 'a' && e.ctrlKey) {
+            e.preventDefault();
+        }
+
+        // Intercept Ctrl+O to prevent browser open file
+        if (key === 'o' && e.ctrlKey) {
+            e.preventDefault();
+        }
+
         // Intercept Ctrl+N to prevent browser new window
         if (key === 'n' && e.ctrlKey && !shift) {
             e.preventDefault();

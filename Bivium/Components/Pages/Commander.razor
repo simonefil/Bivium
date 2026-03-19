@@ -23,10 +23,12 @@
         OnEditorExtensions="this.DoEditorExtensions"
         OnExtract="this.DoExtract"
         OnCompress="this.DoCompress"
+        OnToggleSinglePanel="this.DoToggleSinglePanel"
+        SinglePanelMode="@this._singlePanelMode"
         OnAbout="() => this._aboutDialog.Show()" />
 
     <!-- Panels area -->
-    <div class="panels-area">
+    <div class="panels-area @(this._singlePanelMode ? "single-panel" : "")">
         <!-- Left panel -->
         <Bivium.Components.Panel.FilePanel
             State="@this._leftPanel"
@@ -37,25 +39,28 @@
             OnSortChanged="this.HandleLeftSortChanged"
             OnCursorChanged="this.HandleLeftCursorChanged"
             OnActivated="() => this.SetActivePanel(0)"
-            OnContextMenu="this.HandleContextMenuRequest" />
+            OnContextMenu="args => this.HandleContextMenuRequest(args, 0)" />
 
-        <!-- Vertical splitter -->
-        <Bivium.Components.Shared.ResizableSplitter
-            Direction="vertical"
-            SplitterId="vsplit"
-            CssVariable="--left-panel-width" />
+        @if (!this._singlePanelMode)
+        {
+            <!-- Vertical splitter -->
+            <Bivium.Components.Shared.ResizableSplitter
+                Direction="vertical"
+                SplitterId="vsplit"
+                CssVariable="--left-panel-width" />
 
-        <!-- Right panel -->
-        <Bivium.Components.Panel.FilePanel
-            State="@this._rightPanel"
-            IsActive="@(this._activePanel == 1)"
-            PanelId="right"
-            OnNavigate="this.HandleRightNavigate"
-            OnSelectionChanged="this.HandleRightSelectionChanged"
-            OnSortChanged="this.HandleRightSortChanged"
-            OnCursorChanged="this.HandleRightCursorChanged"
-            OnActivated="() => this.SetActivePanel(1)"
-            OnContextMenu="this.HandleContextMenuRequest" />
+            <!-- Right panel -->
+            <Bivium.Components.Panel.FilePanel
+                State="@this._rightPanel"
+                IsActive="@(this._activePanel == 1)"
+                PanelId="right"
+                OnNavigate="this.HandleRightNavigate"
+                OnSelectionChanged="this.HandleRightSelectionChanged"
+                OnSortChanged="this.HandleRightSortChanged"
+                OnCursorChanged="this.HandleRightCursorChanged"
+                OnActivated="() => this.SetActivePanel(1)"
+                OnContextMenu="args => this.HandleContextMenuRequest(args, 1)" />
+        }
     </div>
 
     <!-- Status bar -->
@@ -99,6 +104,7 @@
     OnExtract="this.DoExtract"
     OnExtractToFolder="this.DoExtractToFolder"
     OnCompress="this.DoCompress"
+    OnRefresh="this.DoRefresh"
     OnPermissions="this.DoPermissions"
     OnProperties="this.DoProperties"
     IsDirectory="@this._contextMenuIsDirectory"

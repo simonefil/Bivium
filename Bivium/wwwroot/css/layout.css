@@ -15,6 +15,11 @@
     overflow: hidden;
 }
 
+/* Single panel mode - left panel takes full width */
+.panels-area.single-panel {
+    grid-template-columns: 1fr;
+}
+
 /* Single panel - 4 rows: header, tree, splitter, file list */
 .file-panel {
     display: grid;

@@ -122,6 +122,18 @@ namespace Bivium.Components.Shared
         [Parameter]
         public EventCallback OnCompress { get; set; }
 
+        /// <summary>
+        /// Callback for toggle single/dual panel mode
+        /// </summary>
+        [Parameter]
+        public EventCallback OnToggleSinglePanel { get; set; }
+
+        /// <summary>
+        /// Whether single panel mode is active
+        /// </summary>
+        [Parameter]
+        public bool SinglePanelMode { get; set; } = false;
+
         #endregion
 
         #region Class Variables
@@ -378,6 +390,15 @@ namespace Bivium.Components.Shared
         {
             this._activeMenu = "";
             this.OnCompress.InvokeAsync();
+        }
+
+        /// <summary>
+        /// Handles toggle single/dual panel mode
+        /// </summary>
+        private void HandleToggleSinglePanel()
+        {
+            this._activeMenu = "";
+            this.OnToggleSinglePanel.InvokeAsync();
         }
 
         #endregion
