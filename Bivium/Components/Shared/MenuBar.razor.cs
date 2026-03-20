@@ -81,6 +81,12 @@ namespace Bivium.Components.Shared
         public EventCallback OnRename { get; set; }
 
         /// <summary>
+        /// Callback for Advanced Rename action
+        /// </summary>
+        [Parameter]
+        public EventCallback OnAdvancedRename { get; set; }
+
+        /// <summary>
         /// Callback for Select All action
         /// </summary>
         [Parameter]
@@ -327,6 +333,15 @@ namespace Bivium.Components.Shared
         {
             this._activeMenu = "";
             this.OnRename.InvokeAsync();
+        }
+
+        /// <summary>
+        /// Handles Advanced Rename action
+        /// </summary>
+        private void HandleAdvancedRename()
+        {
+            this._activeMenu = "";
+            this.OnAdvancedRename.InvokeAsync();
         }
 
         /// <summary>

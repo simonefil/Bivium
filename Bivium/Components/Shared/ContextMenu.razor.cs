@@ -131,6 +131,12 @@ namespace Bivium.Components.Shared
         public EventCallback OnExtractToFolder { get; set; }
 
         /// <summary>
+        /// Callback for Advanced Rename action
+        /// </summary>
+        [Parameter]
+        public EventCallback OnAdvancedRename { get; set; }
+
+        /// <summary>
         /// Callback for Refresh action
         /// </summary>
         [Parameter]
@@ -159,6 +165,18 @@ namespace Bivium.Components.Shared
         /// </summary>
         [Parameter]
         public bool HasSelection { get; set; } = false;
+
+        /// <summary>
+        /// Whether multiple items are selected
+        /// </summary>
+        [Parameter]
+        public bool IsMultiSelection { get; set; } = false;
+
+        /// <summary>
+        /// Whether the cursor file has an editable extension (Monaco editor)
+        /// </summary>
+        [Parameter]
+        public bool IsEditable { get; set; } = false;
 
         #endregion
 
@@ -314,6 +332,15 @@ namespace Bivium.Components.Shared
         {
             this.OnClose.InvokeAsync();
             this.OnCompress.InvokeAsync();
+        }
+
+        /// <summary>
+        /// Handles Advanced Rename action
+        /// </summary>
+        private void HandleAdvancedRename()
+        {
+            this.OnClose.InvokeAsync();
+            this.OnAdvancedRename.InvokeAsync();
         }
 
         /// <summary>

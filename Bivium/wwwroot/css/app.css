@@ -23,6 +23,7 @@
 @import 'statusbar.css';
 @import 'terminal.css';
 @import 'editor.css';
+@import 'renamer.css';
 
 /* Global overrides */
 html, body {

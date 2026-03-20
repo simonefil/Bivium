@@ -5,17 +5,20 @@
 
     <!-- Context menu positioned at click coordinates -->
     <div class="context-menu" style="left: @(this.X)px; top: @(this.Y)px;">
-        @if (this.IsDirectory)
+        @if (this.IsDirectory && !this.IsMultiSelection)
         {
             <div class="context-menu-item" @onclick="this.HandleOpen">
                 <span>Open</span>
                 <span class="shortcut">Enter</span>
             </div>
         }
-        <div class="context-menu-item" @onclick="this.HandleEdit">
-            <span>Edit</span>
-            <span class="shortcut">F4</span>
-        </div>
+        @if (!this.IsDirectory && !this.IsMultiSelection && this.IsEditable)
+        {
+            <div class="context-menu-item" @onclick="this.HandleEdit">
+                <span>Edit</span>
+                <span class="shortcut">F4</span>
+            </div>
+        }
         <hr />
         <div class="context-menu-item" @onclick="this.HandleCut">
             <span>Cut</span>
@@ -34,6 +37,13 @@
             <span>Rename</span>
             <span class="shortcut">F2</span>
         </div>
+        @if (this.HasSelection)
+        {
+            <div class="context-menu-item" @onclick="this.HandleAdvancedRename">
+                <span>Advanced Rename...</span>
+                <span class="shortcut">Ctrl+F2</span>
+            </div>
+        }
         <div class="context-menu-item" @onclick="this.HandleDelete">
             <span>Delete</span>
             <span class="shortcut">Del</span>

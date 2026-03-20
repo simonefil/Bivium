@@ -106,6 +106,11 @@ export function captureKeyboard(dotNetRef) {
             e.preventDefault();
         }
 
+        // Intercept Ctrl+C/X/V to prevent browser clipboard operations
+        if ((key === 'c' || key === 'x' || key === 'v') && e.ctrlKey && !shift) {
+            e.preventDefault();
+        }
+
         // Intercept Ctrl+O to prevent browser open file
         if (key === 'o' && e.ctrlKey) {
             e.preventDefault();

@@ -18,6 +18,7 @@
         OnDelete="this.DoDelete"
         OnRename="this.DoRename"
         OnSelectAll="this.DoSelectAll"
+        OnAdvancedRename="this.DoAdvancedRename"
         OnRefresh="this.DoRefresh"
         OnTerminal="this.DoToggleTerminal"
         OnEditorExtensions="this.DoEditorExtensions"
@@ -105,12 +106,15 @@
     OnExtractToFolder="this.DoExtractToFolder"
     OnCompress="this.DoCompress"
     OnRefresh="this.DoRefresh"
+    OnAdvancedRename="this.DoAdvancedRename"
     OnPermissions="this.DoPermissions"
     OnProperties="this.DoProperties"
     IsDirectory="@this._contextMenuIsDirectory"
     IsArchive="@this._contextMenuIsArchive"
     ArchiveBaseName="@this._contextMenuArchiveBaseName"
-    HasSelection="@this._contextMenuHasSelection" />
+    HasSelection="@this._contextMenuHasSelection"
+    IsMultiSelection="@this._contextMenuIsMultiSelection"
+    IsEditable="@this._contextMenuIsEditable" />
 
 <!-- Modal dialogs -->
 <Bivium.Components.Shared.ConfirmDialog @ref="this._confirmDialog"
@@ -141,6 +145,10 @@
 <Bivium.Components.Shared.EditorDialog @ref="this._editorDialog"
     OnSave="this.HandleEditorSave"
     OnClose="this.HandleEditorDialogClose" />
+
+<Bivium.Components.Shared.RenamerDialog @ref="this._renamerDialog"
+    FileOperationService="@this._fileOperationService"
+    OnClose="this.HandleRenamerDialogClose" />
 
 <Bivium.Components.Shared.TerminalPanel @ref="this._terminalPanel"
     WorkingDirectory="@this.GetActivePanel().CurrentPath"

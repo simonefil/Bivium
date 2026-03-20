@@ -8,9 +8,11 @@ Runs on Linux, Windows and macOS. Accessible from any browser.
 
 ## Features
 
-**Dual-panel navigation** with synchronized directory trees, editable path bars with autocomplete, sortable file lists (name, size, date, attributes, owner), and full keyboard-driven operation.
+**Dual-panel navigation** with synchronized directory trees, editable path bars with autocomplete, sortable file lists (name, size, date, attributes, owner), single panel mode (Ctrl+O), touch support with long-press context menu, and full keyboard-driven operation.
 
 **File operations** — copy, cut, paste, move, rename, delete, create files and folders. Drag and drop upload with chunked transfer (up to 50 MB per chunk). Download files or entire directories as ZIP.
+
+**[Advanced Rename](docs/advanced-rename.md)** (Ctrl+F2) — batch rename files with a composable stack of methods: find & replace (with regex), insert text at position, remove by position or pattern, change case (lower/upper/title on name, extension or both), new name with tag templates (`<Name>`, `<Ext>`, `<Inc:start:step:pad>`, `<Date:format>`, `<Folder>`, `<Rand:min:max>`), and trim characters. Live preview with conflict detection and two-pass rename to handle circular renames safely. Accessible from context menu or Edit menu when files are selected; selecting a single directory renames all files within it recursively. See the [full documentation](docs/advanced-rename.md) for details on every method, tag, and parameter.
 
 **Built-in editor** powered by Monaco Editor with syntax highlighting for 40+ file types, including common languages (C#, Python, Go, Rust, TypeScript, etc.) and configuration formats (JSON, YAML, Dockerfile, etc.).
 
@@ -30,6 +32,7 @@ Runs on Linux, Windows and macOS. Accessible from any browser.
 | Enter | Open directory or file |
 | Backspace | Go to parent directory |
 | F2 | Rename |
+| Ctrl+F2 | Advanced Rename |
 | F4 | Edit in Monaco editor |
 | F5 | Refresh panel |
 | F12 | Toggle terminal |
@@ -38,6 +41,7 @@ Runs on Linux, Windows and macOS. Accessible from any browser.
 | Ctrl+Shift+N | New folder |
 | Ctrl+C / X / V | Copy / Cut / Paste |
 | Ctrl+A | Select all |
+| Ctrl+O | Toggle single / dual panel |
 | Ctrl+P | Permissions |
 | Alt+Enter | Properties |
 | Shift+Up/Down | Extend selection |

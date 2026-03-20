@@ -138,6 +138,11 @@ namespace Bivium.Components.Pages
         private SettingsDialog _settingsDialog;
 
         /// <summary>
+        /// Reference to renamer dialog component
+        /// </summary>
+        private RenamerDialog _renamerDialog;
+
+        /// <summary>
         /// Reference to terminal panel component
         /// </summary>
         private TerminalPanel _terminalPanel;
@@ -176,6 +181,16 @@ namespace Bivium.Components.Pages
         /// Whether there are selected items for compression
         /// </summary>
         private bool _contextMenuHasSelection = false;
+
+        /// <summary>
+        /// Whether multiple items are selected (multi-selection)
+        /// </summary>
+        private bool _contextMenuIsMultiSelection = false;
+
+        /// <summary>
+        /// Whether the cursor file has an editable extension (for Monaco editor)
+        /// </summary>
+        private bool _contextMenuIsEditable = false;
 
         /// <summary>
         /// Single panel mode (hides right panel)
@@ -436,19 +451,35 @@ namespace Bivium.Components.Pages
             this._contextMenuY = args.Y;
             this._contextMenuVisible = true;
 
-            // Determine context flags for archive/compress menu items
+            // Determine context flags for menu items
             PanelState active = this.GetActivePanel();
             this._contextMenuHasSelection = active.SelectedPaths.Count > 0;
+            this._contextMenuIsMultiSelection = active.SelectedPaths.Count > 1;
             this._contextMenuIsDirectory = false;
             this._contextMenuIsArchive = false;
+            this._contextMenuIsEditable = false;
             this._contextMenuArchiveBaseName = "";
 
             if (active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count)
             {
                 FileSystemEntry entry = active.Entries[active.CursorIndex];
                 this._contextMenuIsDirectory = entry.IsDirectory;
+
                 if (!entry.IsDirectory)
                 {
+                    // Check if the file extension is editable by Monaco
+                    string ext = Path.GetExtension(entry.Name).ToLowerInvariant();
+                    List<string> editableExtensions = this._settings.CurrentValue.EditableExtensions;
+                    for (int i = 0; i < editableExtensions.Count; i++)
+                    {
+                        if (editableExtensions[i].ToLowerInvariant() == ext)
+                        {
+                            this._contextMenuIsEditable = true;
+                            break;
+                        }
+                    }
+
+                    // Check if it's an archive
                     this._contextMenuIsArchive = this._archiveService.IsArchive(entry.FullPath);
                     if (this._contextMenuIsArchive)
                     {
@@ -457,11 +488,11 @@ namespace Bivium.Components.Pages
                         string lower = name.ToLowerInvariant();
                         string[] doubleExts = { ".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst" };
                         bool found = false;
-                        foreach (string ext in doubleExts)
+                        foreach (string dblExt in doubleExts)
                         {
-                            if (lower.EndsWith(ext))
+                            if (lower.EndsWith(dblExt))
                             {
-                                this._contextMenuArchiveBaseName = name.Substring(0, name.Length - ext.Length);
+                                this._contextMenuArchiveBaseName = name.Substring(0, name.Length - dblExt.Length);
                                 found = true;
                                 break;
                             }
@@ -974,6 +1005,96 @@ namespace Bivium.Components.Pages
             this._compressDialog.Show(baseName);
         }
 
+        /// <summary>
+        /// Opens the advanced renamer dialog with selected files
+        /// </summary>
+        private void DoAdvancedRename()
+        {
+            PanelState active = this.GetActivePanel();
+
+            if (active.SelectedPaths.Count == 0)
+            {
+                return;
+            }
+
+            // Collect file entries for renaming
+            List<FileSystemEntry> renameEntries = new List<FileSystemEntry>();
+
+            if (active.SelectedPaths.Count == 1)
+            {
+                // Single selection: if directory, collect all files recursively
+                string selectedPath = active.SelectedPaths[0];
+                bool isDir = false;
+
+                for (int i = 0; i < active.Entries.Count; i++)
+                {
+                    if (active.Entries[i].FullPath == selectedPath && active.Entries[i].IsDirectory)
+                    {
+                        isDir = true;
+                        break;
+                    }
+                }
+
+                if (isDir)
+                {
+                    // Recursive file collection
+                    this.CollectFilesRecursively(selectedPath, renameEntries);
+                }
+                else
+                {
+                    // Single file
+                    for (int i = 0; i < active.Entries.Count; i++)
+                    {
+                        if (active.Entries[i].FullPath == selectedPath && !active.Entries[i].IsDirectory)
+                        {
+                            renameEntries.Add(active.Entries[i]);
+                            break;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                // Multiple selection: collect only files (skip directories)
+                for (int i = 0; i < active.Entries.Count; i++)
+                {
+                    if (!active.Entries[i].IsDirectory && active.SelectedPaths.Contains(active.Entries[i].FullPath))
+                    {
+                        renameEntries.Add(active.Entries[i]);
+                    }
+                }
+            }
+
+            if (renameEntries.Count > 0)
+            {
+                this._renamerDialog.Show(renameEntries);
+                this.StateHasChanged();
+            }
+        }
+
+        /// <summary>
+        /// Recursively collects all files from a directory
+        /// </summary>
+        /// <param name="directoryPath">Directory to scan</param>
+        /// <param name="result">List to add file entries to</param>
+        private void CollectFilesRecursively(string directoryPath, List<FileSystemEntry> result)
+        {
+            List<FileSystemEntry> contents = this._fileSystemService.GetDirectoryContents(directoryPath);
+
+            for (int i = 0; i < contents.Count; i++)
+            {
+                if (contents[i].IsDirectory)
+                {
+                    // Recurse into subdirectory
+                    this.CollectFilesRecursively(contents[i].FullPath, result);
+                }
+                else
+                {
+                    result.Add(contents[i]);
+                }
+            }
+        }
+
         #endregion
 
         #region Dialog Callbacks
@@ -1201,6 +1322,21 @@ namespace Bivium.Components.Pages
         }
 
         /// <summary>
+        /// Handles renamer dialog close
+        /// </summary>
+        /// <param name="renamed">True if files were renamed</param>
+        private void HandleRenamerDialogClose(bool renamed)
+        {
+            if (renamed)
+            {
+                // Refresh both panels to reflect renames
+                this.LoadPanelContents(this._leftPanel);
+                this.LoadPanelContents(this._rightPanel);
+                this.StateHasChanged();
+            }
+        }
+
+        /// <summary>
         /// Handles terminal panel close
         /// </summary>
         private void HandleTerminalClose()
@@ -1269,6 +1405,14 @@ namespace Bivium.Components.Pages
             if (key == "F2" && !ctrl && !shift && !alt)
             {
                 this.DoRename();
+                this.StateHasChanged();
+                return;
+            }
+
+            // Ctrl+F2: advanced rename
+            if (key == "F2" && ctrl && !shift && !alt)
+            {
+                this.DoAdvancedRename();
                 this.StateHasChanged();
                 return;
             }

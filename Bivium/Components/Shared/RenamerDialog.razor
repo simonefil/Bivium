@@ -1,0 +1,244 @@
+@inject IJSRuntime JSRuntime
+
+<div id="renamer-window" class="renamer-window @(this._isVisible ? "visible" : "")">
+
+    <!-- Title bar (draggable) -->
+    <div class="renamer-titlebar" id="renamer-titlebar">
+        <span>Advanced Rename</span>
+        <button class="renamer-close" @onclick="this.HandleClose" title="Close">X</button>
+    </div>
+
+    <!-- Body: two-column layout -->
+    <div class="renamer-body">
+
+        <!-- Left: file list preview -->
+        <div class="renamer-file-list">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Original Name</th>
+                        <th>New Name</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @for (int idx = 0; idx < this._previewItems.Count; idx++)
+                    {
+                        Bivium.Models.RenamePreviewItem item = this._previewItems[idx];
+                        string rowClass = "";
+                        if (item.HasConflict)
+                        {
+                            rowClass = "conflict";
+                        }
+                        else if (item.HasError)
+                        {
+                            rowClass = "error";
+                        }
+                        else if (item.OriginalName != item.NewName)
+                        {
+                            rowClass = "changed";
+                        }
+                        <tr class="@rowClass">
+                            <td title="@item.OriginalName">@item.OriginalName</td>
+                            <td title="@item.NewName">@item.NewName</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Right: method configuration -->
+        <div class="renamer-config">
+
+            <!-- Method selector row -->
+            <div class="renamer-method-selector">
+                <span>Method:</span>
+                <select @bind="this._selectedMethodType" @bind:after="this.HandleMethodTypeChanged">
+                    <option value="Replace">Replace</option>
+                    <option value="Add">Add</option>
+                    <option value="Remove">Remove</option>
+                    <option value="NewCase">New Case</option>
+                    <option value="NewName">New Name</option>
+                    <option value="Trim">Trim</option>
+                </select>
+                <button class="renamer-add-btn" @onclick="this.HandleAddMethod">Add</button>
+            </div>
+
+            <!-- Method parameters area -->
+            <div class="renamer-params">
+
+                @if (!string.IsNullOrEmpty(this._paramsError))
+                {
+                    <div class="renamer-params-error">@this._paramsError</div>
+                }
+
+                @if (this._selectedMethodType == Bivium.Models.RenameMethodType.Replace)
+                {
+                    <label>
+                        <span>Search:</span>
+                        <input type="text" @bind="this._editingMethod.SearchText" @bind:event="oninput" @bind:after="this.RecalculatePreview" />
+                    </label>
+                    <label>
+                        <span>Replace:</span>
+                        <input type="text" @bind="this._editingMethod.ReplaceText" @bind:event="oninput" @bind:after="this.RecalculatePreview" />
+                    </label>
+                    <label>
+                        <input type="checkbox" @bind="this._editingMethod.CaseSensitive" @bind:after="this.RecalculatePreview" />
+                        <span>Case sensitive</span>
+                    </label>
+                    <label>
+                        <input type="checkbox" @bind="this._editingMethod.UseRegex" @bind:after="this.RecalculatePreview" />
+                        <span>Use regex</span>
+                    </label>
+                }
+                else if (this._selectedMethodType == Bivium.Models.RenameMethodType.Add)
+                {
+                    <label>
+                        <span>Text:</span>
+                        <input type="text" @bind="this._editingMethod.InsertText" @bind:event="oninput" @bind:after="this.RecalculatePreview" />
+                    </label>
+                    <label>
+                        <span>Position:</span>
+                        <input type="number" @bind="this._editingMethod.InsertPosition" @bind:after="this.RecalculatePreview" />
+                    </label>
+                    <label>
+                        <input type="checkbox" @bind="this._editingMethod.FromEnd" @bind:after="this.RecalculatePreview" />
+                        <span>From end</span>
+                    </label>
+                }
+                else if (this._selectedMethodType == Bivium.Models.RenameMethodType.Remove)
+                {
+                    <label>
+                        <span>Mode:</span>
+                        <select @bind="this._editingMethod.RemoveByPattern" @bind:after="this.RecalculatePreview">
+                            <option value="false">By position</option>
+                            <option value="true">By pattern</option>
+                        </select>
+                    </label>
+
+                    @if (!this._editingMethod.RemoveByPattern)
+                    {
+                        <label>
+                            <span>Start:</span>
+                            <input type="number" @bind="this._editingMethod.RemoveStartIndex" @bind:after="this.RecalculatePreview" />
+                        </label>
+                        <label>
+                            <span>Count:</span>
+                            <input type="number" @bind="this._editingMethod.RemoveCount" @bind:after="this.RecalculatePreview" />
+                        </label>
+                        <label>
+                            <input type="checkbox" @bind="this._editingMethod.RemoveFromEnd" @bind:after="this.RecalculatePreview" />
+                            <span>From end</span>
+                        </label>
+                    }
+                    else
+                    {
+                        <label>
+                            <span>Pattern:</span>
+                            <input type="text" @bind="this._editingMethod.RemovePattern" @bind:event="oninput" @bind:after="this.RecalculatePreview" />
+                        </label>
+                        <label>
+                            <input type="checkbox" @bind="this._editingMethod.RemovePatternCaseSensitive" @bind:after="this.RecalculatePreview" />
+                            <span>Case sensitive</span>
+                        </label>
+                        <label>
+                            <input type="checkbox" @bind="this._editingMethod.RemovePatternUseRegex" @bind:after="this.RecalculatePreview" />
+                            <span>Use regex</span>
+                        </label>
+                    }
+                }
+                else if (this._selectedMethodType == Bivium.Models.RenameMethodType.NewCase)
+                {
+                    <label>
+                        <span>Mode:</span>
+                        <select @bind="this._editingMethod.CaseMode" @bind:after="this.RecalculatePreview">
+                            <option value="0">lowercase</option>
+                            <option value="1">UPPERCASE</option>
+                            <option value="2">Title Case</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span>Scope:</span>
+                        <select @bind="this._editingMethod.CaseScope" @bind:after="this.RecalculatePreview">
+                            <option value="0">Name only</option>
+                            <option value="1">Extension only</option>
+                            <option value="2">Full name</option>
+                        </select>
+                    </label>
+                }
+                else if (this._selectedMethodType == Bivium.Models.RenameMethodType.NewName)
+                {
+                    <label>
+                        <span>Pattern:</span>
+                        <input type="text" @bind="this._editingMethod.NamePattern" @bind:event="oninput" @bind:after="this.RecalculatePreview" />
+                    </label>
+                    <div class="renamer-tag-help">
+                        Tags: &lt;Name&gt; &lt;Ext&gt; &lt;Folder&gt;
+                        &lt;Inc:start:step:pad&gt;
+                        &lt;Date:format&gt;
+                        &lt;Rand:min:max&gt;
+                    </div>
+                }
+                else if (this._selectedMethodType == Bivium.Models.RenameMethodType.Trim)
+                {
+                    <label>
+                        <span>Chars:</span>
+                        <input type="text" @bind="this._editingMethod.TrimCharacters" @bind:event="oninput" @bind:after="this.RecalculatePreview" />
+                    </label>
+                    <label>
+                        <span>Location:</span>
+                        <select @bind="this._editingMethod.TrimLocation" @bind:after="this.RecalculatePreview">
+                            <option value="0">Start</option>
+                            <option value="1">End</option>
+                            <option value="2">Both</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span>Scope:</span>
+                        <select @bind="this._editingMethod.TrimScope" @bind:after="this.RecalculatePreview">
+                            <option value="0">Name only</option>
+                            <option value="1">Extension only</option>
+                            <option value="2">Full name</option>
+                        </select>
+                    </label>
+                }
+            </div>
+
+            <!-- Method stack section -->
+            <div class="renamer-stack-header">Methods (@this._methodStack.Count):</div>
+
+            <div class="renamer-stack">
+                @for (int idx = 0; idx < this._methodStack.Count; idx++)
+                {
+                    int i = idx;
+                    Bivium.Models.RenameMethod m = this._methodStack[i];
+                    <div class="renamer-stack-item">
+                        <span class="renamer-stack-item-name" title="@m.GetDisplayName()">@m.GetDisplayName()</span>
+                        <div class="renamer-stack-item-actions">
+                            @if (i > 0)
+                            {
+                                <button @onclick="() => this.HandleMoveUp(i)" title="Move up">^</button>
+                            }
+                            @if (i < this._methodStack.Count - 1)
+                            {
+                                <button @onclick="() => this.HandleMoveDown(i)" title="Move down">v</button>
+                            }
+                            <button @onclick="() => this.HandleRemoveMethod(i)" title="Remove">x</button>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <!-- Status bar -->
+    <div class="renamer-statusbar">
+        <span>@this._statusText</span>
+        <div class="renamer-statusbar-actions">
+            <button @onclick="this.HandleRename" disabled="@(!this.CanRename())">Rename</button>
+            <button @onclick="this.HandleClose">Cancel</button>
+        </div>
+    </div>
+
+    <!-- Resize handle -->
+    <div class="renamer-resize-handle" id="renamer-resize-handle">/</div>
+</div>
