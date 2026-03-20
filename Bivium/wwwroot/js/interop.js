@@ -77,18 +77,26 @@ export function captureKeyboard(dotNetRef) {
             return;
         }
 
-        // If an input or textarea has focus, don't intercept (path bar, dialogs)
+        // If an input or textarea has focus, check context
         const tagName = activeEl ? activeEl.tagName : '';
         if (tagName === 'INPUT' || tagName === 'TEXTAREA') {
-            // Prevent Tab from moving focus (used for autocomplete)
-            if (key === 'Tab') {
-                e.preventDefault();
+            // Check if the input is inside a dialog (context menu, renamer, etc.)
+            const inDialog = activeEl.closest('.context-menu') || activeEl.closest('.renamer-window');
+
+            if (ctrl && !inDialog) {
+                // Ctrl+key on path bar: blur and handle as file operation
+                activeEl.blur();
+                // Fall through to normal key handling
+            } else {
+                // Inside a dialog or regular typing: let the input handle it
+                if (key === 'Tab') {
+                    e.preventDefault();
+                }
+                if (key === 'Escape') {
+                    dotNetRef.invokeMethodAsync('OnKeyDown', key, ctrl, shift, alt);
+                }
+                return;
             }
-            // Only forward Escape to .NET
-            if (key === 'Escape') {
-                dotNetRef.invokeMethodAsync('OnKeyDown', key, ctrl, shift, alt);
-            }
-            return;
         }
 
         // Intercept F5 to prevent browser refresh

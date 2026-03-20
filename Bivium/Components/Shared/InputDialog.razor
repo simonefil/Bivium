@@ -11,6 +11,7 @@
                 <input type="text"
                        @ref="this._inputElement"
                        @bind="this._inputValue"
+                       @bind:event="oninput"
                        @onkeydown="this.HandleKeyDown"
                        style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2); padding: 0 0.5ch;" />
             </div>

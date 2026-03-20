@@ -197,6 +197,11 @@ namespace Bivium.Components.Pages
         /// </summary>
         private bool _singlePanelMode = false;
 
+        /// <summary>
+        /// Flag to scroll cursor into view after next render
+        /// </summary>
+        private bool _scrollAfterRender = false;
+
         #endregion
 
         #region Overrides
@@ -224,6 +229,16 @@ namespace Bivium.Components.Pages
             if (firstRender)
             {
                 _ = this.InitializeKeyboardCapture();
+            }
+
+            // Scroll cursor into view after DOM is ready
+            if (this._scrollAfterRender)
+            {
+                this._scrollAfterRender = false;
+                if (this._jsModule != null)
+                {
+                    _ = this._jsModule.InvokeVoidAsync("scrollCursorIntoView");
+                }
             }
         }
 
@@ -1175,7 +1190,7 @@ namespace Bivium.Components.Pages
                             active.CursorIndex = i;
                             active.SelectedPaths.Clear();
                             active.SelectedPaths.Add(active.Entries[i].FullPath);
-                            _ = this._jsModule.InvokeVoidAsync("scrollCursorIntoView");
+                            this._scrollAfterRender = true;
                             break;
                         }
                     }
