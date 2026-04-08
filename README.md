@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="icons/icon-256.png" alt="Bivium" width="128" />
+</p>
+
 # Bivium File Manager
 
 A web-based dual-panel file manager inspired by Norton Commander and Midnight Commander. Built with Blazor Server on .NET 10, styled with [WebTUI](https://github.com/nicholasgasior/webtui) to look like a classic terminal application.
