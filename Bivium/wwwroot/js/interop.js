@@ -59,6 +59,10 @@ export function captureKeyboard(dotNetRef) {
         const activeEl = document.activeElement;
         const inTerminal = terminalWindow && terminalWindow.classList.contains('visible') && (terminalWindow.contains(activeEl) || (activeEl && activeEl.closest && activeEl.closest('.terminal-body')));
 
+        // Check if focus is inside the Monaco editor - let Monaco handle input
+        const editorWindow = document.getElementById('editor-window');
+        const inEditor = editorWindow && editorWindow.classList.contains('visible') && (editorWindow.contains(activeEl) || (activeEl && activeEl.closest && activeEl.closest('#monaco-container')));
+
         // F12 always goes to .NET (toggle terminal)
         if (key === 'F12') {
             e.preventDefault();
@@ -68,6 +72,14 @@ export function captureKeyboard(dotNetRef) {
 
         // If terminal has focus, don't intercept anything else
         if (inTerminal) {
+            return;
+        }
+
+        // If Monaco editor has focus, only block browser defaults (Ctrl+S save page)
+        if (inEditor) {
+            if (key === 's' && ctrl) {
+                e.preventDefault();
+            }
             return;
         }
 

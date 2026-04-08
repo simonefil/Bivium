@@ -167,15 +167,15 @@ namespace Bivium.Components.Shared
         /// Called from JS when Ctrl+S is pressed in the editor
         /// </summary>
         [JSInvokable]
-        public void OnEditorSave()
+        public async System.Threading.Tasks.Task OnEditorSave()
         {
-            this.HandleSave();
+            await this.HandleSave();
         }
 
         /// <summary>
         /// Handles the save button click - retrieves content from Monaco and invokes callback
         /// </summary>
-        private async void HandleSave()
+        private async System.Threading.Tasks.Task HandleSave()
         {
             if (this._jsModule == null || !this._jsInitialized)
             {
