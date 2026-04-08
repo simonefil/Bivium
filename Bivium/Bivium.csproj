@@ -7,6 +7,7 @@
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
     <NoWarn>CA1416</NoWarn>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

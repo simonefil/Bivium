@@ -65,7 +65,7 @@ done
 # Build Docker image
 confirm_step "Build Docker image ${DOCKER_IMAGE}:${TAG}?"
 echo "Building Docker image..."
-docker build -t "${DOCKER_IMAGE}:${TAG}" -t "${DOCKER_IMAGE}:latest" .
+docker build --build-arg VERSION="$VERSION" -t "${DOCKER_IMAGE}:${TAG}" -t "${DOCKER_IMAGE}:latest" .
 
 # Push Docker image
 confirm_step "Push Docker image to Docker Hub?"

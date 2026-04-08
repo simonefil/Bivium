@@ -78,7 +78,7 @@ foreach ($rid in $rids) {
 # Build Docker image
 Confirm-Step "Build Docker image ${dockerImage}:${Tag}?"
 Write-Host "Building Docker image..." -ForegroundColor Cyan
-docker build -t "${dockerImage}:${Tag}" -t "${dockerImage}:latest" .
+docker build --build-arg VERSION="$version" -t "${dockerImage}:${Tag}" -t "${dockerImage}:latest" .
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Docker build failed" -ForegroundColor Red
     Cleanup

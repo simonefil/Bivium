@@ -224,8 +224,20 @@ namespace Bivium.Services
                 }
                 catch (IOException ex)
                 {
-                    failed++;
-                    lastError = "I/O error: " + ex.Message;
+                    // Verifica se il move e' riuscito nonostante l'eccezione
+                    string destName2 = Path.GetFileName(source);
+                    string destPath2 = Path.Combine(destinationDir, destName2);
+                    bool movedAnyway = (File.Exists(destPath2) || Directory.Exists(destPath2)) && !File.Exists(source) && !Directory.Exists(source);
+
+                    if (movedAnyway)
+                    {
+                        processed++;
+                    }
+                    else
+                    {
+                        failed++;
+                        lastError = "I/O error: " + ex.Message;
+                    }
                 }
             }
 
@@ -292,8 +304,21 @@ namespace Bivium.Services
                 }
                 catch (IOException ex)
                 {
-                    failed++;
-                    lastError = "I/O error: " + ex.Message;
+                    // Verifica se il move e' riuscito nonostante l'eccezione
+                    string destName2 = Path.GetFileName(source);
+                    string destPath2 = Path.Combine(destinationDir, destName2);
+                    bool movedAnyway = (File.Exists(destPath2) || Directory.Exists(destPath2)) && !File.Exists(source) && !Directory.Exists(source);
+
+                    if (movedAnyway)
+                    {
+                        processed++;
+                        onProgress(i + 1, totalEntries, destName2);
+                    }
+                    else
+                    {
+                        failed++;
+                        lastError = "I/O error: " + ex.Message;
+                    }
                 }
             }
 

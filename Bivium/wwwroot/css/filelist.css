@@ -53,6 +53,12 @@
     text-align: center;
 }
 
+.file-list-table th:nth-child(5),
+.file-list-table td:nth-child(5) {
+    width: 12ch;
+    text-align: left;
+}
+
 /* Header row */
 .file-list-table thead th {
     background-color: var(--background1);
