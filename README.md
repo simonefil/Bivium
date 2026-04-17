@@ -108,3 +108,7 @@ docker build -t bivium .
 ## License
 
 This project is licensed under the [GNU General Public License v3.0](LICENSE).
+
+## Buy me a coffee!
+
+[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/simonefil)
