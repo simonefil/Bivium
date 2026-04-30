@@ -94,10 +94,10 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Handles close button click
         /// </summary>
-        private void HandleClose()
+        private async System.Threading.Tasks.Task HandleClose()
         {
             this._isVisible = false;
-            this.OnClose.InvokeAsync();
+            await this.OnClose.InvokeAsync();
         }
 
         #endregion

@@ -190,12 +190,12 @@ namespace Bivium.Components.Panel
         /// Handles keyboard input in the path bar
         /// </summary>
         /// <param name="args">Keyboard event args</param>
-        private void HandlePathKeyDown(KeyboardEventArgs args)
+        private async System.Threading.Tasks.Task HandlePathKeyDown(KeyboardEventArgs args)
         {
             if (args.Key == "Enter")
             {
                 // Navigate to the typed path
-                this.CommitPathEdit();
+                await this.CommitPathEdit();
             }
             else if (args.Key == "Escape")
             {
@@ -212,7 +212,7 @@ namespace Bivium.Components.Panel
         /// <summary>
         /// Commits the path bar edit and navigates to the typed path (keeps edit mode)
         /// </summary>
-        private void CommitPathEdit()
+        private async System.Threading.Tasks.Task CommitPathEdit()
         {
             string path = this._editPath.Trim();
             this._autocompleteMatches.Clear();
@@ -220,7 +220,7 @@ namespace Bivium.Components.Panel
             // Navigate but keep the input focused
             if (!string.IsNullOrEmpty(path) && Directory.Exists(path))
             {
-                this.OnNavigate.InvokeAsync(path);
+                await this.OnNavigate.InvokeAsync(path);
             }
         }
 
@@ -333,7 +333,7 @@ namespace Bivium.Components.Panel
                 this._autocompleteIndex = 0;
 
                 // Navigate directly
-                this.CommitPathEdit();
+                _ = this.CommitPathEdit();
             }
         }
 
@@ -344,11 +344,11 @@ namespace Bivium.Components.Panel
         /// <summary>
         /// Handles click on the panel to activate it
         /// </summary>
-        private void OnPanelClick()
+        private async System.Threading.Tasks.Task OnPanelClick()
         {
             if (!this.IsActive)
             {
-                this.OnActivated.InvokeAsync();
+                await this.OnActivated.InvokeAsync();
             }
         }
 
@@ -356,68 +356,68 @@ namespace Bivium.Components.Panel
         /// Handles navigation from the tree view
         /// </summary>
         /// <param name="path">Selected directory path</param>
-        private void HandleTreeNavigation(string path)
+        private async System.Threading.Tasks.Task HandleTreeNavigation(string path)
         {
-            this.OnNavigate.InvokeAsync(path);
+            await this.OnNavigate.InvokeAsync(path);
         }
 
         /// <summary>
         /// Handles navigation from the file list (double-click directory)
         /// </summary>
         /// <param name="path">Selected directory path</param>
-        private void HandleFileListNavigation(string path)
+        private async System.Threading.Tasks.Task HandleFileListNavigation(string path)
         {
-            this.OnNavigate.InvokeAsync(path);
+            await this.OnNavigate.InvokeAsync(path);
         }
 
         /// <summary>
         /// Handles sort column change from file list header
         /// </summary>
         /// <param name="sort">New sort configuration</param>
-        private void HandleSortChanged(SortColumn sort)
+        private async System.Threading.Tasks.Task HandleSortChanged(SortColumn sort)
         {
-            this.OnSortChanged.InvokeAsync(sort);
+            await this.OnSortChanged.InvokeAsync(sort);
         }
 
         /// <summary>
         /// Handles selection change from file list
         /// </summary>
         /// <param name="selectedPaths">Updated list of selected paths</param>
-        private void HandleSelectionChanged(List<string> selectedPaths)
+        private async System.Threading.Tasks.Task HandleSelectionChanged(List<string> selectedPaths)
         {
-            this.OnSelectionChanged.InvokeAsync(selectedPaths);
+            await this.OnSelectionChanged.InvokeAsync(selectedPaths);
         }
 
         /// <summary>
         /// Handles cursor index change from keyboard navigation
         /// </summary>
         /// <param name="index">New cursor index</param>
-        private void HandleCursorChanged(int index)
+        private async System.Threading.Tasks.Task HandleCursorChanged(int index)
         {
-            this.OnCursorChanged.InvokeAsync(index);
+            await this.OnCursorChanged.InvokeAsync(index);
         }
 
         /// <summary>
         /// Handles context menu request from file list
         /// </summary>
         /// <param name="args">Context menu event data</param>
-        private void HandleContextMenu(ContextMenuEventArgs args)
+        private async System.Threading.Tasks.Task HandleContextMenu(ContextMenuEventArgs args)
         {
-            this.OnContextMenu.InvokeAsync(args);
+            await this.OnContextMenu.InvokeAsync(args);
         }
 
         /// <summary>
         /// Handles right-click on the panel background (empty area)
         /// </summary>
         /// <param name="args">Mouse event args with coordinates</param>
-        private void HandlePanelContextMenu(MouseEventArgs args)
+        private async System.Threading.Tasks.Task HandlePanelContextMenu(MouseEventArgs args)
         {
             // Fire context menu without a specific entry selected
             ContextMenuEventArgs contextArgs = new ContextMenuEventArgs();
             contextArgs.X = args.ClientX;
             contextArgs.Y = args.ClientY;
             contextArgs.Entry = null;
-            this.OnContextMenu.InvokeAsync(contextArgs);
+            await this.OnContextMenu.InvokeAsync(contextArgs);
         }
 
         #endregion

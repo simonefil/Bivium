@@ -399,7 +399,7 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Executes the rename operation using two-pass strategy
         /// </summary>
-        private void HandleRename()
+        private async System.Threading.Tasks.Task HandleRename()
         {
             if (!this.CanRename())
             {
@@ -500,17 +500,17 @@ namespace Bivium.Components.Shared
             if (this._didRename && string.IsNullOrEmpty(errorMessage))
             {
                 this._isVisible = false;
-                this.OnClose.InvokeAsync(true);
+                await this.OnClose.InvokeAsync(true);
             }
         }
 
         /// <summary>
         /// Closes the dialog without renaming
         /// </summary>
-        private void HandleClose()
+        private async System.Threading.Tasks.Task HandleClose()
         {
             this._isVisible = false;
-            this.OnClose.InvokeAsync(this._didRename);
+            await this.OnClose.InvokeAsync(this._didRename);
         }
 
         #endregion

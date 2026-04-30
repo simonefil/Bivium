@@ -129,19 +129,19 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Handles confirm button click
         /// </summary>
-        private void HandleConfirm()
+        private async System.Threading.Tasks.Task HandleConfirm()
         {
             this._isVisible = false;
-            this.OnClose.InvokeAsync(true);
+            await this.OnClose.InvokeAsync(true);
         }
 
         /// <summary>
         /// Handles cancel button click
         /// </summary>
-        private void HandleCancel()
+        private async System.Threading.Tasks.Task HandleCancel()
         {
             this._isVisible = false;
-            this.OnClose.InvokeAsync(false);
+            await this.OnClose.InvokeAsync(false);
         }
 
         /// <summary>
@@ -155,16 +155,16 @@ namespace Bivium.Components.Shared
                 // Confirm or cancel based on focused button
                 if (this._focusedButton == 0)
                 {
-                    this.HandleCancel();
+                    _ = this.HandleCancel();
                 }
                 else
                 {
-                    this.HandleConfirm();
+                    _ = this.HandleConfirm();
                 }
             }
             else if (args.Key == "Escape")
             {
-                this.HandleCancel();
+                _ = this.HandleCancel();
             }
             else if (args.Key == "Tab" || args.Key == "ArrowLeft" || args.Key == "ArrowRight")
             {

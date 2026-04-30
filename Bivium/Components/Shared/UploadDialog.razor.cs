@@ -117,7 +117,7 @@ namespace Bivium.Components.Shared
         /// <param name="success">True if upload succeeded</param>
         /// <param name="message">Error message on failure</param>
         [JSInvokable]
-        public void OnUploadComplete(bool success, string message)
+        public async System.Threading.Tasks.Task OnUploadComplete(bool success, string message)
         {
             this._isUploading = false;
 
@@ -125,14 +125,14 @@ namespace Bivium.Components.Shared
             {
                 this._statusText = "Upload complete";
                 this._isVisible = false;
-                this.OnClose.InvokeAsync(true);
+                await this.OnClose.InvokeAsync(true);
             }
             else
             {
                 this._statusText = "Error: " + message;
             }
 
-            this.InvokeAsync(() => this.StateHasChanged());
+            await this.InvokeAsync(() => this.StateHasChanged());
         }
 
         #endregion
@@ -211,7 +211,7 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Handles the Cancel button click
         /// </summary>
-        private void HandleCancel()
+        private async System.Threading.Tasks.Task HandleCancel()
         {
             if (this._isUploading)
             {
@@ -219,7 +219,7 @@ namespace Bivium.Components.Shared
             }
 
             this._isVisible = false;
-            this.OnClose.InvokeAsync(false);
+            await this.OnClose.InvokeAsync(false);
         }
 
         /// <summary>

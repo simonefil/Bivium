@@ -185,171 +185,163 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Closes the menu
         /// </summary>
-        private void HandleClose()
+        private async System.Threading.Tasks.Task HandleClose()
         {
-            this.OnClose.InvokeAsync();
+            await this.OnClose.InvokeAsync();
         }
 
         /// <summary>
         /// Handles Open action
         /// </summary>
-        private void HandleOpen()
+        private async System.Threading.Tasks.Task HandleOpen()
         {
-            this.OnClose.InvokeAsync();
-            this.OnOpen.InvokeAsync();
+            await this.HandleAction(this.OnOpen);
         }
 
         /// <summary>
         /// Handles Copy action
         /// </summary>
-        private void HandleCopy()
+        private async System.Threading.Tasks.Task HandleCopy()
         {
-            this.OnClose.InvokeAsync();
-            this.OnCopy.InvokeAsync();
+            await this.HandleAction(this.OnCopy);
         }
 
         /// <summary>
         /// Handles Cut action
         /// </summary>
-        private void HandleCut()
+        private async System.Threading.Tasks.Task HandleCut()
         {
-            this.OnClose.InvokeAsync();
-            this.OnCut.InvokeAsync();
+            await this.HandleAction(this.OnCut);
         }
 
         /// <summary>
         /// Handles Paste action
         /// </summary>
-        private void HandlePaste()
+        private async System.Threading.Tasks.Task HandlePaste()
         {
-            this.OnClose.InvokeAsync();
-            this.OnPaste.InvokeAsync();
+            await this.HandleAction(this.OnPaste);
         }
 
         /// <summary>
         /// Handles New File action
         /// </summary>
-        private void HandleNewFile()
+        private async System.Threading.Tasks.Task HandleNewFile()
         {
-            this.OnClose.InvokeAsync();
-            this.OnNewFile.InvokeAsync();
+            await this.HandleAction(this.OnNewFile);
         }
 
         /// <summary>
         /// Handles New Folder action
         /// </summary>
-        private void HandleNewFolder()
+        private async System.Threading.Tasks.Task HandleNewFolder()
         {
-            this.OnClose.InvokeAsync();
-            this.OnNewFolder.InvokeAsync();
+            await this.HandleAction(this.OnNewFolder);
         }
 
         /// <summary>
         /// Handles Edit action
         /// </summary>
-        private void HandleEdit()
+        private async System.Threading.Tasks.Task HandleEdit()
         {
-            this.OnClose.InvokeAsync();
-            this.OnEdit.InvokeAsync();
+            await this.HandleAction(this.OnEdit);
         }
 
         /// <summary>
         /// Handles Download action
         /// </summary>
-        private void HandleDownload()
+        private async System.Threading.Tasks.Task HandleDownload()
         {
-            this.OnClose.InvokeAsync();
-            this.OnDownload.InvokeAsync();
+            await this.HandleAction(this.OnDownload);
         }
 
         /// <summary>
         /// Handles Upload action
         /// </summary>
-        private void HandleUpload()
+        private async System.Threading.Tasks.Task HandleUpload()
         {
-            this.OnClose.InvokeAsync();
-            this.OnUpload.InvokeAsync();
+            await this.HandleAction(this.OnUpload);
         }
 
         /// <summary>
         /// Handles Rename action
         /// </summary>
-        private void HandleRename()
+        private async System.Threading.Tasks.Task HandleRename()
         {
-            this.OnClose.InvokeAsync();
-            this.OnRename.InvokeAsync();
+            await this.HandleAction(this.OnRename);
         }
 
         /// <summary>
         /// Handles Delete action
         /// </summary>
-        private void HandleDelete()
+        private async System.Threading.Tasks.Task HandleDelete()
         {
-            this.OnClose.InvokeAsync();
-            this.OnDelete.InvokeAsync();
+            await this.HandleAction(this.OnDelete);
         }
 
         /// <summary>
         /// Handles Permissions action
         /// </summary>
-        private void HandlePermissions()
+        private async System.Threading.Tasks.Task HandlePermissions()
         {
-            this.OnClose.InvokeAsync();
-            this.OnPermissions.InvokeAsync();
+            await this.HandleAction(this.OnPermissions);
         }
 
         /// <summary>
         /// Handles Properties action
         /// </summary>
-        private void HandleProperties()
+        private async System.Threading.Tasks.Task HandleProperties()
         {
-            this.OnClose.InvokeAsync();
-            this.OnProperties.InvokeAsync();
+            await this.HandleAction(this.OnProperties);
         }
 
         /// <summary>
         /// Handles Extract Here action
         /// </summary>
-        private void HandleExtract()
+        private async System.Threading.Tasks.Task HandleExtract()
         {
-            this.OnClose.InvokeAsync();
-            this.OnExtract.InvokeAsync();
+            await this.HandleAction(this.OnExtract);
         }
 
         /// <summary>
         /// Handles Extract To Folder action
         /// </summary>
-        private void HandleExtractToFolder()
+        private async System.Threading.Tasks.Task HandleExtractToFolder()
         {
-            this.OnClose.InvokeAsync();
-            this.OnExtractToFolder.InvokeAsync();
+            await this.HandleAction(this.OnExtractToFolder);
         }
 
         /// <summary>
         /// Handles Compress To action
         /// </summary>
-        private void HandleCompress()
+        private async System.Threading.Tasks.Task HandleCompress()
         {
-            this.OnClose.InvokeAsync();
-            this.OnCompress.InvokeAsync();
+            await this.HandleAction(this.OnCompress);
         }
 
         /// <summary>
         /// Handles Advanced Rename action
         /// </summary>
-        private void HandleAdvancedRename()
+        private async System.Threading.Tasks.Task HandleAdvancedRename()
         {
-            this.OnClose.InvokeAsync();
-            this.OnAdvancedRename.InvokeAsync();
+            await this.HandleAction(this.OnAdvancedRename);
         }
 
         /// <summary>
         /// Handles Refresh action
         /// </summary>
-        private void HandleRefresh()
+        private async System.Threading.Tasks.Task HandleRefresh()
         {
-            this.OnClose.InvokeAsync();
-            this.OnRefresh.InvokeAsync();
+            await this.HandleAction(this.OnRefresh);
+        }
+
+        /// <summary>
+        /// Closes the menu and invokes the selected action in order
+        /// </summary>
+        /// <param name="callback">Action callback to invoke</param>
+        private async System.Threading.Tasks.Task HandleAction(EventCallback callback)
+        {
+            await this.OnClose.InvokeAsync();
+            await callback.InvokeAsync();
         }
 
         #endregion

@@ -33,10 +33,13 @@
             <span class="shortcut">Ctrl+V</span>
         </div>
         <hr />
-        <div class="context-menu-item" @onclick="this.HandleRename">
-            <span>Rename</span>
-            <span class="shortcut">F2</span>
-        </div>
+        @if (!this.IsMultiSelection)
+        {
+            <div class="context-menu-item" @onclick="this.HandleRename">
+                <span>Rename</span>
+                <span class="shortcut">F2</span>
+            </div>
+        }
         @if (this.HasSelection)
         {
             <div class="context-menu-item" @onclick="this.HandleAdvancedRename">
@@ -59,7 +62,7 @@
         </div>
         <hr />
         <div class="context-menu-item" @onclick="this.HandleDownload">
-            <span>Download</span>
+            <span>@(this.IsMultiSelection ? "Download as ZIP" : "Download")</span>
             <span class="shortcut"></span>
         </div>
         <div class="context-menu-item" @onclick="this.HandleUpload">
@@ -74,7 +77,7 @@
                 <span class="shortcut"></span>
             </div>
             <div class="context-menu-item" @onclick="this.HandleExtractToFolder">
-                <span>Extract to @(this.ArchiveBaseName)/</span>
+                <span>Extract to @(this.IsMultiSelection ? "*/" : this.ArchiveBaseName + "/")</span>
                 <span class="shortcut"></span>
             </div>
         }
@@ -93,14 +96,17 @@
             <span>Refresh</span>
             <span class="shortcut">F5</span>
         </div>
-        <hr />
-        <div class="context-menu-item" @onclick="this.HandlePermissions">
-            <span>Permissions</span>
-            <span class="shortcut">Ctrl+P</span>
-        </div>
-        <div class="context-menu-item" @onclick="this.HandleProperties">
-            <span>Properties</span>
-            <span class="shortcut">Alt+Enter</span>
-        </div>
+        @if (!this.IsMultiSelection)
+        {
+            <hr />
+            <div class="context-menu-item" @onclick="this.HandlePermissions">
+                <span>Permissions</span>
+                <span class="shortcut">Ctrl+P</span>
+            </div>
+            <div class="context-menu-item" @onclick="this.HandleProperties">
+                <span>Properties</span>
+                <span class="shortcut">Alt+Enter</span>
+            </div>
+        }
     </div>
 }

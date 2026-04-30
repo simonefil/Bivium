@@ -89,9 +89,9 @@ namespace Bivium.Components.Tree
         /// Handles directory selection from a tree node
         /// </summary>
         /// <param name="path">Selected directory path</param>
-        private void HandleDirectorySelected(string path)
+        private async System.Threading.Tasks.Task HandleDirectorySelected(string path)
         {
-            this.OnDirectorySelected.InvokeAsync(path);
+            await this.OnDirectorySelected.InvokeAsync(path);
         }
 
         #endregion

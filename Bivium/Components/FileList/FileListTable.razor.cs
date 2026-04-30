@@ -118,7 +118,7 @@ namespace Bivium.Components.FileList
         /// Toggles sort on a column (click same column toggles direction)
         /// </summary>
         /// <param name="field">Sort field clicked</param>
-        private void ToggleSort(SortField field)
+        private async System.Threading.Tasks.Task ToggleSort(SortField field)
         {
             SortColumn newSort = new SortColumn();
 
@@ -138,7 +138,7 @@ namespace Bivium.Components.FileList
                 newSort.Direction = SortDirection.Ascending;
             }
 
-            this.OnSortChanged.InvokeAsync(newSort);
+            await this.OnSortChanged.InvokeAsync(newSort);
         }
 
         /// <summary>
@@ -167,14 +167,14 @@ namespace Bivium.Components.FileList
         /// </summary>
         /// <param name="index">Clicked row index</param>
         /// <param name="args">Mouse event args with modifier keys</param>
-        private void HandleRowClick(int index, MouseEventArgs args)
+        private async System.Threading.Tasks.Task HandleRowClick(int index, MouseEventArgs args)
         {
             List<string> newSelection = new List<string>();
 
             if (index < 0 || index >= this.Entries.Count)
             {
-                this.OnSelectionChanged.InvokeAsync(newSelection);
-                this.OnCursorChanged.InvokeAsync(0);
+                await this.OnSelectionChanged.InvokeAsync(newSelection);
+                await this.OnCursorChanged.InvokeAsync(0);
                 return;
             }
 
@@ -218,22 +218,22 @@ namespace Bivium.Components.FileList
             }
 
             this._lastClickedIndex = index;
-            this.OnSelectionChanged.InvokeAsync(newSelection);
-            this.OnCursorChanged.InvokeAsync(index);
+            await this.OnSelectionChanged.InvokeAsync(newSelection);
+            await this.OnCursorChanged.InvokeAsync(index);
         }
 
         /// <summary>
         /// Handles double-click on a row (navigate into directory)
         /// </summary>
         /// <param name="index">Double-clicked row index</param>
-        private void HandleRowDoubleClick(int index)
+        private async System.Threading.Tasks.Task HandleRowDoubleClick(int index)
         {
             if (index >= 0 && index < this.Entries.Count)
             {
                 FileSystemEntry entry = this.Entries[index];
                 if (entry.IsDirectory)
                 {
-                    this.OnNavigate.InvokeAsync(entry.FullPath);
+                    await this.OnNavigate.InvokeAsync(entry.FullPath);
                 }
             }
         }
@@ -241,12 +241,12 @@ namespace Bivium.Components.FileList
         /// <summary>
         /// Navigates to the parent directory
         /// </summary>
-        private void NavigateToParent()
+        private async System.Threading.Tasks.Task NavigateToParent()
         {
             string parentPath = this._fileSystemService.GetParentPath(this.CurrentPath);
             if (!string.IsNullOrEmpty(parentPath))
             {
-                this.OnNavigate.InvokeAsync(parentPath);
+                await this.OnNavigate.InvokeAsync(parentPath);
             }
         }
 
@@ -255,7 +255,7 @@ namespace Bivium.Components.FileList
         /// </summary>
         /// <param name="index">Right-clicked row index</param>
         /// <param name="args">Mouse event args with coordinates</param>
-        private void HandleRowContextMenu(int index, MouseEventArgs args)
+        private async System.Threading.Tasks.Task HandleRowContextMenu(int index, MouseEventArgs args)
         {
             // Select the row if not already selected
             if (index >= 0 && index < this.Entries.Count)
@@ -266,17 +266,17 @@ namespace Bivium.Components.FileList
                 {
                     List<string> newSelection = new List<string>();
                     newSelection.Add(clickedPath);
-                    this.OnSelectionChanged.InvokeAsync(newSelection);
+                    await this.OnSelectionChanged.InvokeAsync(newSelection);
                 }
 
-                this.OnCursorChanged.InvokeAsync(index);
+                await this.OnCursorChanged.InvokeAsync(index);
 
                 // Fire context menu event
                 ContextMenuEventArgs contextArgs = new ContextMenuEventArgs();
                 contextArgs.X = args.ClientX;
                 contextArgs.Y = args.ClientY;
                 contextArgs.Entry = this.Entries[index];
-                this.OnContextMenu.InvokeAsync(contextArgs);
+                await this.OnContextMenu.InvokeAsync(contextArgs);
             }
         }
 

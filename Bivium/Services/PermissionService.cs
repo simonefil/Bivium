@@ -51,16 +51,18 @@ namespace Bivium.Services
             PermissionModel result = new PermissionModel();
             result.IsUnix = this._isUnix;
 
-            if (this._securityService.IsPathSafe(path))
+            if (!this._securityService.IsPathSafe(path))
             {
-                if (this._isUnix)
-                {
-                    this.GetUnixPermissions(path, result);
-                }
-                else
-                {
-                    this.GetWindowsPermissions(path, result);
-                }
+                throw new IOException("Invalid path: " + path);
+            }
+
+            if (this._isUnix)
+            {
+                this.GetUnixPermissions(path, result);
+            }
+            else
+            {
+                this.GetWindowsPermissions(path, result);
             }
 
             return result;
@@ -161,13 +163,30 @@ namespace Bivium.Services
         private void GetUnixPermissions(string path, PermissionModel model)
         {
             // Use stat to get permissions and owner
-            string statOutput = this.RunCommand("stat", "-c \"%a %U %G\" \"" + path + "\"");
+            CommandResult commandResult;
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            {
+                commandResult = this.RunCommand("stat", new List<string> { "-f", "%Lp %Su %Sg", path });
+            }
+            else
+            {
+                commandResult = this.RunCommand("stat", new List<string> { "-c", "%a %U %G", path });
+            }
+
+            if (!commandResult.Success)
+            {
+                throw new IOException(commandResult.ErrorMessage);
+            }
+
+            string statOutput = commandResult.Output;
+
+            bool parsed = false;
 
             if (!string.IsNullOrEmpty(statOutput))
             {
                 // Remove quotes if present
                 statOutput = statOutput.Trim().Trim('"');
-                string[] parts = statOutput.Split(' ');
+                string[] parts = statOutput.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
                 if (parts.Length >= 3)
                 {
@@ -192,7 +211,13 @@ namespace Bivium.Services
 
                     model.Owner = parts[1];
                     model.Group = parts[2];
+                    parsed = true;
                 }
+            }
+
+            if (!parsed)
+            {
+                throw new IOException("Could not parse permission data for: " + path);
             }
         }
 
@@ -205,16 +230,106 @@ namespace Bivium.Services
         /// <returns>Operation result</returns>
         private FileOperationResult SetUnixPermissions(string path, PermissionModel model, bool recursive)
         {
-            // Build octal permission string
-            int ownerBits = (model.OwnerRead ? 4 : 0) + (model.OwnerWrite ? 2 : 0) + (model.OwnerExecute ? 1 : 0);
-            int groupBits = (model.GroupRead ? 4 : 0) + (model.GroupWrite ? 2 : 0) + (model.GroupExecute ? 1 : 0);
-            int otherBits = (model.OthersRead ? 4 : 0) + (model.OthersWrite ? 2 : 0) + (model.OthersExecute ? 1 : 0);
-            string octal = ownerBits.ToString() + groupBits.ToString() + otherBits.ToString();
+            UnixFileMode mode = this.BuildUnixFileMode(model);
+            int processed = 0;
+            int failed = 0;
+            string lastError = "";
 
-            string recursiveFlag = recursive ? "-R " : "";
-            string output = this.RunCommand("chmod", recursiveFlag + octal + " \"" + path + "\"");
+            this.ApplyUnixFileMode(path, mode, recursive, ref processed, ref failed, ref lastError);
 
-            FileOperationResult result = FileOperationResult.Ok(1);
+            FileOperationResult result = new FileOperationResult();
+            result.Success = failed == 0;
+            result.FilesProcessed = processed;
+            result.FilesFailed = failed;
+            result.ErrorMessage = lastError;
+            return result;
+        }
+
+        /// <summary>
+        /// Builds a UnixFileMode value from the permission model
+        /// </summary>
+        /// <param name="model">Permission model</param>
+        /// <returns>Unix file mode</returns>
+        private UnixFileMode BuildUnixFileMode(PermissionModel model)
+        {
+            UnixFileMode result = 0;
+
+            if (model.OwnerRead) result |= UnixFileMode.UserRead;
+            if (model.OwnerWrite) result |= UnixFileMode.UserWrite;
+            if (model.OwnerExecute) result |= UnixFileMode.UserExecute;
+            if (model.GroupRead) result |= UnixFileMode.GroupRead;
+            if (model.GroupWrite) result |= UnixFileMode.GroupWrite;
+            if (model.GroupExecute) result |= UnixFileMode.GroupExecute;
+            if (model.OthersRead) result |= UnixFileMode.OtherRead;
+            if (model.OthersWrite) result |= UnixFileMode.OtherWrite;
+            if (model.OthersExecute) result |= UnixFileMode.OtherExecute;
+
+            return result;
+        }
+
+        /// <summary>
+        /// Applies Unix permissions to one path and optionally its directory contents
+        /// </summary>
+        /// <param name="path">File or directory path</param>
+        /// <param name="mode">Unix file mode to apply</param>
+        /// <param name="recursive">If true, apply recursively</param>
+        /// <param name="processed">Number of successfully processed entries</param>
+        /// <param name="failed">Number of failed entries</param>
+        /// <param name="lastError">Last error message</param>
+        private void ApplyUnixFileMode(string path, UnixFileMode mode, bool recursive, ref int processed, ref int failed, ref string lastError)
+        {
+            try
+            {
+                File.SetUnixFileMode(path, mode);
+                processed++;
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                failed++;
+                lastError = "Access denied: " + ex.Message;
+                return;
+            }
+            catch (IOException ex)
+            {
+                failed++;
+                lastError = "I/O error: " + ex.Message;
+                return;
+            }
+
+            if (!recursive || !Directory.Exists(path) || this.IsSymbolicLink(path))
+            {
+                return;
+            }
+
+            try
+            {
+                string[] entries = Directory.GetFileSystemEntries(path);
+                for (int i = 0; i < entries.Length; i++)
+                {
+                    this.ApplyUnixFileMode(entries[i], mode, true, ref processed, ref failed, ref lastError);
+                }
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                failed++;
+                lastError = "Access denied: " + ex.Message;
+            }
+            catch (IOException ex)
+            {
+                failed++;
+                lastError = "I/O error: " + ex.Message;
+            }
+        }
+
+        /// <summary>
+        /// Checks whether a filesystem entry is a symbolic link
+        /// </summary>
+        /// <param name="path">File or directory path</param>
+        /// <returns>True if the entry is a symbolic link</returns>
+        private bool IsSymbolicLink(string path)
+        {
+            FileAttributes attributes = File.GetAttributes(path);
+            bool result = (attributes & FileAttributes.ReparsePoint) == FileAttributes.ReparsePoint;
             return result;
         }
 
@@ -234,8 +349,19 @@ namespace Bivium.Services
                 ownerGroup = owner + ":" + group;
             }
 
-            string recursiveFlag = recursive ? "-R " : "";
-            string output = this.RunCommand("chown", recursiveFlag + ownerGroup + " \"" + path + "\"");
+            List<string> arguments = new List<string>();
+            if (recursive)
+            {
+                arguments.Add("-R");
+            }
+            arguments.Add(ownerGroup);
+            arguments.Add(path);
+
+            CommandResult commandResult = this.RunCommand("chown", arguments);
+            if (!commandResult.Success)
+            {
+                return FileOperationResult.Fail(commandResult.ErrorMessage);
+            }
 
             FileOperationResult result = FileOperationResult.Ok(1);
             return result;
@@ -431,34 +557,79 @@ namespace Bivium.Services
         #region Private Methods - Utility
 
         /// <summary>
-        /// Runs a shell command and returns stdout
+        /// Runs a command without shell expansion and returns output plus exit status
         /// </summary>
         /// <param name="command">Command to run</param>
         /// <param name="arguments">Command arguments</param>
-        /// <returns>Standard output</returns>
-        private string RunCommand(string command, string arguments)
+        /// <returns>Command result</returns>
+        private CommandResult RunCommand(string command, List<string> arguments)
         {
-            string result = "";
+            CommandResult result = new CommandResult();
 
             ProcessStartInfo startInfo = new ProcessStartInfo();
             startInfo.FileName = command;
-            startInfo.Arguments = arguments;
             startInfo.RedirectStandardOutput = true;
             startInfo.RedirectStandardError = true;
             startInfo.UseShellExecute = false;
             startInfo.CreateNoWindow = true;
 
+            for (int i = 0; i < arguments.Count; i++)
+            {
+                startInfo.ArgumentList.Add(arguments[i]);
+            }
+
             Process process = new Process();
             process.StartInfo = startInfo;
             process.Start();
 
-            result = process.StandardOutput.ReadToEnd().Trim();
+            result.Output = process.StandardOutput.ReadToEnd().Trim();
+            result.ErrorMessage = process.StandardError.ReadToEnd().Trim();
             process.WaitForExit();
+            result.ExitCode = process.ExitCode;
+
+            if (!result.Success && string.IsNullOrEmpty(result.ErrorMessage))
+            {
+                result.ErrorMessage = command + " failed with exit code " + result.ExitCode;
+            }
 
             // Clean up
             process.Dispose();
 
             return result;
+        }
+
+        #endregion
+
+        #region Nested Classes
+
+        /// <summary>
+        /// Result of a spawned process
+        /// </summary>
+        private class CommandResult
+        {
+            #region Properties
+
+            /// <summary>
+            /// Standard output
+            /// </summary>
+            public string Output { get; set; } = "";
+
+            /// <summary>
+            /// Standard error or generated error message
+            /// </summary>
+            public string ErrorMessage { get; set; } = "";
+
+            /// <summary>
+            /// Process exit code
+            /// </summary>
+            public int ExitCode { get; set; } = 0;
+
+            /// <summary>
+            /// True if command exited successfully
+            /// </summary>
+            public bool Success => this.ExitCode == 0;
+
+            #endregion
         }
 
         #endregion

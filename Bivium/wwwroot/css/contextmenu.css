@@ -5,15 +5,19 @@
     left: 0;
     width: 100vw;
     height: 100vh;
-    z-index: 999;
+    z-index: 3000;
 }
 
 .context-menu {
     position: fixed;
-    z-index: 1000;
+    z-index: 3001;
     background-color: var(--background0);
     border: 1px solid var(--foreground2);
     min-width: 30ch;
+    max-width: calc(100vw - 2ch);
+    max-height: calc(100vh - 2lh);
+    overflow: auto;
+    box-sizing: border-box;
     padding: 0;
 }
 

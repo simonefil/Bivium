@@ -112,9 +112,9 @@ namespace Bivium.Components.Tree
         /// <summary>
         /// Handles click on the node row - navigates the file list
         /// </summary>
-        private void OnClick()
+        private async System.Threading.Tasks.Task OnClick()
         {
-            this.OnDirectorySelected.InvokeAsync(this.Entry.FullPath);
+            await this.OnDirectorySelected.InvokeAsync(this.Entry.FullPath);
         }
 
         /// <summary>

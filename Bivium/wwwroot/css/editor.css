@@ -13,6 +13,9 @@
     flex-direction: column;
     min-width: 40ch;
     min-height: 10lh;
+    max-width: calc(100vw - 2ch);
+    max-height: calc(100vh - 2lh);
+    box-sizing: border-box;
 }
 
 .editor-window.visible {
@@ -35,6 +38,7 @@
 }
 
 .editor-titlebar-title {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -80,6 +84,8 @@
     line-height: 1lh;
     border-top: 1px solid var(--foreground2);
     flex-shrink: 0;
+    gap: 1ch;
+    overflow: hidden;
 }
 
 /* TUI-style button in status bar */

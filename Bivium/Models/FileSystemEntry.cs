@@ -1,5 +1,5 @@
 using System.IO;
-using System.Runtime.InteropServices;
+using System.Diagnostics;
 
 namespace Bivium.Models
 {
@@ -182,26 +182,32 @@ namespace Bivium.Models
             {
                 try
                 {
-                    // Allocate buffer for stat struct (256 bytes is enough for any platform)
-                    IntPtr buf = Marshal.AllocHGlobal(256);
-                    int ret = NativeStat(path, buf);
+                    ProcessStartInfo startInfo = new ProcessStartInfo();
+                    startInfo.FileName = "stat";
+                    startInfo.RedirectStandardOutput = true;
+                    startInfo.RedirectStandardError = true;
+                    startInfo.UseShellExecute = false;
+                    startInfo.CreateNoWindow = true;
 
-                    if (ret == 0)
+                    if (OperatingSystem.IsMacOS())
                     {
-                        // st_uid is at offset 28 on Linux x86_64
-                        // (st_dev[8] + st_ino[8] + st_nlink[8] + st_mode[4] = 28)
-                        uint uid = (uint)Marshal.ReadInt32(buf, 28);
-                        IntPtr passwd = NativeGetpwuid(uid);
-
-                        if (passwd != IntPtr.Zero)
-                        {
-                            // pw_name is the first field (char* pointer)
-                            IntPtr namePtr = Marshal.ReadIntPtr(passwd, 0);
-                            result = Marshal.PtrToStringAnsi(namePtr);
-                        }
+                        startInfo.ArgumentList.Add("-f");
+                        startInfo.ArgumentList.Add("%Su");
                     }
+                    else
+                    {
+                        startInfo.ArgumentList.Add("-c");
+                        startInfo.ArgumentList.Add("%U");
+                    }
+                    startInfo.ArgumentList.Add(path);
 
-                    Marshal.FreeHGlobal(buf);
+                    Process process = new Process();
+                    process.StartInfo = startInfo;
+                    process.Start();
+
+                    result = process.StandardOutput.ReadToEnd().Trim();
+                    process.WaitForExit();
+                    process.Dispose();
                 }
                 catch
                 {
@@ -211,18 +217,6 @@ namespace Bivium.Models
 
             return result;
         }
-
-        /// <summary>
-        /// Native stat syscall (Linux/macOS)
-        /// </summary>
-        [DllImport("libc", EntryPoint = "stat", SetLastError = true)]
-        private static extern int NativeStat(string path, IntPtr buf);
-
-        /// <summary>
-        /// Native getpwuid to resolve uid to username (Linux/macOS)
-        /// </summary>
-        [DllImport("libc", EntryPoint = "getpwuid")]
-        private static extern IntPtr NativeGetpwuid(uint uid);
 
         #endregion
 

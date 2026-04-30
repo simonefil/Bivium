@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
+using Bivium.Models;
+using Bivium.Services;
 
 namespace Bivium.Components.Shared
 {
@@ -8,6 +10,16 @@ namespace Bivium.Components.Shared
     /// </summary>
     public partial class EditorDialog : ComponentBase, IDisposable
     {
+        #region Injected Services
+
+        /// <summary>
+        /// File operation service for saving editor content
+        /// </summary>
+        [Inject]
+        private IFileOperationService _fileOperationService { get; set; }
+
+        #endregion
+
         #region Parameters
 
         /// <summary>
@@ -15,12 +27,6 @@ namespace Bivium.Components.Shared
         /// </summary>
         [Parameter]
         public EventCallback<bool> OnClose { get; set; }
-
-        /// <summary>
-        /// Callback to save file content, receives (filePath, content)
-        /// </summary>
-        [Parameter]
-        public EventCallback<(string FilePath, string Content)> OnSave { get; set; }
 
         #endregion
 
@@ -156,8 +162,7 @@ namespace Bivium.Components.Shared
             await this._jsModule.InvokeVoidAsync("setSaveCallback", this._dotNetRef);
 
             // Initialize Monaco editor
-            await this._jsModule.InvokeVoidAsync("initEditor", "monaco-container", content, language);
-            this._jsInitialized = true;
+            this._jsInitialized = await this._jsModule.InvokeAsync<bool>("initEditor", "monaco-container", content, language);
 
             // Initialize drag and resize for the window
             await this._interopModule.InvokeVoidAsync("initWindowDrag", "editor-window", "editor-titlebar", "editor-resize-handle");
@@ -173,6 +178,20 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
+        /// Called from JS when editor content changes
+        /// </summary>
+        [JSInvokable]
+        public void OnEditorDirty()
+        {
+            if (!this._isDirty)
+            {
+                this._isDirty = true;
+                this._statusText = this._statusText.Replace(" - Saved", "") + " - Modified";
+                this.StateHasChanged();
+            }
+        }
+
+        /// <summary>
         /// Handles the save button click - retrieves content from Monaco and invokes callback
         /// </summary>
         private async System.Threading.Tasks.Task HandleSave()
@@ -185,8 +204,15 @@ namespace Bivium.Components.Shared
             // Get current editor content from Monaco
             string content = await this._jsModule.InvokeAsync<string>("getEditorContent");
 
-            // Invoke save callback with file path and content
-            await this.OnSave.InvokeAsync((this._filePath, content));
+            // Save content to disk and keep dirty state if it fails
+            FileOperationResult result = this._fileOperationService.WriteFileText(this._filePath, content);
+            if (!result.Success)
+            {
+                this._statusText = "Save failed: " + result.ErrorMessage;
+                this._isDirty = true;
+                this.StateHasChanged();
+                return;
+            }
 
             // Update status
             this._isDirty = false;
@@ -197,11 +223,11 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Handles the close button click
         /// </summary>
-        private void HandleClose()
+        private async System.Threading.Tasks.Task HandleClose()
         {
             bool wasSaved = !this._isDirty;
             this.Hide();
-            this.OnClose.InvokeAsync(wasSaved);
+            await this.OnClose.InvokeAsync(wasSaved);
         }
 
         /// <summary>

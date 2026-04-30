@@ -26,6 +26,9 @@
         OnCompress="this.DoCompress"
         OnToggleSinglePanel="this.DoToggleSinglePanel"
         SinglePanelMode="@this._singlePanelMode"
+        IsMultiSelection="@(this.GetActivePanel().SelectedPaths.Count > 1)"
+        CanExtract="@(this.GetArchivePathsForOperation(this.GetActivePanel()).Count > 0)"
+        CanCompress="@(this.GetSelectedOrCursorPaths(this.GetActivePanel()).Count > 0)"
         OnAbout="() => this._aboutDialog.Show()" />
 
     <!-- Panels area -->
@@ -82,7 +85,8 @@
         OnNewFolder="this.DoNewFolder"
         OnRefresh="this.DoRefresh"
         OnProperties="this.DoProperties"
-        OnTerminal="this.DoToggleTerminal" />
+        OnTerminal="this.DoToggleTerminal"
+        IsMultiSelection="@(this.GetActivePanel().SelectedPaths.Count > 1)" />
 </div>
 
 <!-- Context menu -->
@@ -143,7 +147,6 @@
 
 <!-- Floating windows -->
 <Bivium.Components.Shared.EditorDialog @ref="this._editorDialog"
-    OnSave="this.HandleEditorSave"
     OnClose="this.HandleEditorDialogClose" />
 
 <Bivium.Components.Shared.RenamerDialog @ref="this._renamerDialog"

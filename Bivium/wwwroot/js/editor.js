@@ -79,28 +79,30 @@ export function getLanguageFromExtension(ext) {
  */
 export function initEditor(containerId, content, language) {
     const container = document.getElementById(containerId);
-    if (!container) return;
+    if (!container) return Promise.resolve(false);
 
-    // Dispose existing editor if any
-    if (editor) {
-        editor.dispose();
-        editor = null;
-    }
+    return new Promise(function (resolve) {
+        // Dispose existing editor if any
+        if (editor) {
+            editor.dispose();
+            editor = null;
+        }
 
-    // Configure Monaco AMD loader
-    const loaderScript = document.getElementById('monaco-loader');
-    if (!loaderScript) {
-        // Load the AMD loader script
-        const script = document.createElement('script');
-        script.id = 'monaco-loader';
-        script.src = './lib/monaco-editor/min/vs/loader.js';
-        script.onload = function () {
-            configureAndCreateEditor(container, content, language);
-        };
-        document.head.appendChild(script);
-    } else {
-        configureAndCreateEditor(container, content, language);
-    }
+        // Configure Monaco AMD loader
+        const loaderScript = document.getElementById('monaco-loader');
+        if (!loaderScript) {
+            // Load the AMD loader script
+            const script = document.createElement('script');
+            script.id = 'monaco-loader';
+            script.src = './lib/monaco-editor/min/vs/loader.js';
+            script.onload = function () {
+                configureAndCreateEditor(container, content, language, resolve);
+            };
+            document.head.appendChild(script);
+        } else {
+            configureAndCreateEditor(container, content, language, resolve);
+        }
+    });
 }
 
 /**
@@ -109,7 +111,7 @@ export function initEditor(containerId, content, language) {
  * @param {string} content - Initial text content
  * @param {string} language - Monaco language identifier
  */
-function configureAndCreateEditor(container, content, language) {
+function configureAndCreateEditor(container, content, language, resolve) {
     // Configure require paths for local Monaco
     require.config({
         paths: {
@@ -157,7 +159,13 @@ function configureAndCreateEditor(container, content, language) {
             editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function () {
                 window._editorSaveDotNetRef.invokeMethodAsync('OnEditorSave');
             });
+
+            editor.onDidChangeModelContent(function () {
+                window._editorSaveDotNetRef.invokeMethodAsync('OnEditorDirty');
+            });
         }
+
+        resolve(true);
     });
 }
 

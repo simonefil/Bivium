@@ -44,7 +44,8 @@
                 @onclick="(e) => this.HandleRowClick(localIdx, e)"
                 @ondblclick="() => this.HandleRowDoubleClick(localIdx)"
                 @oncontextmenu="(e) => this.HandleRowContextMenu(localIdx, e)"
-                @oncontextmenu:preventDefault="true">
+                @oncontextmenu:preventDefault="true"
+                @oncontextmenu:stopPropagation="true">
                 <td title="@entry.Name">@entry.Name@(entry.IsSymLink ? " @" : "")</td>
                 <td>@entry.FormatSize()</td>
                 <td>@entry.FormatDate()</td>

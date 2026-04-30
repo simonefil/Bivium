@@ -56,7 +56,13 @@ namespace Bivium.Services
 
                 // Ensure the resolved path still starts with the base path
                 // This prevents .. traversal beyond the base
-                if (resolved.StartsWith(Path.GetFullPath(basePath), StringComparison.OrdinalIgnoreCase))
+                string resolvedBase = Path.GetFullPath(basePath);
+                if (!resolvedBase.EndsWith(Path.DirectorySeparatorChar))
+                {
+                    resolvedBase += Path.DirectorySeparatorChar;
+                }
+
+                if (resolved.StartsWith(resolvedBase, StringComparison.OrdinalIgnoreCase))
                 {
                     result = resolved;
                 }

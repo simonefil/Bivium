@@ -56,8 +56,14 @@ namespace Bivium.Services
 
                 try
                 {
-                    string destName = Path.GetFileName(source);
-                    string destPath = Path.Combine(destinationDir, destName);
+                    string destPath = this.GetCopyDestinationPath(source, destinationDir);
+                    string validationError = this.GetTransferValidationError(source, destPath, false);
+                    if (!string.IsNullOrEmpty(validationError))
+                    {
+                        failed++;
+                        lastError = validationError;
+                        continue;
+                    }
 
                     if (Directory.Exists(source))
                     {
@@ -67,7 +73,7 @@ namespace Bivium.Services
                     }
                     else if (File.Exists(source))
                     {
-                        File.Copy(source, destPath, true);
+                        File.Copy(source, destPath, false);
                         processed++;
                     }
                     else
@@ -131,8 +137,14 @@ namespace Bivium.Services
 
                 try
                 {
-                    string destName = Path.GetFileName(source);
-                    string destPath = Path.Combine(destinationDir, destName);
+                    string destPath = this.GetCopyDestinationPath(source, destinationDir);
+                    string validationError = this.GetTransferValidationError(source, destPath, false);
+                    if (!string.IsNullOrEmpty(validationError))
+                    {
+                        failed++;
+                        lastError = validationError;
+                        continue;
+                    }
 
                     if (Directory.Exists(source))
                     {
@@ -142,7 +154,7 @@ namespace Bivium.Services
                     }
                     else if (File.Exists(source))
                     {
-                        File.Copy(source, destPath, true);
+                        File.Copy(source, destPath, false);
                         currentCount++;
                         onProgress(currentCount, totalFiles, Path.GetFileName(source));
                         processed++;
@@ -200,6 +212,13 @@ namespace Bivium.Services
                 {
                     string destName = Path.GetFileName(source);
                     string destPath = Path.Combine(destinationDir, destName);
+                    string validationError = this.GetTransferValidationError(source, destPath, true);
+                    if (!string.IsNullOrEmpty(validationError))
+                    {
+                        failed++;
+                        lastError = validationError;
+                        continue;
+                    }
 
                     if (Directory.Exists(source))
                     {
@@ -278,6 +297,13 @@ namespace Bivium.Services
                 {
                     string destName = Path.GetFileName(source);
                     string destPath = Path.Combine(destinationDir, destName);
+                    string validationError = this.GetTransferValidationError(source, destPath, true);
+                    if (!string.IsNullOrEmpty(validationError))
+                    {
+                        failed++;
+                        lastError = validationError;
+                        continue;
+                    }
 
                     if (Directory.Exists(source))
                     {
@@ -557,29 +583,41 @@ namespace Bivium.Services
         /// </summary>
         /// <param name="path">File path</param>
         /// <param name="maxSizeBytes">Maximum allowed file size in bytes</param>
-        /// <returns>File content, or empty string on failure</returns>
-        public string ReadFileText(string path, long maxSizeBytes)
+        /// <returns>File text result</returns>
+        public FileTextResult ReadFileText(string path, long maxSizeBytes)
         {
-            string result = "";
+            FileTextResult result;
 
-            if (this._securityService.IsPathSafe(path) && File.Exists(path))
+            if (!this._securityService.IsPathSafe(path))
             {
-                FileInfo fileInfo = new FileInfo(path);
-
-                if (fileInfo.Length <= maxSizeBytes)
+                result = FileTextResult.Fail("Invalid path: " + path);
+            }
+            else if (!File.Exists(path))
+            {
+                result = FileTextResult.Fail("File not found: " + path);
+            }
+            else
+            {
+                try
                 {
-                    try
+                    FileInfo fileInfo = new FileInfo(path);
+
+                    if (fileInfo.Length > maxSizeBytes)
                     {
-                        result = File.ReadAllText(path);
+                        result = FileTextResult.Fail("File is too large to edit");
                     }
-                    catch (IOException)
+                    else
                     {
-                        // Return empty on read failure
+                        result = FileTextResult.Ok(File.ReadAllText(path));
                     }
-                    catch (UnauthorizedAccessException)
-                    {
-                        // Return empty on access denied
-                    }
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    result = FileTextResult.Fail("Access denied: " + ex.Message);
+                }
+                catch (IOException ex)
+                {
+                    result = FileTextResult.Fail("I/O error: " + ex.Message);
                 }
             }
 
@@ -627,6 +665,109 @@ namespace Bivium.Services
         #endregion
 
         #region Private Methods
+
+        /// <summary>
+        /// Builds a unique destination path for copy operations
+        /// </summary>
+        /// <param name="sourcePath">Source file or directory path</param>
+        /// <param name="destinationDir">Destination directory</param>
+        /// <returns>Unique destination path</returns>
+        private string GetCopyDestinationPath(string sourcePath, string destinationDir)
+        {
+            string sourceName = Path.GetFileName(sourcePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            string destinationPath = Path.Combine(destinationDir, sourceName);
+
+            if (!File.Exists(destinationPath) && !Directory.Exists(destinationPath))
+            {
+                return destinationPath;
+            }
+
+            bool isDirectory = Directory.Exists(sourcePath);
+            string name = isDirectory ? sourceName : Path.GetFileNameWithoutExtension(sourceName);
+            string extension = isDirectory ? "" : Path.GetExtension(sourceName);
+
+            destinationPath = Path.Combine(destinationDir, name + " - Copy" + extension);
+            int copyIndex = 2;
+            while (File.Exists(destinationPath) || Directory.Exists(destinationPath))
+            {
+                destinationPath = Path.Combine(destinationDir, name + " - Copy (" + copyIndex + ")" + extension);
+                copyIndex++;
+            }
+
+            return destinationPath;
+        }
+
+        /// <summary>
+        /// Validates whether a copy or move target is meaningful and safe
+        /// </summary>
+        /// <param name="sourcePath">Source path</param>
+        /// <param name="destinationPath">Resolved destination path</param>
+        /// <param name="isMove">True if this is a move operation</param>
+        /// <returns>Error message, or empty if valid</returns>
+        private string GetTransferValidationError(string sourcePath, string destinationPath, bool isMove)
+        {
+            string result = "";
+            string sourceFull = Path.GetFullPath(sourcePath);
+            string destinationFull = Path.GetFullPath(destinationPath);
+
+            if (this.AreSamePath(sourceFull, destinationFull))
+            {
+                result = isMove ? "Source is already in the destination: " + sourcePath : "Cannot copy an entry onto itself: " + sourcePath;
+            }
+            else if (Directory.Exists(sourcePath) && this.IsPathInsideDirectory(destinationFull, sourceFull))
+            {
+                result = "Cannot " + (isMove ? "move" : "copy") + " a directory into itself: " + sourcePath;
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Checks if two paths resolve to the same path
+        /// </summary>
+        /// <param name="left">First path</param>
+        /// <param name="right">Second path</param>
+        /// <returns>True if paths are equal</returns>
+        private bool AreSamePath(string left, string right)
+        {
+            bool result = string.Equals(
+                Path.TrimEndingDirectorySeparator(left),
+                Path.TrimEndingDirectorySeparator(right),
+                this.GetPathComparison());
+            return result;
+        }
+
+        /// <summary>
+        /// Checks whether a path is inside a directory
+        /// </summary>
+        /// <param name="path">Path to test</param>
+        /// <param name="directory">Parent directory</param>
+        /// <returns>True if path is inside directory</returns>
+        private bool IsPathInsideDirectory(string path, string directory)
+        {
+            string fullPath = Path.GetFullPath(path);
+            string fullDirectory = Path.GetFullPath(directory);
+
+            if (!fullDirectory.EndsWith(Path.DirectorySeparatorChar))
+            {
+                fullDirectory += Path.DirectorySeparatorChar;
+            }
+
+            bool result = fullPath.StartsWith(fullDirectory, this.GetPathComparison());
+            return result;
+        }
+
+        /// <summary>
+        /// Gets the appropriate path comparison for the current platform
+        /// </summary>
+        /// <returns>String comparison for filesystem paths</returns>
+        private StringComparison GetPathComparison()
+        {
+            StringComparison result = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+            return result;
+        }
 
         /// <summary>
         /// Recursively copies a directory and all its contents
@@ -708,16 +849,27 @@ namespace Bivium.Services
             }
             else if (Directory.Exists(path))
             {
-                // Count files in this directory
-                DirectoryInfo dirInfo = new DirectoryInfo(path);
-                FileInfo[] files = dirInfo.GetFiles();
-                count = files.Length;
-
-                // Count files in subdirectories
-                DirectoryInfo[] subDirs = dirInfo.GetDirectories();
-                for (int i = 0; i < subDirs.Length; i++)
+                try
                 {
-                    count += this.CountFilesRecursive(subDirs[i].FullName);
+                    // Count files in this directory
+                    DirectoryInfo dirInfo = new DirectoryInfo(path);
+                    FileInfo[] files = dirInfo.GetFiles();
+                    count = files.Length;
+
+                    // Count files in subdirectories
+                    DirectoryInfo[] subDirs = dirInfo.GetDirectories();
+                    for (int i = 0; i < subDirs.Length; i++)
+                    {
+                        count += this.CountFilesRecursive(subDirs[i].FullName);
+                    }
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    count = 0;
+                }
+                catch (IOException)
+                {
+                    count = 0;
                 }
             }
 

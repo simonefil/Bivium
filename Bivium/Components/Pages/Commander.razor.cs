@@ -475,12 +475,26 @@ namespace Bivium.Components.Pages
             this._contextMenuIsEditable = false;
             this._contextMenuArchiveBaseName = "";
 
-            if (active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count)
+            List<string> selectedArchivePaths = this.GetSelectedArchivePaths(active);
+            if (selectedArchivePaths.Count > 0 && selectedArchivePaths.Count == active.SelectedPaths.Count)
+            {
+                this._contextMenuIsArchive = true;
+                if (selectedArchivePaths.Count == 1)
+                {
+                    this._contextMenuArchiveBaseName = this.GetArchiveBaseName(Path.GetFileName(selectedArchivePaths[0]));
+                }
+                else
+                {
+                    this._contextMenuArchiveBaseName = "*";
+                }
+            }
+
+            if (args.Entry != null && active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count)
             {
                 FileSystemEntry entry = active.Entries[active.CursorIndex];
                 this._contextMenuIsDirectory = entry.IsDirectory;
 
-                if (!entry.IsDirectory)
+                if (!entry.IsDirectory && selectedArchivePaths.Count == 0)
                 {
                     // Check if the file extension is editable by Monaco
                     string ext = Path.GetExtension(entry.Name).ToLowerInvariant();
@@ -498,24 +512,7 @@ namespace Bivium.Components.Pages
                     this._contextMenuIsArchive = this._archiveService.IsArchive(entry.FullPath);
                     if (this._contextMenuIsArchive)
                     {
-                        // Strip archive extensions (.tar.gz, .tar.bz2, etc.)
-                        string name = entry.Name;
-                        string lower = name.ToLowerInvariant();
-                        string[] doubleExts = { ".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst" };
-                        bool found = false;
-                        foreach (string dblExt in doubleExts)
-                        {
-                            if (lower.EndsWith(dblExt))
-                            {
-                                this._contextMenuArchiveBaseName = name.Substring(0, name.Length - dblExt.Length);
-                                found = true;
-                                break;
-                            }
-                        }
-                        if (!found)
-                        {
-                            this._contextMenuArchiveBaseName = Path.GetFileNameWithoutExtension(name);
-                        }
+                        this._contextMenuArchiveBaseName = this.GetArchiveBaseName(entry.Name);
                     }
                 }
             }
@@ -570,10 +567,9 @@ namespace Bivium.Components.Pages
         private void DoEdit()
         {
             PanelState active = this.GetActivePanel();
-            if (active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count)
+            FileSystemEntry entry = this.GetSingleTargetEntry(active, "Edit");
+            if (entry != null)
             {
-                FileSystemEntry entry = active.Entries[active.CursorIndex];
-
                 // Only edit files, not directories
                 if (!entry.IsDirectory)
                 {
@@ -601,8 +597,15 @@ namespace Bivium.Components.Pages
                     else
                     {
                         // Read file content and open editor
-                        string content = this._fileOperationService.ReadFileText(entry.FullPath, MAX_EDITOR_SIZE);
-                        this._editorDialog.Show(entry.FullPath, content);
+                        FileTextResult readResult = this._fileOperationService.ReadFileText(entry.FullPath, MAX_EDITOR_SIZE);
+                        if (readResult.Success)
+                        {
+                            this._editorDialog.Show(entry.FullPath, readResult.Content);
+                        }
+                        else
+                        {
+                            this._confirmDialog.Show("Edit", readResult.ErrorMessage, "OK", "");
+                        }
                     }
                 }
             }
@@ -614,7 +617,7 @@ namespace Bivium.Components.Pages
         private void DoCopy()
         {
             PanelState active = this.GetActivePanel();
-            this._clipboard.Paths = new List<string>(active.SelectedPaths);
+            this._clipboard.Paths = this.GetSelectedOrCursorPaths(active);
             this._clipboard.IsCut = false;
         }
 
@@ -624,7 +627,7 @@ namespace Bivium.Components.Pages
         private void DoCut()
         {
             PanelState active = this.GetActivePanel();
-            this._clipboard.Paths = new List<string>(active.SelectedPaths);
+            this._clipboard.Paths = this.GetSelectedOrCursorPaths(active);
             this._clipboard.IsCut = true;
         }
 
@@ -732,9 +735,9 @@ namespace Bivium.Components.Pages
         private void DoRename()
         {
             PanelState active = this.GetActivePanel();
-            if (active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count)
+            FileSystemEntry entry = this.GetSingleTargetEntry(active, "Rename");
+            if (entry != null)
             {
-                FileSystemEntry entry = active.Entries[active.CursorIndex];
                 this._pendingOperation = "rename";
                 this._inputDialog.Show("Rename", "New name:", entry.Name);
             }
@@ -746,8 +749,10 @@ namespace Bivium.Components.Pages
         private void DoDelete()
         {
             PanelState active = this.GetActivePanel();
-            if (active.SelectedPaths.Count > 0)
+            List<string> paths = this.GetSelectedOrCursorPaths(active);
+            if (paths.Count > 0)
             {
+                active.SelectedPaths = paths;
                 this._pendingOperation = "delete";
                 this._confirmDialog.Show("Delete", "Delete " + active.SelectedPaths.Count + " item(s)?", "Delete", "Cancel");
             }
@@ -759,10 +764,32 @@ namespace Bivium.Components.Pages
         private void DoDownload()
         {
             PanelState active = this.GetActivePanel();
-            if (active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count)
+            List<string> paths = this.GetSelectedOrCursorPaths(active);
+
+            if (paths.Count == 0)
             {
-                FileSystemEntry entry = active.Entries[active.CursorIndex];
-                string url;
+                return;
+            }
+
+            string url;
+
+            if (paths.Count > 1)
+            {
+                List<string> queryParts = new List<string>();
+                for (int i = 0; i < paths.Count; i++)
+                {
+                    queryParts.Add("path=" + Uri.EscapeDataString(paths[i]));
+                }
+
+                url = "/api/FileTransfer/download-zip-multi?" + string.Join("&", queryParts);
+            }
+            else
+            {
+                FileSystemEntry entry = this.GetEntryByPath(active, paths[0]);
+                if (entry == null)
+                {
+                    return;
+                }
 
                 if (entry.IsDirectory)
                 {
@@ -774,10 +801,10 @@ namespace Bivium.Components.Pages
                     // Download single file
                     url = "/api/FileTransfer/download?path=" + Uri.EscapeDataString(entry.FullPath);
                 }
-
-                // Trigger download via JS navigation
-                _ = this.JSRuntime.InvokeVoidAsync("open", url, "_blank");
             }
+
+            // Trigger download via JS navigation
+            _ = this.JSRuntime.InvokeVoidAsync("open", url, "_blank");
         }
 
         /// <summary>
@@ -818,9 +845,9 @@ namespace Bivium.Components.Pages
         private void DoProperties()
         {
             PanelState active = this.GetActivePanel();
-            if (active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count)
+            FileSystemEntry entry = this.GetSingleTargetEntry(active, "Properties");
+            if (entry != null)
             {
-                FileSystemEntry entry = active.Entries[active.CursorIndex];
                 this._propertiesDialog.Show(entry);
             }
         }
@@ -831,9 +858,9 @@ namespace Bivium.Components.Pages
         private void DoPermissions()
         {
             PanelState active = this.GetActivePanel();
-            if (active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count)
+            FileSystemEntry entry = this.GetSingleTargetEntry(active, "Permissions");
+            if (entry != null)
             {
-                FileSystemEntry entry = active.Entries[active.CursorIndex];
                 this._permissionsDialog.Show(entry);
             }
         }
@@ -872,21 +899,14 @@ namespace Bivium.Components.Pages
         private void DoExtract()
         {
             PanelState active = this.GetActivePanel();
+            List<string> archivePaths = this.GetArchivePathsForOperation(active);
 
-            if (active.CursorIndex < 0 || active.CursorIndex >= active.Entries.Count)
-            {
-                return;
-            }
-
-            FileSystemEntry entry = active.Entries[active.CursorIndex];
-
-            if (entry.IsDirectory || !this._archiveService.IsArchive(entry.FullPath))
+            if (archivePaths.Count == 0)
             {
                 this._confirmDialog.Show("Extract", "Selected file is not a supported archive.", "OK", "");
                 return;
             }
 
-            string archivePath = entry.FullPath;
             string destinationDir = active.CurrentPath;
 
             // Show initial progress
@@ -902,7 +922,7 @@ namespace Bivium.Components.Pages
             // Run on background thread
             Thread worker = new Thread(() =>
             {
-                FileOperationResult result = this._archiveService.ExtractArchive(archivePath, destinationDir, onProgress);
+                FileOperationResult result = this.ExtractArchives(archivePaths, destinationDir, false, onProgress);
 
                 _ = this.InvokeAsync(() =>
                 {
@@ -930,34 +950,18 @@ namespace Bivium.Components.Pages
         private void DoExtractToFolder()
         {
             PanelState active = this.GetActivePanel();
+            List<string> archivePaths = this.GetArchivePathsForOperation(active);
 
-            if (active.CursorIndex < 0 || active.CursorIndex >= active.Entries.Count)
-            {
-                return;
-            }
-
-            FileSystemEntry entry = active.Entries[active.CursorIndex];
-
-            if (entry.IsDirectory || !this._archiveService.IsArchive(entry.FullPath))
+            if (archivePaths.Count == 0)
             {
                 this._confirmDialog.Show("Extract", "Selected file is not a supported archive.", "OK", "");
                 return;
             }
 
-            string archivePath = entry.FullPath;
-            string folderName = this._contextMenuArchiveBaseName;
-            string destinationDir = Path.Combine(active.CurrentPath, folderName);
-
-            // Create the destination folder
-            FileOperationResult dirResult = this._fileOperationService.CreateDirectory(active.CurrentPath, folderName);
-            if (!dirResult.Success)
-            {
-                this._confirmDialog.Show("Error", dirResult.ErrorMessage, "OK", "");
-                return;
-            }
-
             // Show initial progress
-            this._progressText = "Extracting to " + folderName + "/...";
+            this._progressText = archivePaths.Count == 1
+                ? "Extracting to " + this.GetArchiveBaseName(Path.GetFileName(archivePaths[0])) + "/..."
+                : "Extracting to */...";
 
             // Progress callback
             Action<int, int, string> onProgress = (current, total, fileName) =>
@@ -969,7 +973,7 @@ namespace Bivium.Components.Pages
             // Run on background thread
             Thread worker = new Thread(() =>
             {
-                FileOperationResult result = this._archiveService.ExtractArchive(archivePath, destinationDir, onProgress);
+                FileOperationResult result = this.ExtractArchives(archivePaths, active.CurrentPath, true, onProgress);
 
                 _ = this.InvokeAsync(() =>
                 {
@@ -992,28 +996,221 @@ namespace Bivium.Components.Pages
         }
 
         /// <summary>
+        /// Gets explicitly selected paths, or the cursor entry when nothing is selected
+        /// </summary>
+        /// <param name="active">Active panel state</param>
+        /// <returns>Selected paths or cursor path</returns>
+        private List<string> GetSelectedOrCursorPaths(PanelState active)
+        {
+            List<string> result = new List<string>(active.SelectedPaths);
+
+            if (result.Count == 0 && active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count)
+            {
+                result.Add(active.Entries[active.CursorIndex].FullPath);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Gets a single target entry from selection or cursor
+        /// </summary>
+        /// <param name="active">Active panel state</param>
+        /// <param name="operationName">Operation name for error dialog</param>
+        /// <returns>Target entry, or null if no single target is available</returns>
+        private FileSystemEntry GetSingleTargetEntry(PanelState active, string operationName)
+        {
+            FileSystemEntry result = null;
+
+            if (active.SelectedPaths.Count > 1)
+            {
+                return result;
+            }
+            else if (active.SelectedPaths.Count == 1)
+            {
+                result = this.GetEntryByPath(active, active.SelectedPaths[0]);
+            }
+            else if (active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count)
+            {
+                result = active.Entries[active.CursorIndex];
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Finds a visible entry by full path and syncs the cursor to it
+        /// </summary>
+        /// <param name="active">Active panel state</param>
+        /// <param name="path">Entry path</param>
+        /// <returns>File system entry, or null if not found</returns>
+        private FileSystemEntry GetEntryByPath(PanelState active, string path)
+        {
+            FileSystemEntry result = null;
+
+            for (int i = 0; i < active.Entries.Count; i++)
+            {
+                if (active.Entries[i].FullPath == path)
+                {
+                    result = active.Entries[i];
+                    active.CursorIndex = i;
+                    break;
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Gets archive paths from the current selection or cursor entry
+        /// </summary>
+        /// <param name="active">Active panel state</param>
+        /// <returns>Archive paths to extract</returns>
+        private List<string> GetArchivePathsForOperation(PanelState active)
+        {
+            List<string> result = this.GetSelectedArchivePaths(active);
+
+            if (active.SelectedPaths.Count > 0)
+            {
+                if (result.Count != active.SelectedPaths.Count)
+                {
+                    result.Clear();
+                }
+
+                return result;
+            }
+
+            if (active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count)
+            {
+                FileSystemEntry entry = active.Entries[active.CursorIndex];
+                if (!entry.IsDirectory && this._archiveService.IsArchive(entry.FullPath))
+                {
+                    result.Add(entry.FullPath);
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Gets archive paths from the current selection
+        /// </summary>
+        /// <param name="active">Active panel state</param>
+        /// <returns>Selected archive paths</returns>
+        private List<string> GetSelectedArchivePaths(PanelState active)
+        {
+            List<string> result = new List<string>();
+
+            for (int i = 0; i < active.SelectedPaths.Count; i++)
+            {
+                string selectedPath = active.SelectedPaths[i];
+                if (File.Exists(selectedPath) && this._archiveService.IsArchive(selectedPath))
+                {
+                    result.Add(selectedPath);
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Extracts one or more archives
+        /// </summary>
+        /// <param name="archivePaths">Archive paths to extract</param>
+        /// <param name="destinationDir">Destination directory</param>
+        /// <param name="extractToOwnFolder">If true, each archive is extracted to its own folder</param>
+        /// <param name="onProgress">Progress callback</param>
+        /// <returns>Operation result</returns>
+        private FileOperationResult ExtractArchives(List<string> archivePaths, string destinationDir, bool extractToOwnFolder, Action<int, int, string> onProgress)
+        {
+            int processed = 0;
+
+            for (int i = 0; i < archivePaths.Count; i++)
+            {
+                string archivePath = archivePaths[i];
+                string currentDestination = destinationDir;
+
+                if (extractToOwnFolder)
+                {
+                    string folderName = this.GetArchiveBaseName(Path.GetFileName(archivePath));
+                    currentDestination = Path.Combine(destinationDir, folderName);
+
+                    try
+                    {
+                        Directory.CreateDirectory(currentDestination);
+                    }
+                    catch (UnauthorizedAccessException ex)
+                    {
+                        return FileOperationResult.Fail("Access denied: " + ex.Message);
+                    }
+                    catch (IOException ex)
+                    {
+                        return FileOperationResult.Fail("I/O error: " + ex.Message);
+                    }
+                }
+
+                FileOperationResult result = this._archiveService.ExtractArchive(archivePath, currentDestination, onProgress);
+                if (!result.Success)
+                {
+                    return result;
+                }
+
+                processed++;
+            }
+
+            return FileOperationResult.Ok(processed);
+        }
+
+        /// <summary>
+        /// Returns archive file name without single or compound archive extension
+        /// </summary>
+        /// <param name="fileName">Archive file name</param>
+        /// <returns>Base archive name</returns>
+        private string GetArchiveBaseName(string fileName)
+        {
+            string result = Path.GetFileNameWithoutExtension(fileName);
+            string lower = fileName.ToLowerInvariant();
+            string[] doubleExts = { ".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst" };
+
+            for (int i = 0; i < doubleExts.Length; i++)
+            {
+                string doubleExt = doubleExts[i];
+                if (lower.EndsWith(doubleExt))
+                {
+                    result = fileName.Substring(0, fileName.Length - doubleExt.Length);
+                    break;
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
         /// Shows the compress dialog for the selected entries
         /// </summary>
         private void DoCompress()
         {
             PanelState active = this.GetActivePanel();
+            List<string> paths = this.GetSelectedOrCursorPaths(active);
 
-            if (active.SelectedPaths.Count == 0)
+            if (paths.Count == 0)
             {
                 return;
             }
 
+            active.SelectedPaths = paths;
+
             // Suggest a base name from selection
             string baseName = "archive";
 
-            if (active.SelectedPaths.Count == 1)
+            if (paths.Count == 1)
             {
-                baseName = Path.GetFileNameWithoutExtension(active.SelectedPaths[0]);
+                baseName = Path.GetFileNameWithoutExtension(paths[0]);
 
                 // For directories, use the directory name
-                if (Directory.Exists(active.SelectedPaths[0]))
+                if (Directory.Exists(paths[0]))
                 {
-                    baseName = Path.GetFileName(active.SelectedPaths[0]);
+                    baseName = Path.GetFileName(paths[0]);
                 }
             }
 
@@ -1026,11 +1223,14 @@ namespace Bivium.Components.Pages
         private void DoAdvancedRename()
         {
             PanelState active = this.GetActivePanel();
+            List<string> paths = this.GetSelectedOrCursorPaths(active);
 
-            if (active.SelectedPaths.Count == 0)
+            if (paths.Count == 0)
             {
                 return;
             }
+
+            active.SelectedPaths = paths;
 
             // Collect file entries for renaming
             List<FileSystemEntry> renameEntries = new List<FileSystemEntry>();
@@ -1236,19 +1436,6 @@ namespace Bivium.Components.Pages
         }
 
         /// <summary>
-        /// Handles editor save event
-        /// </summary>
-        /// <param name="args">Tuple of file path and content</param>
-        private void HandleEditorSave((string FilePath, string Content) args)
-        {
-            FileOperationResult result = this._fileOperationService.WriteFileText(args.FilePath, args.Content);
-            if (!result.Success)
-            {
-                this._confirmDialog.Show("Save Error", result.ErrorMessage, "OK", "");
-            }
-        }
-
-        /// <summary>
         /// Handles editor dialog close
         /// </summary>
         /// <param name="saved">True if file was saved</param>
@@ -1291,7 +1478,15 @@ namespace Bivium.Components.Pages
 
             PanelState active = this.GetActivePanel();
             List<string> paths = new List<string>(active.SelectedPaths);
-            string outputPath = Path.Combine(active.CurrentPath, result.OutputName);
+
+            string outputName = result.OutputName.Trim();
+            if (!this.IsValidOutputFileName(outputName))
+            {
+                this._confirmDialog.Show("Compress", "Archive name must be a file name, not a path.", "OK", "");
+                return;
+            }
+
+            string outputPath = Path.Combine(active.CurrentPath, outputName);
             ArchiveFormat format = result.Format;
 
             // Show initial progress
@@ -1327,6 +1522,19 @@ namespace Bivium.Components.Pages
 
             worker.IsBackground = true;
             worker.Start();
+        }
+
+        /// <summary>
+        /// Validates a user-entered output file name
+        /// </summary>
+        /// <param name="fileName">File name to validate</param>
+        /// <returns>True if the value is a plain file name</returns>
+        private bool IsValidOutputFileName(string fileName)
+        {
+            bool result = !string.IsNullOrWhiteSpace(fileName)
+                && fileName == Path.GetFileName(fileName)
+                && fileName.IndexOfAny(Path.GetInvalidFileNameChars()) < 0;
+            return result;
         }
 
         /// <summary>
@@ -1633,10 +1841,17 @@ namespace Bivium.Components.Pages
                 PanelState active = this.GetActivePanel();
                 if (active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count)
                 {
+                    if (active.SelectedPaths.Count == 0)
+                    {
+                        active.SelectedPaths.Add(active.Entries[active.CursorIndex].FullPath);
+                    }
+
                     // Position context menu at a default location
-                    this._contextMenuX = 100;
-                    this._contextMenuY = 100;
-                    this._contextMenuVisible = true;
+                    ContextMenuEventArgs contextArgs = new ContextMenuEventArgs();
+                    contextArgs.X = 100;
+                    contextArgs.Y = 100;
+                    contextArgs.Entry = active.Entries[active.CursorIndex];
+                    this.HandleContextMenuRequest(contextArgs, this._activePanel);
                     this.StateHasChanged();
                 }
                 return;

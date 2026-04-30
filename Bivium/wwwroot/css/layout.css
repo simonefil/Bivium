@@ -27,12 +27,15 @@
     min-height: 0;
     overflow: hidden;
     border: 1px solid var(--box-border-color, var(--foreground0));
+    box-sizing: border-box;
     user-select: none;
 }
 
 /* Active panel indicator */
 .file-panel.active {
-    border: 2px solid var(--foreground0);
+    border-color: var(--foreground0);
+    outline: 1px solid var(--foreground0);
+    outline-offset: -2px;
 }
 
 .file-panel:not(.active) {

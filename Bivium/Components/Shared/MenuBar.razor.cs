@@ -140,6 +140,24 @@ namespace Bivium.Components.Shared
         [Parameter]
         public bool SinglePanelMode { get; set; } = false;
 
+        /// <summary>
+        /// Whether the active panel has multiple selected entries
+        /// </summary>
+        [Parameter]
+        public bool IsMultiSelection { get; set; } = false;
+
+        /// <summary>
+        /// Whether the active target can be extracted
+        /// </summary>
+        [Parameter]
+        public bool CanExtract { get; set; } = false;
+
+        /// <summary>
+        /// Whether the active target can be compressed
+        /// </summary>
+        [Parameter]
+        public bool CanCompress { get; set; } = false;
+
         #endregion
 
         #region Class Variables
@@ -248,172 +266,164 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Handles New File action
         /// </summary>
-        private void HandleNewFile()
+        private async System.Threading.Tasks.Task HandleNewFile()
         {
-            this._activeMenu = "";
-            this.OnNewFile.InvokeAsync();
+            await this.HandleAction(this.OnNewFile);
         }
 
         /// <summary>
         /// Handles New Folder action
         /// </summary>
-        private void HandleNewFolder()
+        private async System.Threading.Tasks.Task HandleNewFolder()
         {
-            this._activeMenu = "";
-            this.OnNewFolder.InvokeAsync();
+            await this.HandleAction(this.OnNewFolder);
         }
 
         /// <summary>
         /// Handles Download action
         /// </summary>
-        private void HandleDownload()
+        private async System.Threading.Tasks.Task HandleDownload()
         {
-            this._activeMenu = "";
-            this.OnDownload.InvokeAsync();
+            await this.HandleAction(this.OnDownload);
         }
 
         /// <summary>
         /// Handles Upload action
         /// </summary>
-        private void HandleUpload()
+        private async System.Threading.Tasks.Task HandleUpload()
         {
-            this._activeMenu = "";
-            this.OnUpload.InvokeAsync();
+            await this.HandleAction(this.OnUpload);
         }
 
         /// <summary>
         /// Handles Exit action
         /// </summary>
-        private void HandleExit()
+        private async System.Threading.Tasks.Task HandleExit()
         {
-            this._activeMenu = "";
-            this.OnExit.InvokeAsync();
+            await this.HandleAction(this.OnExit);
         }
 
         /// <summary>
         /// Handles Copy action
         /// </summary>
-        private void HandleCopy()
+        private async System.Threading.Tasks.Task HandleCopy()
         {
-            this._activeMenu = "";
-            this.OnCopy.InvokeAsync();
+            await this.HandleAction(this.OnCopy);
         }
 
         /// <summary>
         /// Handles Cut action
         /// </summary>
-        private void HandleCut()
+        private async System.Threading.Tasks.Task HandleCut()
         {
-            this._activeMenu = "";
-            this.OnCut.InvokeAsync();
+            await this.HandleAction(this.OnCut);
         }
 
         /// <summary>
         /// Handles Paste action
         /// </summary>
-        private void HandlePaste()
+        private async System.Threading.Tasks.Task HandlePaste()
         {
-            this._activeMenu = "";
-            this.OnPaste.InvokeAsync();
+            await this.HandleAction(this.OnPaste);
         }
 
         /// <summary>
         /// Handles Delete action
         /// </summary>
-        private void HandleDelete()
+        private async System.Threading.Tasks.Task HandleDelete()
         {
-            this._activeMenu = "";
-            this.OnDelete.InvokeAsync();
+            await this.HandleAction(this.OnDelete);
         }
 
         /// <summary>
         /// Handles Rename action
         /// </summary>
-        private void HandleRename()
+        private async System.Threading.Tasks.Task HandleRename()
         {
-            this._activeMenu = "";
-            this.OnRename.InvokeAsync();
+            await this.HandleAction(this.OnRename);
         }
 
         /// <summary>
         /// Handles Advanced Rename action
         /// </summary>
-        private void HandleAdvancedRename()
+        private async System.Threading.Tasks.Task HandleAdvancedRename()
         {
-            this._activeMenu = "";
-            this.OnAdvancedRename.InvokeAsync();
+            await this.HandleAction(this.OnAdvancedRename);
         }
 
         /// <summary>
         /// Handles Select All action
         /// </summary>
-        private void HandleSelectAll()
+        private async System.Threading.Tasks.Task HandleSelectAll()
         {
-            this._activeMenu = "";
-            this.OnSelectAll.InvokeAsync();
+            await this.HandleAction(this.OnSelectAll);
         }
 
         /// <summary>
         /// Handles Refresh action
         /// </summary>
-        private void HandleRefresh()
+        private async System.Threading.Tasks.Task HandleRefresh()
         {
-            this._activeMenu = "";
-            this.OnRefresh.InvokeAsync();
+            await this.HandleAction(this.OnRefresh);
         }
 
         /// <summary>
         /// Handles Terminal toggle action
         /// </summary>
-        private void HandleTerminal()
+        private async System.Threading.Tasks.Task HandleTerminal()
         {
-            this._activeMenu = "";
-            this.OnTerminal.InvokeAsync();
+            await this.HandleAction(this.OnTerminal);
         }
 
         /// <summary>
         /// Handles Editor Extensions action
         /// </summary>
-        private void HandleEditorExtensions()
+        private async System.Threading.Tasks.Task HandleEditorExtensions()
         {
-            this._activeMenu = "";
-            this.OnEditorExtensions.InvokeAsync();
+            await this.HandleAction(this.OnEditorExtensions);
         }
 
         /// <summary>
         /// Handles About action
         /// </summary>
-        private void HandleAbout()
+        private async System.Threading.Tasks.Task HandleAbout()
         {
-            this._activeMenu = "";
-            this.OnAbout.InvokeAsync();
+            await this.HandleAction(this.OnAbout);
         }
 
         /// <summary>
         /// Handles Extract action
         /// </summary>
-        private void HandleExtract()
+        private async System.Threading.Tasks.Task HandleExtract()
         {
-            this._activeMenu = "";
-            this.OnExtract.InvokeAsync();
+            await this.HandleAction(this.OnExtract);
         }
 
         /// <summary>
         /// Handles Compress action
         /// </summary>
-        private void HandleCompress()
+        private async System.Threading.Tasks.Task HandleCompress()
         {
-            this._activeMenu = "";
-            this.OnCompress.InvokeAsync();
+            await this.HandleAction(this.OnCompress);
         }
 
         /// <summary>
         /// Handles toggle single/dual panel mode
         /// </summary>
-        private void HandleToggleSinglePanel()
+        private async System.Threading.Tasks.Task HandleToggleSinglePanel()
         {
             this._activeMenu = "";
-            this.OnToggleSinglePanel.InvokeAsync();
+            await this.HandleAction(this.OnToggleSinglePanel);
+        }
+
+        /// <summary>
+        /// Closes the active menu and invokes the selected action
+        /// </summary>
+        /// <param name="callback">Action callback</param>
+        private async System.Threading.Tasks.Task HandleAction(EventCallback callback)
+        {
+            this._activeMenu = "";
+            await callback.InvokeAsync();
         }
 
         #endregion

@@ -112,9 +112,21 @@ namespace Bivium.Services
                 result = FileOperationResult.Fail("Invalid output path");
                 return result;
             }
+            if (sourcePaths == null || sourcePaths.Count == 0)
+            {
+                result = FileOperationResult.Fail("No source paths selected");
+                return result;
+            }
 
             try
             {
+                string validationError = this.ValidateArchiveSources(outputPath, sourcePaths);
+                if (!string.IsNullOrEmpty(validationError))
+                {
+                    result = FileOperationResult.Fail(validationError);
+                    return result;
+                }
+
                 // Count total files for progress
                 int totalFiles = 0;
                 for (int i = 0; i < sourcePaths.Count; i++)
@@ -217,9 +229,7 @@ namespace Bivium.Services
                 string destPath = Path.Combine(destinationDir, entry.FullName);
 
                 // Security: prevent path traversal
-                string fullDest = Path.GetFullPath(destPath);
-                string fullDir = Path.GetFullPath(destinationDir);
-                if (!fullDest.StartsWith(fullDir))
+                if (!this.IsPathInsideDirectory(destPath, destinationDir))
                 {
                     continue;
                 }
@@ -288,10 +298,7 @@ namespace Bivium.Services
                 string destPath = Path.Combine(destinationDir, entry.Name);
 
                 // Security: prevent path traversal
-                string fullDest = Path.GetFullPath(destPath);
-                string fullDir = Path.GetFullPath(destinationDir);
-
-                if (fullDest.StartsWith(fullDir))
+                if (this.IsPathInsideDirectory(destPath, destinationDir))
                 {
                     if (entry.EntryType == TarEntryType.Directory)
                     {
@@ -361,17 +368,17 @@ namespace Bivium.Services
                 if (entry.IsDirectory)
                 {
                     string dirPath = Path.Combine(destinationDir, entry.Key);
-                    Directory.CreateDirectory(dirPath);
+                    if (this.IsPathInsideDirectory(dirPath, destinationDir))
+                    {
+                        Directory.CreateDirectory(dirPath);
+                    }
                 }
                 else
                 {
                     string destPath = Path.Combine(destinationDir, entry.Key);
 
                     // Security: prevent path traversal
-                    string fullDest = Path.GetFullPath(destPath);
-                    string fullDir = Path.GetFullPath(destinationDir);
-
-                    if (fullDest.StartsWith(fullDir))
+                    if (this.IsPathInsideDirectory(destPath, destinationDir))
                     {
                         Directory.CreateDirectory(Path.GetDirectoryName(destPath));
                         reader.WriteEntryToFile(destPath, new ExtractionOptions() { Overwrite = true });
@@ -384,6 +391,42 @@ namespace Bivium.Services
             fileStream.Dispose();
 
             FileOperationResult result = FileOperationResult.Ok(processed);
+            return result;
+        }
+
+        #endregion
+
+        #region Private Methods - Security
+
+        /// <summary>
+        /// Checks whether a target path resolves inside a destination directory
+        /// </summary>
+        /// <param name="targetPath">Target file or directory path</param>
+        /// <param name="destinationDir">Expected parent directory</param>
+        /// <returns>True if target path is inside destination directory</returns>
+        private bool IsPathInsideDirectory(string targetPath, string destinationDir)
+        {
+            string fullTarget = Path.GetFullPath(targetPath);
+            string fullDir = Path.GetFullPath(destinationDir);
+
+            if (!fullDir.EndsWith(Path.DirectorySeparatorChar))
+            {
+                fullDir += Path.DirectorySeparatorChar;
+            }
+
+            bool result = fullTarget.StartsWith(fullDir, this.GetPathComparison());
+            return result;
+        }
+
+        /// <summary>
+        /// Gets the appropriate path comparison for the current platform
+        /// </summary>
+        /// <returns>String comparison for filesystem paths</returns>
+        private StringComparison GetPathComparison()
+        {
+            StringComparison result = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
             return result;
         }
 
@@ -448,6 +491,12 @@ namespace Bivium.Services
             // Add files in this directory
             DirectoryInfo dirInfo = new DirectoryInfo(dirPath);
             FileInfo[] files = dirInfo.GetFiles();
+            DirectoryInfo[] subDirs = dirInfo.GetDirectories();
+
+            if (files.Length == 0 && subDirs.Length == 0)
+            {
+                archive.CreateEntry(entryBase + "/");
+            }
 
             for (int i = 0; i < files.Length; i++)
             {
@@ -462,8 +511,6 @@ namespace Bivium.Services
             }
 
             // Recurse into subdirectories
-            DirectoryInfo[] subDirs = dirInfo.GetDirectories();
-
             for (int i = 0; i < subDirs.Length; i++)
             {
                 string subBase = entryBase + "/" + subDirs[i].Name;
@@ -570,6 +617,12 @@ namespace Bivium.Services
             // Add files in this directory
             DirectoryInfo dirInfo = new DirectoryInfo(dirPath);
             FileInfo[] files = dirInfo.GetFiles();
+            DirectoryInfo[] subDirs = dirInfo.GetDirectories();
+
+            if (files.Length == 0 && subDirs.Length == 0)
+            {
+                tarWriter.WriteEntry(dirPath, entryBase);
+            }
 
             for (int i = 0; i < files.Length; i++)
             {
@@ -584,8 +637,6 @@ namespace Bivium.Services
             }
 
             // Recurse into subdirectories
-            DirectoryInfo[] subDirs = dirInfo.GetDirectories();
-
             for (int i = 0; i < subDirs.Length; i++)
             {
                 string subBase = entryBase + "/" + subDirs[i].Name;
@@ -596,6 +647,53 @@ namespace Bivium.Services
         #endregion
 
         #region Private Methods - Helpers
+
+        /// <summary>
+        /// Validates source paths before archive creation starts
+        /// </summary>
+        /// <param name="outputPath">Archive output path</param>
+        /// <param name="sourcePaths">Source paths to compress</param>
+        /// <returns>Error message, or empty if valid</returns>
+        private string ValidateArchiveSources(string outputPath, List<string> sourcePaths)
+        {
+            string result = "";
+            string fullOutputPath = Path.GetFullPath(outputPath);
+
+            for (int i = 0; i < sourcePaths.Count; i++)
+            {
+                string sourcePath = sourcePaths[i];
+
+                if (!this._securityService.IsPathSafe(sourcePath))
+                {
+                    result = "Invalid source path: " + sourcePath;
+                    break;
+                }
+                if (!File.Exists(sourcePath) && !Directory.Exists(sourcePath))
+                {
+                    result = "Source not found: " + sourcePath;
+                    break;
+                }
+
+                string fullSourcePath = Path.GetFullPath(sourcePath);
+                bool samePath = string.Equals(
+                    Path.TrimEndingDirectorySeparator(fullSourcePath),
+                    Path.TrimEndingDirectorySeparator(fullOutputPath),
+                    this.GetPathComparison());
+
+                if (samePath)
+                {
+                    result = "Archive output cannot overwrite a selected source: " + sourcePath;
+                    break;
+                }
+                if (Directory.Exists(sourcePath) && this.IsPathInsideDirectory(fullOutputPath, fullSourcePath))
+                {
+                    result = "Archive output cannot be created inside a selected source directory: " + sourcePath;
+                    break;
+                }
+            }
+
+            return result;
+        }
 
         /// <summary>
         /// Counts total files in a path (file = 1, directory = recursive count)
@@ -626,6 +724,10 @@ namespace Bivium.Services
                     }
                 }
                 catch (UnauthorizedAccessException)
+                {
+                    // Skip inaccessible
+                }
+                catch (IOException)
                 {
                     // Skip inaccessible
                 }

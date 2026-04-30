@@ -69,6 +69,12 @@ namespace Bivium.Components.Shared
         [Parameter]
         public EventCallback OnTerminal { get; set; }
 
+        /// <summary>
+        /// Whether the active panel has multiple selected entries
+        /// </summary>
+        [Parameter]
+        public bool IsMultiSelection { get; set; } = false;
+
         #endregion
     }
 }

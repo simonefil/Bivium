@@ -92,19 +92,19 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Handles confirm
         /// </summary>
-        private void HandleConfirm()
+        private async System.Threading.Tasks.Task HandleConfirm()
         {
             this._isVisible = false;
-            this.OnClose.InvokeAsync(this._inputValue);
+            await this.OnClose.InvokeAsync(this._inputValue);
         }
 
         /// <summary>
         /// Handles cancel
         /// </summary>
-        private void HandleCancel()
+        private async System.Threading.Tasks.Task HandleCancel()
         {
             this._isVisible = false;
-            this.OnClose.InvokeAsync("");
+            await this.OnClose.InvokeAsync("");
         }
 
         /// <summary>
@@ -115,11 +115,11 @@ namespace Bivium.Components.Shared
         {
             if (args.Key == "Enter")
             {
-                this.HandleConfirm();
+                _ = this.HandleConfirm();
             }
             else if (args.Key == "Escape")
             {
-                this.HandleCancel();
+                _ = this.HandleCancel();
             }
         }
 

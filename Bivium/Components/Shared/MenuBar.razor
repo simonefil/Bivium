@@ -55,22 +55,31 @@
             </div>
             <hr />
             <div class="context-menu-item" @onclick="this.HandleDownload">
-                <span>Download</span>
+                <span>@(this.IsMultiSelection ? "Download as ZIP" : "Download")</span>
                 <span class="shortcut"></span>
             </div>
             <div class="context-menu-item" @onclick="this.HandleUpload">
                 <span>Upload</span>
                 <span class="shortcut"></span>
             </div>
-            <hr />
-            <div class="context-menu-item" @onclick="this.HandleExtract">
-                <span>Extract Here</span>
-                <span class="shortcut"></span>
-            </div>
-            <div class="context-menu-item" @onclick="this.HandleCompress">
-                <span>Compress to...</span>
-                <span class="shortcut"></span>
-            </div>
+            @if (this.CanExtract || this.CanCompress)
+            {
+                <hr />
+            }
+            @if (this.CanExtract)
+            {
+                <div class="context-menu-item" @onclick="this.HandleExtract">
+                    <span>Extract Here</span>
+                    <span class="shortcut"></span>
+                </div>
+            }
+            @if (this.CanCompress)
+            {
+                <div class="context-menu-item" @onclick="this.HandleCompress">
+                    <span>Compress to...</span>
+                    <span class="shortcut"></span>
+                </div>
+            }
             <hr />
             <div class="context-menu-item" @onclick="this.HandleExit">
                 <span>Exit</span>
@@ -100,10 +109,13 @@
                 <span>Delete</span>
                 <span class="shortcut">Del</span>
             </div>
-            <div class="context-menu-item" @onclick="this.HandleRename">
-                <span>Rename</span>
-                <span class="shortcut">F2</span>
-            </div>
+            @if (!this.IsMultiSelection)
+            {
+                <div class="context-menu-item" @onclick="this.HandleRename">
+                    <span>Rename</span>
+                    <span class="shortcut">F2</span>
+                </div>
+            }
             <div class="context-menu-item" @onclick="this.HandleAdvancedRename">
                 <span>Advanced Rename...</span>
                 <span class="shortcut">Ctrl+F2</span>

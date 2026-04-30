@@ -77,8 +77,8 @@ namespace Bivium.Services
         /// </summary>
         /// <param name="path">File path</param>
         /// <param name="maxSizeBytes">Maximum allowed file size in bytes</param>
-        /// <returns>File content, or empty string on failure</returns>
-        string ReadFileText(string path, long maxSizeBytes);
+        /// <returns>File text result</returns>
+        FileTextResult ReadFileText(string path, long maxSizeBytes);
 
         /// <summary>
         /// Writes text content to a file

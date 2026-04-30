@@ -77,6 +77,11 @@ namespace Bivium.Components.Shared
         private string _errorMessage = "";
 
         /// <summary>
+        /// Whether permissions were loaded successfully and can be saved
+        /// </summary>
+        private bool _canSave = false;
+
+        /// <summary>
         /// Reference to the dialog element for focus
         /// </summary>
         private ElementReference _dialogElement;
@@ -96,6 +101,7 @@ namespace Bivium.Components.Shared
             this._isDirectory = entry.IsDirectory;
             this._recursive = false;
             this._errorMessage = "";
+            this._canSave = false;
 
             // Load current permissions
             try
@@ -103,13 +109,14 @@ namespace Bivium.Components.Shared
                 this._model = this._permissionService.GetPermissions(entry.FullPath);
                 this._originalOwner = this._model.Owner;
                 this._originalGroup = this._model.Group;
+                this._canSave = true;
             }
-            catch
+            catch (Exception ex)
             {
                 this._model = new PermissionModel();
                 this._originalOwner = "";
                 this._originalGroup = "";
-                this._errorMessage = "Could not read permissions";
+                this._errorMessage = "Could not read permissions: " + ex.Message;
             }
 
             this._isVisible = true;
@@ -144,9 +151,15 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Handles save button click - applies permissions and ownership changes
         /// </summary>
-        private void HandleSave()
+        private async System.Threading.Tasks.Task HandleSave()
         {
             this._errorMessage = "";
+
+            if (!this._canSave)
+            {
+                this._errorMessage = "Cannot save permissions because current permissions were not loaded.";
+                return;
+            }
 
             // Apply permission changes
             FileOperationResult permResult = this._permissionService.SetPermissions(this._entryPath, this._model, this._recursive);
@@ -171,16 +184,16 @@ namespace Bivium.Components.Shared
             }
 
             this._isVisible = false;
-            this.OnClose.InvokeAsync(true);
+            await this.OnClose.InvokeAsync(true);
         }
 
         /// <summary>
         /// Handles cancel button click
         /// </summary>
-        private void HandleCancel()
+        private async System.Threading.Tasks.Task HandleCancel()
         {
             this._isVisible = false;
-            this.OnClose.InvokeAsync(false);
+            await this.OnClose.InvokeAsync(false);
         }
 
         /// <summary>

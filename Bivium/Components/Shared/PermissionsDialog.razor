@@ -88,7 +88,7 @@
             </div>
             <div style="display: flex; justify-content: flex-end; gap: 2ch; padding: 0 1ch 1lh 1ch;">
                 <button @onclick="this.HandleCancel">Cancel</button>
-                <button @onclick="this.HandleSave">Save</button>
+                <button @onclick="this.HandleSave" disabled="@(!this._canSave)">Save</button>
             </div>
         </div>
     </div>

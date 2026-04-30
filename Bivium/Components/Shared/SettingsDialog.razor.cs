@@ -136,10 +136,10 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Handles the Cancel button click
         /// </summary>
-        private void HandleCancel()
+        private async System.Threading.Tasks.Task HandleCancel()
         {
             this._isVisible = false;
-            this.OnClose.InvokeAsync();
+            await this.OnClose.InvokeAsync();
         }
 
         #endregion
