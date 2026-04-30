@@ -32,13 +32,18 @@
             </tr>
         }
 
-        @* File/directory rows *@
-        @for (int idx = 0; idx < this.Entries.Count; idx++)
-        {
-            int localIdx = idx;
-            FileSystemEntry entry = this.Entries[localIdx];
-            bool isSelected = this.SelectedPaths.Contains(entry.FullPath);
-            bool isCursor = localIdx == this.CursorIndex;
+        <Virtualize @key="this.Entries"
+                    ItemsProvider="this.GetRows"
+                    Context="row"
+                    ItemSize="20"
+                    OverscanCount="30"
+                    SpacerElement="tr">
+            @{
+                int localIdx = row.Index;
+                FileSystemEntry entry = row.Entry;
+                bool isSelected = this._selectedPathSet.Contains(entry.FullPath);
+                bool isCursor = localIdx == this.CursorIndex;
+            }
 
             <tr class="@(isSelected ? "selected" : "") @(isCursor ? "cursor" : "") @(entry.IsDirectory ? "entry-dir" : "entry-file")"
                 @onclick="(e) => this.HandleRowClick(localIdx, e)"
@@ -52,7 +57,7 @@
                 <td>@entry.Attributes</td>
                 <td>@entry.Owner</td>
             </tr>
-        }
+        </Virtualize>
 
         @* Empty directory message *@
         @if (this.Entries.Count == 0)

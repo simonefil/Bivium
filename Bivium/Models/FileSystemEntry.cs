@@ -1,5 +1,4 @@
 using System.IO;
-using System.Diagnostics;
 
 namespace Bivium.Models
 {
@@ -87,7 +86,6 @@ namespace Bivium.Models
             this.IsReadOnly = fileInfo.IsReadOnly;
             this.IsSymLink = fileInfo.LinkTarget != null;
             this.Attributes = FormatAttributes(fileInfo, false);
-            this.Owner = GetOwner(fileInfo.FullName);
         }
 
         /// <summary>
@@ -105,7 +103,6 @@ namespace Bivium.Models
             this.IsReadOnly = (dirInfo.Attributes & FileAttributes.ReadOnly) == FileAttributes.ReadOnly;
             this.IsSymLink = dirInfo.LinkTarget != null;
             this.Attributes = FormatAttributes(dirInfo, true);
-            this.Owner = GetOwner(dirInfo.FullName);
         }
 
         #endregion
@@ -166,55 +163,6 @@ namespace Bivium.Models
             result += (mode & UnixFileMode.OtherRead) != 0 ? "r" : "-";
             result += (mode & UnixFileMode.OtherWrite) != 0 ? "w" : "-";
             result += (mode & UnixFileMode.OtherExecute) != 0 ? "x" : "-";
-            return result;
-        }
-
-        /// <summary>
-        /// Gets the file owner name (Linux/macOS only)
-        /// </summary>
-        /// <param name="path">Full file path</param>
-        /// <returns>Owner name, or empty string on Windows</returns>
-        private static string GetOwner(string path)
-        {
-            string result = "";
-
-            if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
-            {
-                try
-                {
-                    ProcessStartInfo startInfo = new ProcessStartInfo();
-                    startInfo.FileName = "stat";
-                    startInfo.RedirectStandardOutput = true;
-                    startInfo.RedirectStandardError = true;
-                    startInfo.UseShellExecute = false;
-                    startInfo.CreateNoWindow = true;
-
-                    if (OperatingSystem.IsMacOS())
-                    {
-                        startInfo.ArgumentList.Add("-f");
-                        startInfo.ArgumentList.Add("%Su");
-                    }
-                    else
-                    {
-                        startInfo.ArgumentList.Add("-c");
-                        startInfo.ArgumentList.Add("%U");
-                    }
-                    startInfo.ArgumentList.Add(path);
-
-                    Process process = new Process();
-                    process.StartInfo = startInfo;
-                    process.Start();
-
-                    result = process.StandardOutput.ReadToEnd().Trim();
-                    process.WaitForExit();
-                    process.Dispose();
-                }
-                catch
-                {
-                    // Fallback: owner unknown
-                }
-            }
-
             return result;
         }
 

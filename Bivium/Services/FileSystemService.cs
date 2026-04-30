@@ -1,4 +1,5 @@
 using Bivium.Models;
+using System.Diagnostics;
 
 namespace Bivium.Services
 {
@@ -46,37 +47,46 @@ namespace Bivium.Services
 
                 if (dirInfo.Exists)
                 {
-                    // Get directories first
                     try
                     {
-                        DirectoryInfo[] directories = dirInfo.GetDirectories();
-                        Array.Sort(directories, (a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
-
-                        for (int i = 0; i < directories.Length; i++)
+                        foreach (FileSystemInfo fileSystemInfo in dirInfo.EnumerateFileSystemInfos())
                         {
-                            result.Add(new FileSystemEntry(directories[i]));
+                            try
+                            {
+                                DirectoryInfo directoryInfo = fileSystemInfo as DirectoryInfo;
+                                if (directoryInfo != null)
+                                {
+                                    result.Add(new FileSystemEntry(directoryInfo));
+                                }
+                                else
+                                {
+                                    FileInfo fileInfo = fileSystemInfo as FileInfo;
+                                    if (fileInfo != null)
+                                    {
+                                        result.Add(new FileSystemEntry(fileInfo));
+                                    }
+                                }
+                            }
+                            catch (UnauthorizedAccessException)
+                            {
+                                // Skip inaccessible entries
+                            }
+                            catch (IOException)
+                            {
+                                // Skip entries that disappear while listing
+                            }
                         }
                     }
                     catch (UnauthorizedAccessException)
                     {
-                        // Skip directories we cannot access
+                        // Skip directory contents we cannot access
+                    }
+                    catch (IOException)
+                    {
+                        // Skip directory contents if the directory disappears while listing
                     }
 
-                    // Then files
-                    try
-                    {
-                        FileInfo[] files = dirInfo.GetFiles();
-                        Array.Sort(files, (a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
-
-                        for (int i = 0; i < files.Length; i++)
-                        {
-                            result.Add(new FileSystemEntry(files[i]));
-                        }
-                    }
-                    catch (UnauthorizedAccessException)
-                    {
-                        // Skip files we cannot access
-                    }
+                    this.PopulateOwners(result);
                 }
             }
 
@@ -157,11 +167,13 @@ namespace Bivium.Services
                 {
                     DirectoryInfo dirInfo = new DirectoryInfo(path);
                     result = new FileSystemEntry(dirInfo);
+                    this.PopulateOwners(new List<FileSystemEntry> { result });
                 }
                 else if (File.Exists(path))
                 {
                     FileInfo fileInfo = new FileInfo(path);
                     result = new FileSystemEntry(fileInfo);
+                    this.PopulateOwners(new List<FileSystemEntry> { result });
                 }
             }
 
@@ -292,6 +304,97 @@ namespace Bivium.Services
                         // Skip inaccessible directories
                     }
                 }
+            }
+
+            return result;
+        }
+
+        #endregion
+
+        #region Private Methods - Owners
+
+        /// <summary>
+        /// Populates Unix owner names using batched stat calls
+        /// </summary>
+        /// <param name="entries">Entries to enrich</param>
+        private void PopulateOwners(List<FileSystemEntry> entries)
+        {
+            if ((!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) || entries.Count == 0)
+            {
+                return;
+            }
+
+            const int batchSize = 500;
+
+            for (int offset = 0; offset < entries.Count; offset += batchSize)
+            {
+                int count = Math.Min(batchSize, entries.Count - offset);
+                List<string> owners = this.GetOwnersBatch(entries, offset, count);
+
+                for (int i = 0; i < owners.Count && i < count; i++)
+                {
+                    entries[offset + i].Owner = owners[i];
+                }
+            }
+        }
+
+        /// <summary>
+        /// Gets owners for a contiguous entry batch
+        /// </summary>
+        /// <param name="entries">All entries</param>
+        /// <param name="offset">Batch start index</param>
+        /// <param name="count">Batch item count</param>
+        /// <returns>Owner names in the same order as the input batch</returns>
+        private List<string> GetOwnersBatch(List<FileSystemEntry> entries, int offset, int count)
+        {
+            List<string> result = new List<string>();
+
+            try
+            {
+                ProcessStartInfo startInfo = new ProcessStartInfo();
+                startInfo.FileName = "stat";
+                startInfo.RedirectStandardOutput = true;
+                startInfo.RedirectStandardError = true;
+                startInfo.UseShellExecute = false;
+                startInfo.CreateNoWindow = true;
+
+                if (OperatingSystem.IsMacOS())
+                {
+                    startInfo.ArgumentList.Add("-f");
+                    startInfo.ArgumentList.Add("%Su");
+                }
+                else
+                {
+                    startInfo.ArgumentList.Add("-c");
+                    startInfo.ArgumentList.Add("%U");
+                }
+
+                for (int i = 0; i < count; i++)
+                {
+                    startInfo.ArgumentList.Add(entries[offset + i].FullPath);
+                }
+
+                Process process = new Process();
+                process.StartInfo = startInfo;
+                process.Start();
+
+                string output = process.StandardOutput.ReadToEnd();
+                process.WaitForExit();
+
+                if (process.ExitCode == 0)
+                {
+                    string[] lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                    for (int i = 0; i < lines.Length; i++)
+                    {
+                        result.Add(lines[i]);
+                    }
+                }
+
+                process.Dispose();
+            }
+            catch
+            {
+                result.Clear();
             }
 
             return result;

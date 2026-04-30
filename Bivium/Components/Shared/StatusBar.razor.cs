@@ -54,6 +54,11 @@ namespace Bivium.Components.Shared
         /// </summary>
         private string _progressText = "";
 
+        /// <summary>
+        /// Last path used to calculate disk info
+        /// </summary>
+        private string _lastDiskInfoPath = "";
+
         #endregion
 
         #region Overrides
@@ -83,11 +88,13 @@ namespace Bivium.Components.Shared
             }
             else
             {
+                HashSet<string> selectedPathSet = new HashSet<string>(this.SelectedPaths);
+
                 // Calculate total size of selected files
                 long totalSize = 0;
                 for (int i = 0; i < this.Entries.Count; i++)
                 {
-                    if (this.SelectedPaths.Contains(this.Entries[i].FullPath))
+                    if (selectedPathSet.Contains(this.Entries[i].FullPath))
                     {
                         totalSize += this.Entries[i].SizeBytes;
                     }
@@ -102,11 +109,12 @@ namespace Bivium.Components.Shared
         /// </summary>
         private void UpdateDiskInfo()
         {
-            if (!string.IsNullOrEmpty(this.CurrentPath))
+            if (!string.IsNullOrEmpty(this.CurrentPath) && this.CurrentPath != this._lastDiskInfoPath)
             {
                 long free = this.FileSystemService.GetAvailableDiskSpace(this.CurrentPath);
                 long total = this.FileSystemService.GetTotalDiskSpace(this.CurrentPath);
                 this._diskInfo = "Free: " + this.FormatSize(free) + " / " + this.FormatSize(total);
+                this._lastDiskInfoPath = this.CurrentPath;
             }
         }
 

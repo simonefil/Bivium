@@ -48,6 +48,11 @@ namespace Bivium.Components.Pages
         /// </summary>
         private const long MAX_EDITOR_SIZE = 5L * 1024 * 1024;
 
+        /// <summary>
+        /// Minimum interval between progress UI updates
+        /// </summary>
+        private const int PROGRESS_UPDATE_INTERVAL_MS = 100;
+
         #endregion
 
         #region Class Variables
@@ -217,8 +222,7 @@ namespace Bivium.Components.Pages
             this._leftPanel = new PanelState(homePath);
             this._rightPanel = new PanelState(homePath);
 
-            this.LoadPanelContents(this._leftPanel);
-            this.LoadPanelContents(this._rightPanel);
+            this.RefreshVisiblePanels();
         }
 
         /// <summary>
@@ -237,7 +241,7 @@ namespace Bivium.Components.Pages
                 this._scrollAfterRender = false;
                 if (this._jsModule != null)
                 {
-                    _ = this._jsModule.InvokeVoidAsync("scrollCursorIntoView");
+                    _ = this._jsModule.InvokeVoidAsync("scrollCursorIntoView", this.GetActivePanel().CursorIndex);
                 }
             }
         }
@@ -380,6 +384,68 @@ namespace Bivium.Components.Pages
         {
             panel.Entries = this._fileSystemService.GetDirectoryContents(panel.CurrentPath);
             this.SortEntries(panel);
+        }
+
+        /// <summary>
+        /// Refreshes visible panels while avoiding duplicate directory reads
+        /// </summary>
+        private void RefreshVisiblePanels()
+        {
+            if (this._singlePanelMode)
+            {
+                this.LoadPanelContents(this._leftPanel);
+                return;
+            }
+
+            if (this._leftPanel.CurrentPath == this._rightPanel.CurrentPath)
+            {
+                List<FileSystemEntry> entries = this._fileSystemService.GetDirectoryContents(this._leftPanel.CurrentPath);
+
+                this._leftPanel.Entries = new List<FileSystemEntry>(entries);
+                this.SortEntries(this._leftPanel);
+
+                this._rightPanel.Entries = new List<FileSystemEntry>(entries);
+                this.SortEntries(this._rightPanel);
+            }
+            else
+            {
+                this.LoadPanelContents(this._leftPanel);
+                this.LoadPanelContents(this._rightPanel);
+            }
+        }
+
+        /// <summary>
+        /// Creates a progress callback that throttles UI renders during high-volume file operations
+        /// </summary>
+        /// <param name="operationName">Operation label</param>
+        /// <returns>Progress callback</returns>
+        private Action<int, int, string> CreateThrottledProgressCallback(string operationName)
+        {
+            DateTime lastUpdate = DateTime.MinValue;
+            object updateLock = new object();
+
+            Action<int, int, string> result = (current, total, fileName) =>
+            {
+                DateTime now = DateTime.UtcNow;
+                bool shouldUpdate = false;
+
+                lock (updateLock)
+                {
+                    if ((now - lastUpdate).TotalMilliseconds >= PROGRESS_UPDATE_INTERVAL_MS || current >= total)
+                    {
+                        lastUpdate = now;
+                        shouldUpdate = true;
+                    }
+                }
+
+                if (shouldUpdate)
+                {
+                    this._progressText = operationName + " " + current + "/" + total + ": " + fileName;
+                    _ = this.InvokeAsync(() => this.StateHasChanged());
+                }
+            };
+
+            return result;
         }
 
         /// <summary>
@@ -646,12 +712,7 @@ namespace Bivium.Components.Pages
                 // Show initial progress
                 this._progressText = isCut ? "Moving..." : "Copying...";
 
-                // Progress callback updates status bar
-                Action<int, int, string> onProgress = (current, total, fileName) =>
-                {
-                    this._progressText = (isCut ? "Moving" : "Copying") + " " + current + "/" + total + ": " + fileName;
-                    _ = this.InvokeAsync(() => this.StateHasChanged());
-                };
+                Action<int, int, string> onProgress = this.CreateThrottledProgressCallback(isCut ? "Moving" : "Copying");
 
                 // Run file operation on background thread
                 Thread worker = new Thread(() =>
@@ -679,9 +740,7 @@ namespace Bivium.Components.Pages
                         // Clear progress text
                         this._progressText = "";
 
-                        // Refresh both panels after paste
-                        this.LoadPanelContents(this._leftPanel);
-                        this.LoadPanelContents(this._rightPanel);
+                        this.RefreshVisiblePanels();
 
                         if (!result.Success)
                         {
@@ -912,12 +971,7 @@ namespace Bivium.Components.Pages
             // Show initial progress
             this._progressText = "Extracting...";
 
-            // Progress callback
-            Action<int, int, string> onProgress = (current, total, fileName) =>
-            {
-                this._progressText = "Extracting " + current + "/" + total + ": " + fileName;
-                _ = this.InvokeAsync(() => this.StateHasChanged());
-            };
+            Action<int, int, string> onProgress = this.CreateThrottledProgressCallback("Extracting");
 
             // Run on background thread
             Thread worker = new Thread(() =>
@@ -927,8 +981,7 @@ namespace Bivium.Components.Pages
                 _ = this.InvokeAsync(() =>
                 {
                     this._progressText = "";
-                    this.LoadPanelContents(this._leftPanel);
-                    this.LoadPanelContents(this._rightPanel);
+                    this.RefreshVisiblePanels();
 
                     if (!result.Success)
                     {
@@ -963,12 +1016,7 @@ namespace Bivium.Components.Pages
                 ? "Extracting to " + this.GetArchiveBaseName(Path.GetFileName(archivePaths[0])) + "/..."
                 : "Extracting to */...";
 
-            // Progress callback
-            Action<int, int, string> onProgress = (current, total, fileName) =>
-            {
-                this._progressText = "Extracting " + current + "/" + total + ": " + fileName;
-                _ = this.InvokeAsync(() => this.StateHasChanged());
-            };
+            Action<int, int, string> onProgress = this.CreateThrottledProgressCallback("Extracting");
 
             // Run on background thread
             Thread worker = new Thread(() =>
@@ -978,8 +1026,7 @@ namespace Bivium.Components.Pages
                 _ = this.InvokeAsync(() =>
                 {
                     this._progressText = "";
-                    this.LoadPanelContents(this._leftPanel);
-                    this.LoadPanelContents(this._rightPanel);
+                    this.RefreshVisiblePanels();
 
                     if (!result.Success)
                     {
@@ -1007,6 +1054,49 @@ namespace Bivium.Components.Pages
             if (result.Count == 0 && active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count)
             {
                 result.Add(active.Entries[active.CursorIndex].FullPath);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Checks if the active target can be compressed using in-memory panel state
+        /// </summary>
+        /// <returns>True if a selected or cursor target exists</returns>
+        private bool CanCompressActiveTarget()
+        {
+            PanelState active = this.GetActivePanel();
+            bool result = active.SelectedPaths.Count > 0 || (active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count);
+            return result;
+        }
+
+        /// <summary>
+        /// Checks if the active target can be extracted using in-memory panel state
+        /// </summary>
+        /// <returns>True if selection or cursor contains extractable archives</returns>
+        private bool CanExtractActiveTarget()
+        {
+            PanelState active = this.GetActivePanel();
+            bool result = false;
+
+            if (active.SelectedPaths.Count > 0)
+            {
+                int archiveCount = 0;
+                for (int i = 0; i < active.SelectedPaths.Count; i++)
+                {
+                    FileSystemEntry entry = this.FindEntryByPath(active, active.SelectedPaths[i]);
+                    if (entry != null && !entry.IsDirectory && this._archiveService.IsArchive(entry.FullPath))
+                    {
+                        archiveCount++;
+                    }
+                }
+
+                result = archiveCount == active.SelectedPaths.Count;
+            }
+            else if (active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count)
+            {
+                FileSystemEntry entry = active.Entries[active.CursorIndex];
+                result = !entry.IsDirectory && this._archiveService.IsArchive(entry.FullPath);
             }
 
             return result;
@@ -1054,6 +1144,28 @@ namespace Bivium.Components.Pages
                 {
                     result = active.Entries[i];
                     active.CursorIndex = i;
+                    break;
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Finds a visible entry by full path without changing cursor state
+        /// </summary>
+        /// <param name="active">Active panel state</param>
+        /// <param name="path">Entry path</param>
+        /// <returns>File system entry, or null if not found</returns>
+        private FileSystemEntry FindEntryByPath(PanelState active, string path)
+        {
+            FileSystemEntry result = null;
+
+            for (int i = 0; i < active.Entries.Count; i++)
+            {
+                if (active.Entries[i].FullPath == path)
+                {
+                    result = active.Entries[i];
                     break;
                 }
             }
@@ -1271,9 +1383,10 @@ namespace Bivium.Components.Pages
             else
             {
                 // Multiple selection: collect only files (skip directories)
+                HashSet<string> selectedPathSet = new HashSet<string>(active.SelectedPaths);
                 for (int i = 0; i < active.Entries.Count; i++)
                 {
-                    if (!active.Entries[i].IsDirectory && active.SelectedPaths.Contains(active.Entries[i].FullPath))
+                    if (!active.Entries[i].IsDirectory && selectedPathSet.Contains(active.Entries[i].FullPath))
                     {
                         renameEntries.Add(active.Entries[i]);
                     }
@@ -1458,8 +1571,7 @@ namespace Bivium.Components.Pages
             // Refresh both panels after upload
             if (uploaded)
             {
-                this.LoadPanelContents(this._leftPanel);
-                this.LoadPanelContents(this._rightPanel);
+                this.RefreshVisiblePanels();
                 this.StateHasChanged();
             }
         }
@@ -1492,12 +1604,7 @@ namespace Bivium.Components.Pages
             // Show initial progress
             this._progressText = "Compressing...";
 
-            // Progress callback
-            Action<int, int, string> onProgress = (current, total, fileName) =>
-            {
-                this._progressText = "Compressing " + current + "/" + total + ": " + fileName;
-                _ = this.InvokeAsync(() => this.StateHasChanged());
-            };
+            Action<int, int, string> onProgress = this.CreateThrottledProgressCallback("Compressing");
 
             // Run on background thread
             Thread worker = new Thread(() =>
@@ -1507,8 +1614,7 @@ namespace Bivium.Components.Pages
                 _ = this.InvokeAsync(() =>
                 {
                     this._progressText = "";
-                    this.LoadPanelContents(this._leftPanel);
-                    this.LoadPanelContents(this._rightPanel);
+                    this.RefreshVisiblePanels();
 
                     if (!opResult.Success)
                     {
@@ -1552,9 +1658,7 @@ namespace Bivium.Components.Pages
         {
             if (renamed)
             {
-                // Refresh both panels to reflect renames
-                this.LoadPanelContents(this._leftPanel);
-                this.LoadPanelContents(this._rightPanel);
+                this.RefreshVisiblePanels();
                 this.StateHasChanged();
             }
         }
@@ -1938,7 +2042,7 @@ namespace Bivium.Components.Pages
             // Scroll cursor into view after render
             if (this._jsModule != null)
             {
-                _ = this._jsModule.InvokeVoidAsync("scrollCursorIntoView");
+                _ = this._jsModule.InvokeVoidAsync("scrollCursorIntoView", this.GetActivePanel().CursorIndex);
             }
         }
 

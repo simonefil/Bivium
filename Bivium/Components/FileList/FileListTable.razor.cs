@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
+using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Bivium.Models;
 using Bivium.Components.Panel;
 using Bivium.Services;
@@ -97,6 +98,11 @@ namespace Bivium.Components.FileList
         /// </summary>
         private int _lastClickedIndex = 0;
 
+        /// <summary>
+        /// Fast lookup for selected paths during row rendering
+        /// </summary>
+        private HashSet<string> _selectedPathSet = new HashSet<string>();
+
         #endregion
 
         #region Overrides
@@ -108,6 +114,32 @@ namespace Bivium.Components.FileList
         {
             string parentPath = this._fileSystemService.GetParentPath(this.CurrentPath);
             this._hasParent = !string.IsNullOrEmpty(parentPath);
+            this._selectedPathSet = new HashSet<string>(this.SelectedPaths);
+        }
+
+        #endregion
+
+        #region Private Methods - Virtualization
+
+        /// <summary>
+        /// Provides visible file rows to the virtualized table body
+        /// </summary>
+        /// <param name="request">Virtualization request</param>
+        /// <returns>Requested rows and total row count</returns>
+        private System.Threading.Tasks.ValueTask<ItemsProviderResult<FileListRowItem>> GetRows(ItemsProviderRequest request)
+        {
+            int startIndex = Math.Min(request.StartIndex, this.Entries.Count);
+            int count = Math.Min(request.Count, this.Entries.Count - startIndex);
+            List<FileListRowItem> rows = new List<FileListRowItem>();
+
+            for (int i = 0; i < count; i++)
+            {
+                int entryIndex = startIndex + i;
+                rows.Add(new FileListRowItem(entryIndex, this.Entries[entryIndex]));
+            }
+
+            ItemsProviderResult<FileListRowItem> result = new ItemsProviderResult<FileListRowItem>(rows, this.Entries.Count);
+            return new System.Threading.Tasks.ValueTask<ItemsProviderResult<FileListRowItem>>(result);
         }
 
         #endregion
@@ -184,7 +216,7 @@ namespace Bivium.Components.FileList
             {
                 // Ctrl+click: toggle individual item
                 newSelection.AddRange(this.SelectedPaths);
-                if (newSelection.Contains(clickedPath))
+                if (this._selectedPathSet.Contains(clickedPath))
                 {
                     newSelection.Remove(clickedPath);
                 }
@@ -196,6 +228,7 @@ namespace Bivium.Components.FileList
             else if (args.ShiftKey)
             {
                 // Shift+click: range selection from last clicked to current
+                HashSet<string> newSelectionSet = new HashSet<string>();
                 int start = Math.Min(this._lastClickedIndex, index);
                 int end = Math.Max(this._lastClickedIndex, index);
 
@@ -204,9 +237,10 @@ namespace Bivium.Components.FileList
                     if (i >= 0 && i < this.Entries.Count)
                     {
                         string path = this.Entries[i].FullPath;
-                        if (!newSelection.Contains(path))
+                        if (!newSelectionSet.Contains(path))
                         {
                             newSelection.Add(path);
+                            newSelectionSet.Add(path);
                         }
                     }
                 }
@@ -262,7 +296,7 @@ namespace Bivium.Components.FileList
             {
                 string clickedPath = this.Entries[index].FullPath;
 
-                if (!this.SelectedPaths.Contains(clickedPath))
+                if (!this._selectedPathSet.Contains(clickedPath))
                 {
                     List<string> newSelection = new List<string>();
                     newSelection.Add(clickedPath);
@@ -278,6 +312,45 @@ namespace Bivium.Components.FileList
                 contextArgs.Entry = this.Entries[index];
                 await this.OnContextMenu.InvokeAsync(contextArgs);
             }
+        }
+
+        #endregion
+
+        #region Classes
+
+        /// <summary>
+        /// Row item carrying the original entry index
+        /// </summary>
+        private class FileListRowItem
+        {
+            #region Properties
+
+            /// <summary>
+            /// Entry index in the full list
+            /// </summary>
+            public int Index { get; set; } = 0;
+
+            /// <summary>
+            /// File system entry
+            /// </summary>
+            public FileSystemEntry Entry { get; set; } = new FileSystemEntry();
+
+            #endregion
+
+            #region Constructor
+
+            /// <summary>
+            /// Creates a virtualized row item
+            /// </summary>
+            /// <param name="index">Entry index</param>
+            /// <param name="entry">File system entry</param>
+            public FileListRowItem(int index, FileSystemEntry entry)
+            {
+                this.Index = index;
+                this.Entry = entry;
+            }
+
+            #endregion
         }
 
         #endregion

@@ -27,8 +27,8 @@
         OnToggleSinglePanel="this.DoToggleSinglePanel"
         SinglePanelMode="@this._singlePanelMode"
         IsMultiSelection="@(this.GetActivePanel().SelectedPaths.Count > 1)"
-        CanExtract="@(this.GetArchivePathsForOperation(this.GetActivePanel()).Count > 0)"
-        CanCompress="@(this.GetSelectedOrCursorPaths(this.GetActivePanel()).Count > 0)"
+        CanExtract="@this.CanExtractActiveTarget()"
+        CanCompress="@this.CanCompressActiveTarget()"
         OnAbout="() => this._aboutDialog.Show()" />
 
     <!-- Panels area -->

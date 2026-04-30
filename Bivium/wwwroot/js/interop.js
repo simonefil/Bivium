@@ -288,10 +288,17 @@ export function adjustContextMenuPosition() {
 /**
  * Scrolls the active panel's cursor row into view
  */
-export function scrollCursorIntoView() {
-    const row = document.querySelector('.file-panel.active .file-list-table tbody tr.cursor');
+export function scrollCursorIntoView(cursorIndex = -1) {
+    const activePanel = document.querySelector('.file-panel.active');
+    const row = activePanel?.querySelector('.file-list-table tbody tr.cursor');
     if (row) {
         row.scrollIntoView({ block: 'nearest' });
+        return;
+    }
+
+    const scroller = activePanel?.querySelector('.panel-filelist');
+    if (scroller && cursorIndex >= 0) {
+        scroller.scrollTop = Math.max(0, cursorIndex * 20);
     }
 }
 
