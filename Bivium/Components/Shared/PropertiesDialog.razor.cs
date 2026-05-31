@@ -73,6 +73,11 @@ namespace Bivium.Components.Shared
         private bool _isCalculating = false;
 
         /// <summary>
+        /// Version token used to ignore stale background calculations
+        /// </summary>
+        private int _calculationVersion = 0;
+
+        /// <summary>
         /// Reference to the OK button for focus
         /// </summary>
         private ElementReference _okButton;
@@ -88,6 +93,7 @@ namespace Bivium.Components.Shared
         public void Show(FileSystemEntry entry)
         {
             this._entry = entry;
+            this._calculationVersion++;
 
             // Reset calculated size
             this._calculatedSize = -1;
@@ -126,7 +132,9 @@ namespace Bivium.Components.Shared
         /// </summary>
         public void Hide()
         {
+            this._calculationVersion++;
             this._isVisible = false;
+            this._isCalculating = false;
             this.StateHasChanged();
         }
 
@@ -139,7 +147,9 @@ namespace Bivium.Components.Shared
         /// </summary>
         private async System.Threading.Tasks.Task HandleClose()
         {
+            this._calculationVersion++;
             this._isVisible = false;
+            this._isCalculating = false;
             await this.OnClose.InvokeAsync();
         }
 
@@ -148,6 +158,9 @@ namespace Bivium.Components.Shared
         /// </summary>
         private void HandleCalculateSize()
         {
+            string entryPath = this._entry.FullPath;
+            int calculationVersion = ++this._calculationVersion;
+
             this._isCalculating = true;
             this.StateHasChanged();
 
@@ -156,15 +169,20 @@ namespace Bivium.Components.Shared
             {
                 int fileCount = 0;
                 int dirCount = 0;
-                long size = this._fileSystemService.CalculateDirectorySize(this._entry.FullPath, out fileCount, out dirCount);
+                long size = this._fileSystemService.CalculateDirectorySize(entryPath, out fileCount, out dirCount);
 
-                this._calculatedSize = size;
-                this._calculatedFileCount = fileCount;
-                this._calculatedDirCount = dirCount;
-                this._isCalculating = false;
+                _ = this.InvokeAsync(() =>
+                {
+                    if (calculationVersion == this._calculationVersion && string.Equals(this._entry.FullPath, entryPath, StringComparison.Ordinal))
+                    {
+                        this._calculatedSize = size;
+                        this._calculatedFileCount = fileCount;
+                        this._calculatedDirCount = dirCount;
+                        this._isCalculating = false;
+                        this.StateHasChanged();
+                    }
+                });
 
-                // Marshal back to Blazor render thread
-                this.InvokeAsync(() => this.StateHasChanged());
             });
             calcThread.IsBackground = true;
             calcThread.Start();

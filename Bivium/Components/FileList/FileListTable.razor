@@ -33,6 +33,7 @@
         }
 
         <Virtualize @key="this.Entries"
+                    @ref="this._virtualizeComponent"
                     ItemsProvider="this.GetRows"
                     Context="row"
                     ItemSize="20"

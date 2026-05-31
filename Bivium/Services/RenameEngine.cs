@@ -636,9 +636,9 @@ namespace Bivium.Services
                 items[i].HasConflict = false;
             }
 
-            // Use case-insensitive comparison on Windows, case-sensitive on Linux
+            // Use case-insensitive comparison on Windows/macOS, case-sensitive on Linux
             StringComparison comparison = StringComparison.Ordinal;
-            if (OperatingSystem.IsWindows())
+            if (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())
             {
                 comparison = StringComparison.OrdinalIgnoreCase;
             }

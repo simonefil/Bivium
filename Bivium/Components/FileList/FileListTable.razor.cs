@@ -103,6 +103,11 @@ namespace Bivium.Components.FileList
         /// </summary>
         private HashSet<string> _selectedPathSet = new HashSet<string>();
 
+        /// <summary>
+        /// Virtualized rows component used to refresh the provider after in-place entry changes
+        /// </summary>
+        private Virtualize<FileListRowItem> _virtualizeComponent;
+
         #endregion
 
         #region Overrides
@@ -142,6 +147,17 @@ namespace Bivium.Components.FileList
             return new System.Threading.Tasks.ValueTask<ItemsProviderResult<FileListRowItem>>(result);
         }
 
+        /// <summary>
+        /// Refreshes virtualized rows after the entry list changes without replacing the list instance
+        /// </summary>
+        private async System.Threading.Tasks.Task RefreshRowsAsync()
+        {
+            if (this._virtualizeComponent != null)
+            {
+                await this._virtualizeComponent.RefreshDataAsync();
+            }
+        }
+
         #endregion
 
         #region Private Methods - Sort
@@ -171,6 +187,7 @@ namespace Bivium.Components.FileList
             }
 
             await this.OnSortChanged.InvokeAsync(newSort);
+            await this.RefreshRowsAsync();
         }
 
         /// <summary>

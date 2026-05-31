@@ -103,6 +103,11 @@ namespace Bivium.Components.Pages
         private ConfirmDialog _confirmDialog;
 
         /// <summary>
+        /// Reference to overwrite dialog component
+        /// </summary>
+        private OverwriteDialog _overwriteDialog;
+
+        /// <summary>
         /// Reference to input dialog component
         /// </summary>
         private InputDialog _inputDialog;
@@ -206,6 +211,41 @@ namespace Bivium.Components.Pages
         /// Flag to scroll cursor into view after next render
         /// </summary>
         private bool _scrollAfterRender = false;
+
+        /// <summary>
+        /// Source paths waiting for overwrite decisions before paste
+        /// </summary>
+        private List<string> _pendingPastePaths = new List<string>();
+
+        /// <summary>
+        /// Source file paths that have an overwrite conflict
+        /// </summary>
+        private List<string> _pendingPasteConflictPaths = new List<string>();
+
+        /// <summary>
+        /// Source file paths approved for overwrite
+        /// </summary>
+        private List<string> _pendingPasteOverwritePaths = new List<string>();
+
+        /// <summary>
+        /// Source paths skipped during overwrite prompts
+        /// </summary>
+        private List<string> _pendingPasteSkippedPaths = new List<string>();
+
+        /// <summary>
+        /// Destination directory for the pending paste operation
+        /// </summary>
+        private string _pendingPasteDestinationDir = "";
+
+        /// <summary>
+        /// Whether the pending paste operation is a cut/move
+        /// </summary>
+        private bool _pendingPasteIsCut = false;
+
+        /// <summary>
+        /// Current conflict index for the pending overwrite prompt sequence
+        /// </summary>
+        private int _pendingPasteConflictIndex = 0;
 
         #endregion
 
@@ -709,52 +749,236 @@ namespace Bivium.Components.Pages
                 List<string> paths = new List<string>(this._clipboard.Paths);
                 bool isCut = this._clipboard.IsCut;
 
-                // Show initial progress
-                this._progressText = isCut ? "Moving..." : "Copying...";
-
-                Action<int, int, string> onProgress = this.CreateThrottledProgressCallback(isCut ? "Moving" : "Copying");
-
-                // Run file operation on background thread
-                Thread worker = new Thread(() =>
+                List<string> conflictPaths = this.GetPasteFileConflicts(paths, destinationDir);
+                if (conflictPaths.Count > 0)
                 {
-                    FileOperationResult result;
+                    this.PreparePendingPaste(paths, conflictPaths, destinationDir, isCut);
+                    this.ShowNextPasteOverwritePrompt();
+                    return;
+                }
 
-                    if (isCut)
-                    {
-                        result = this._fileOperationService.MoveEntriesWithProgress(paths, destinationDir, onProgress);
-                    }
-                    else
-                    {
-                        result = this._fileOperationService.CopyEntriesWithProgress(paths, destinationDir, onProgress);
-                    }
-
-                    // Update UI on the render thread
-                    _ = this.InvokeAsync(() =>
-                    {
-                        // Clear clipboard on successful cut
-                        if (isCut && result.Success)
-                        {
-                            this._clipboard.Clear();
-                        }
-
-                        // Clear progress text
-                        this._progressText = "";
-
-                        this.RefreshVisiblePanels();
-
-                        if (!result.Success)
-                        {
-                            this._pendingOperation = "";
-                            this._confirmDialog.Show("Error", result.ErrorMessage, "OK", "");
-                        }
-
-                        this.StateHasChanged();
-                    });
-                });
-
-                worker.IsBackground = true;
-                worker.Start();
+                this.StartPasteOperation(paths, destinationDir, isCut, new List<string>());
             }
+        }
+
+        /// <summary>
+        /// Starts a paste operation after overwrite decisions have been resolved
+        /// </summary>
+        /// <param name="paths">Source paths to process</param>
+        /// <param name="destinationDir">Destination directory</param>
+        /// <param name="isCut">True when moving, false when copying</param>
+        /// <param name="overwritePaths">Source paths approved for overwrite</param>
+        private void StartPasteOperation(List<string> paths, string destinationDir, bool isCut, List<string> overwritePaths)
+        {
+            if (paths.Count == 0)
+            {
+                return;
+            }
+
+            List<string> operationPaths = new List<string>(paths);
+            List<string> operationOverwritePaths = new List<string>(overwritePaths);
+
+            // Show initial progress
+            this._progressText = isCut ? "Moving..." : "Copying...";
+
+            Action<int, int, string> onProgress = this.CreateThrottledProgressCallback(isCut ? "Moving" : "Copying");
+
+            // Run file operation on background thread
+            Thread worker = new Thread(() =>
+            {
+                FileOperationResult result;
+
+                if (isCut)
+                {
+                    result = this._fileOperationService.MoveEntriesWithProgress(operationPaths, destinationDir, onProgress, operationOverwritePaths);
+                }
+                else
+                {
+                    result = this._fileOperationService.CopyEntriesWithProgress(operationPaths, destinationDir, onProgress, operationOverwritePaths);
+                }
+
+                // Update UI on the render thread
+                _ = this.InvokeAsync(() =>
+                {
+                    // Clear clipboard on successful cut
+                    if (isCut && result.Success)
+                    {
+                        this._clipboard.Clear();
+                    }
+
+                    // Clear progress text
+                    this._progressText = "";
+
+                    this.RefreshVisiblePanels();
+
+                    if (!result.Success)
+                    {
+                        this._pendingOperation = "";
+                        this._confirmDialog.Show("Error", result.ErrorMessage, "OK", "");
+                    }
+
+                    this.StateHasChanged();
+                });
+            });
+
+            worker.IsBackground = true;
+            worker.Start();
+        }
+
+        /// <summary>
+        /// Finds paste file conflicts that need an overwrite decision
+        /// </summary>
+        /// <param name="paths">Source paths from clipboard</param>
+        /// <param name="destinationDir">Destination directory</param>
+        /// <returns>Source file paths with destination conflicts</returns>
+        private List<string> GetPasteFileConflicts(List<string> paths, string destinationDir)
+        {
+            List<string> result = new List<string>();
+
+            for (int i = 0; i < paths.Count; i++)
+            {
+                string source = paths[i];
+                if (!File.Exists(source))
+                {
+                    continue;
+                }
+
+                string destPath = Path.Combine(destinationDir, Path.GetFileName(source));
+                if (!this.AreSamePath(source, destPath) && File.Exists(destPath))
+                {
+                    result.Add(source);
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Stores paste state while overwrite prompts are shown
+        /// </summary>
+        /// <param name="paths">Source paths to paste</param>
+        /// <param name="conflictPaths">Source file paths with conflicts</param>
+        /// <param name="destinationDir">Destination directory</param>
+        /// <param name="isCut">True when moving, false when copying</param>
+        private void PreparePendingPaste(List<string> paths, List<string> conflictPaths, string destinationDir, bool isCut)
+        {
+            this._pendingPastePaths = new List<string>(paths);
+            this._pendingPasteConflictPaths = new List<string>(conflictPaths);
+            this._pendingPasteOverwritePaths = new List<string>();
+            this._pendingPasteSkippedPaths = new List<string>();
+            this._pendingPasteDestinationDir = destinationDir;
+            this._pendingPasteIsCut = isCut;
+            this._pendingPasteConflictIndex = 0;
+        }
+
+        /// <summary>
+        /// Shows the next overwrite prompt, or starts paste when all decisions are available
+        /// </summary>
+        private void ShowNextPasteOverwritePrompt()
+        {
+            if (this._pendingPasteConflictIndex >= this._pendingPasteConflictPaths.Count)
+            {
+                this.CompletePendingPaste();
+                return;
+            }
+
+            string sourcePath = this._pendingPasteConflictPaths[this._pendingPasteConflictIndex];
+            string destinationPath = Path.Combine(this._pendingPasteDestinationDir, Path.GetFileName(sourcePath));
+            string message = "A file named '" + Path.GetFileName(sourcePath) + "' already exists in the destination.\n\n"
+                + "Source: " + sourcePath + "\n"
+                + "Destination: " + destinationPath + "\n\n"
+                + "Overwrite it?";
+
+            this._overwriteDialog.Show("Overwrite file", message);
+        }
+
+        /// <summary>
+        /// Completes the pending paste after overwrite prompts
+        /// </summary>
+        private void CompletePendingPaste()
+        {
+            List<string> paths = new List<string>();
+            for (int i = 0; i < this._pendingPastePaths.Count; i++)
+            {
+                if (!this.ContainsPath(this._pendingPasteSkippedPaths, this._pendingPastePaths[i]))
+                {
+                    paths.Add(this._pendingPastePaths[i]);
+                }
+            }
+
+            List<string> overwritePaths = new List<string>(this._pendingPasteOverwritePaths);
+            string destinationDir = this._pendingPasteDestinationDir;
+            bool isCut = this._pendingPasteIsCut;
+
+            this.ClearPendingPaste();
+
+            if (paths.Count > 0)
+            {
+                this.StartPasteOperation(paths, destinationDir, isCut, overwritePaths);
+            }
+        }
+
+        /// <summary>
+        /// Clears pending paste state
+        /// </summary>
+        private void ClearPendingPaste()
+        {
+            this._pendingPastePaths = new List<string>();
+            this._pendingPasteConflictPaths = new List<string>();
+            this._pendingPasteOverwritePaths = new List<string>();
+            this._pendingPasteSkippedPaths = new List<string>();
+            this._pendingPasteDestinationDir = "";
+            this._pendingPasteIsCut = false;
+            this._pendingPasteConflictIndex = 0;
+        }
+
+        /// <summary>
+        /// Checks whether a path list contains a path using filesystem comparison rules
+        /// </summary>
+        /// <param name="paths">Path list</param>
+        /// <param name="path">Path to find</param>
+        /// <returns>True if the path is present</returns>
+        private bool ContainsPath(List<string> paths, string path)
+        {
+            bool result = false;
+
+            for (int i = 0; i < paths.Count; i++)
+            {
+                if (this.AreSamePath(paths[i], path))
+                {
+                    result = true;
+                    break;
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Checks if two paths resolve to the same path
+        /// </summary>
+        /// <param name="left">First path</param>
+        /// <param name="right">Second path</param>
+        /// <returns>True if paths are equal</returns>
+        private bool AreSamePath(string left, string right)
+        {
+            bool result = string.Equals(
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)),
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)),
+                this.GetPathComparison());
+            return result;
+        }
+
+        /// <summary>
+        /// Gets the appropriate path comparison for the current platform
+        /// </summary>
+        /// <returns>String comparison for filesystem paths</returns>
+        private StringComparison GetPathComparison()
+        {
+            StringComparison result = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+            return result;
         }
 
         /// <summary>
@@ -1011,6 +1235,8 @@ namespace Bivium.Components.Pages
                 return;
             }
 
+            string destinationDir = active.CurrentPath;
+
             // Show initial progress
             this._progressText = archivePaths.Count == 1
                 ? "Extracting to " + this.GetArchiveBaseName(Path.GetFileName(archivePaths[0])) + "/..."
@@ -1021,7 +1247,7 @@ namespace Bivium.Components.Pages
             // Run on background thread
             Thread worker = new Thread(() =>
             {
-                FileOperationResult result = this.ExtractArchives(archivePaths, active.CurrentPath, true, onProgress);
+                FileOperationResult result = this.ExtractArchives(archivePaths, destinationDir, true, onProgress);
 
                 _ = this.InvokeAsync(() =>
                 {
@@ -1461,6 +1687,43 @@ namespace Bivium.Components.Pages
             }
 
             this._pendingOperation = "";
+        }
+
+        /// <summary>
+        /// Handles overwrite dialog result during paste
+        /// </summary>
+        /// <param name="choice">Overwrite choice</param>
+        private void HandleOverwriteDialogClose(OverwriteChoice choice)
+        {
+            if (this._pendingPasteConflictPaths.Count == 0 || this._pendingPasteConflictIndex >= this._pendingPasteConflictPaths.Count)
+            {
+                this.ClearPendingPaste();
+                return;
+            }
+
+            string currentPath = this._pendingPasteConflictPaths[this._pendingPasteConflictIndex];
+
+            if (choice == OverwriteChoice.Yes)
+            {
+                this._pendingPasteOverwritePaths.Add(currentPath);
+                this._pendingPasteConflictIndex++;
+            }
+            else if (choice == OverwriteChoice.YesToAll)
+            {
+                for (int i = this._pendingPasteConflictIndex; i < this._pendingPasteConflictPaths.Count; i++)
+                {
+                    this._pendingPasteOverwritePaths.Add(this._pendingPasteConflictPaths[i]);
+                }
+
+                this._pendingPasteConflictIndex = this._pendingPasteConflictPaths.Count;
+            }
+            else
+            {
+                this._pendingPasteSkippedPaths.Add(currentPath);
+                this._pendingPasteConflictIndex++;
+            }
+
+            this.ShowNextPasteOverwritePrompt();
         }
 
         /// <summary>

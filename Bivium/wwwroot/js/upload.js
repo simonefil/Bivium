@@ -66,6 +66,7 @@ export async function uploadFile(destinationDir, fileName) {
 
     const fileSize = _selectedFile.size;
     const totalChunks = Math.max(1, Math.ceil(fileSize / CHUNK_SIZE));
+    const uploadId = createUploadId();
 
     for (let i = 0; i < totalChunks; i++) {
         const start = i * CHUNK_SIZE;
@@ -84,7 +85,8 @@ export async function uploadFile(destinationDir, fileName) {
                         'X-Destination-Dir': destinationDir,
                         'X-File-Name': fileName,
                         'X-Chunk-Index': i.toString(),
-                        'X-Total-Chunks': totalChunks.toString()
+                        'X-Total-Chunks': totalChunks.toString(),
+                        'X-Upload-Id': uploadId
                     },
                     body: chunk
                 });
@@ -120,6 +122,22 @@ export async function uploadFile(destinationDir, fileName) {
     if (_dotNetRef) {
         await _dotNetRef.invokeMethodAsync('OnUploadComplete', true, '');
     }
+}
+
+/**
+ * Creates a unique id for one upload session
+ * @returns {string} Upload session id
+ */
+function createUploadId() {
+    if (window.crypto && window.crypto.randomUUID) {
+        return window.crypto.randomUUID();
+    }
+
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (char) {
+        const random = Math.floor(Math.random() * 16);
+        const value = char === 'x' ? random : (random & 0x3) | 0x8;
+        return value.toString(16);
+    });
 }
 
 /**

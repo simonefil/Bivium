@@ -1,6 +1,8 @@
 // Bivium JS Interop
 // Handles: resize drag, keyboard capture, theme switching
 
+const initializedWindowDragElements = new WeakSet();
+
 /**
  * Initialize a resizable splitter element
  * @param {string} splitterId - DOM id of the splitter element
@@ -313,6 +315,8 @@ export function initWindowDrag(windowId, titlebarId, resizeHandleId) {
     const titlebar = document.getElementById(titlebarId);
     const resizeHandle = document.getElementById(resizeHandleId);
     if (!win || !titlebar) return;
+    if (initializedWindowDragElements.has(win)) return;
+    initializedWindowDragElements.add(win);
 
     let isDragging = false;
     let isResizing = false;

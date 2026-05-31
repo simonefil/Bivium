@@ -36,8 +36,9 @@ namespace Bivium.Services
         /// </summary>
         /// <param name="sourcePaths">List of source file/directory paths</param>
         /// <param name="destinationDir">Destination directory path</param>
+        /// <param name="overwritePaths">Source file paths approved for overwrite</param>
         /// <returns>Operation result</returns>
-        public FileOperationResult CopyEntries(List<string> sourcePaths, string destinationDir)
+        public FileOperationResult CopyEntries(List<string> sourcePaths, string destinationDir, List<string> overwritePaths = null)
         {
             int processed = 0;
             int failed = 0;
@@ -56,7 +57,8 @@ namespace Bivium.Services
 
                 try
                 {
-                    string destPath = this.GetCopyDestinationPath(source, destinationDir);
+                    bool overwrite = this.IsOverwriteRequested(source, overwritePaths);
+                    string destPath = overwrite ? this.GetDefaultDestinationPath(source, destinationDir) : this.GetCopyDestinationPath(source, destinationDir);
                     string validationError = this.GetTransferValidationError(source, destPath, false);
                     if (!string.IsNullOrEmpty(validationError))
                     {
@@ -67,13 +69,27 @@ namespace Bivium.Services
 
                     if (Directory.Exists(source))
                     {
+                        if (overwrite && Directory.Exists(destPath))
+                        {
+                            failed++;
+                            lastError = "Directory overwrite is not supported: " + destPath;
+                            continue;
+                        }
+
                         // Recursive directory copy
                         this.CopyDirectoryRecursive(source, destPath);
                         processed++;
                     }
                     else if (File.Exists(source))
                     {
-                        File.Copy(source, destPath, false);
+                        if (Directory.Exists(destPath))
+                        {
+                            failed++;
+                            lastError = "Cannot overwrite directory with file: " + destPath;
+                            continue;
+                        }
+
+                        File.Copy(source, destPath, overwrite);
                         processed++;
                     }
                     else
@@ -108,8 +124,9 @@ namespace Bivium.Services
         /// <param name="sourcePaths">List of source file/directory paths</param>
         /// <param name="destinationDir">Destination directory path</param>
         /// <param name="onProgress">Callback invoked after each file (currentFile, totalFiles, currentFileName)</param>
+        /// <param name="overwritePaths">Source file paths approved for overwrite</param>
         /// <returns>Operation result</returns>
-        public FileOperationResult CopyEntriesWithProgress(List<string> sourcePaths, string destinationDir, Action<int, int, string> onProgress)
+        public FileOperationResult CopyEntriesWithProgress(List<string> sourcePaths, string destinationDir, Action<int, int, string> onProgress, List<string> overwritePaths = null)
         {
             int processed = 0;
             int failed = 0;
@@ -137,7 +154,8 @@ namespace Bivium.Services
 
                 try
                 {
-                    string destPath = this.GetCopyDestinationPath(source, destinationDir);
+                    bool overwrite = this.IsOverwriteRequested(source, overwritePaths);
+                    string destPath = overwrite ? this.GetDefaultDestinationPath(source, destinationDir) : this.GetCopyDestinationPath(source, destinationDir);
                     string validationError = this.GetTransferValidationError(source, destPath, false);
                     if (!string.IsNullOrEmpty(validationError))
                     {
@@ -148,13 +166,27 @@ namespace Bivium.Services
 
                     if (Directory.Exists(source))
                     {
+                        if (overwrite && Directory.Exists(destPath))
+                        {
+                            failed++;
+                            lastError = "Directory overwrite is not supported: " + destPath;
+                            continue;
+                        }
+
                         // Recursive directory copy with progress
                         this.CopyDirectoryRecursiveWithProgress(source, destPath, onProgress, ref currentCount, totalFiles);
                         processed++;
                     }
                     else if (File.Exists(source))
                     {
-                        File.Copy(source, destPath, false);
+                        if (Directory.Exists(destPath))
+                        {
+                            failed++;
+                            lastError = "Cannot overwrite directory with file: " + destPath;
+                            continue;
+                        }
+
+                        File.Copy(source, destPath, overwrite);
                         currentCount++;
                         onProgress(currentCount, totalFiles, Path.GetFileName(source));
                         processed++;
@@ -190,8 +222,9 @@ namespace Bivium.Services
         /// </summary>
         /// <param name="sourcePaths">List of source file/directory paths</param>
         /// <param name="destinationDir">Destination directory path</param>
+        /// <param name="overwritePaths">Source file paths approved for overwrite</param>
         /// <returns>Operation result</returns>
-        public FileOperationResult MoveEntries(List<string> sourcePaths, string destinationDir)
+        public FileOperationResult MoveEntries(List<string> sourcePaths, string destinationDir, List<string> overwritePaths = null)
         {
             int processed = 0;
             int failed = 0;
@@ -210,6 +243,7 @@ namespace Bivium.Services
 
                 try
                 {
+                    bool overwrite = this.IsOverwriteRequested(source, overwritePaths);
                     string destName = Path.GetFileName(source);
                     string destPath = Path.Combine(destinationDir, destName);
                     string validationError = this.GetTransferValidationError(source, destPath, true);
@@ -222,12 +256,33 @@ namespace Bivium.Services
 
                     if (Directory.Exists(source))
                     {
+                        if (File.Exists(destPath) || Directory.Exists(destPath))
+                        {
+                            failed++;
+                            lastError = "Destination already exists: " + destPath;
+                            continue;
+                        }
+
                         Directory.Move(source, destPath);
                         processed++;
                     }
                     else if (File.Exists(source))
                     {
-                        File.Move(source, destPath, true);
+                        if (Directory.Exists(destPath))
+                        {
+                            failed++;
+                            lastError = "Cannot overwrite directory with file: " + destPath;
+                            continue;
+                        }
+
+                        if (File.Exists(destPath) && !overwrite)
+                        {
+                            failed++;
+                            lastError = "Destination already exists: " + destPath;
+                            continue;
+                        }
+
+                        File.Move(source, destPath, overwrite);
                         processed++;
                     }
                     else
@@ -274,8 +329,9 @@ namespace Bivium.Services
         /// <param name="sourcePaths">List of source file/directory paths</param>
         /// <param name="destinationDir">Destination directory path</param>
         /// <param name="onProgress">Callback invoked after each entry (currentEntry, totalEntries, currentEntryName)</param>
+        /// <param name="overwritePaths">Source file paths approved for overwrite</param>
         /// <returns>Operation result</returns>
-        public FileOperationResult MoveEntriesWithProgress(List<string> sourcePaths, string destinationDir, Action<int, int, string> onProgress)
+        public FileOperationResult MoveEntriesWithProgress(List<string> sourcePaths, string destinationDir, Action<int, int, string> onProgress, List<string> overwritePaths = null)
         {
             int processed = 0;
             int failed = 0;
@@ -295,6 +351,7 @@ namespace Bivium.Services
 
                 try
                 {
+                    bool overwrite = this.IsOverwriteRequested(source, overwritePaths);
                     string destName = Path.GetFileName(source);
                     string destPath = Path.Combine(destinationDir, destName);
                     string validationError = this.GetTransferValidationError(source, destPath, true);
@@ -307,13 +364,34 @@ namespace Bivium.Services
 
                     if (Directory.Exists(source))
                     {
+                        if (File.Exists(destPath) || Directory.Exists(destPath))
+                        {
+                            failed++;
+                            lastError = "Destination already exists: " + destPath;
+                            continue;
+                        }
+
                         Directory.Move(source, destPath);
                         processed++;
                         onProgress(i + 1, totalEntries, destName);
                     }
                     else if (File.Exists(source))
                     {
-                        File.Move(source, destPath, true);
+                        if (Directory.Exists(destPath))
+                        {
+                            failed++;
+                            lastError = "Cannot overwrite directory with file: " + destPath;
+                            continue;
+                        }
+
+                        if (File.Exists(destPath) && !overwrite)
+                        {
+                            failed++;
+                            lastError = "Destination already exists: " + destPath;
+                            continue;
+                        }
+
+                        File.Move(source, destPath, overwrite);
                         processed++;
                         onProgress(i + 1, totalEntries, destName);
                     }
@@ -695,6 +773,44 @@ namespace Bivium.Services
             }
 
             return destinationPath;
+        }
+
+        /// <summary>
+        /// Builds the direct destination path without adding copy suffixes
+        /// </summary>
+        /// <param name="sourcePath">Source file or directory path</param>
+        /// <param name="destinationDir">Destination directory</param>
+        /// <returns>Direct destination path</returns>
+        private string GetDefaultDestinationPath(string sourcePath, string destinationDir)
+        {
+            string sourceName = Path.GetFileName(sourcePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            string result = Path.Combine(destinationDir, sourceName);
+            return result;
+        }
+
+        /// <summary>
+        /// Checks whether the source path was approved for overwrite
+        /// </summary>
+        /// <param name="sourcePath">Source path</param>
+        /// <param name="overwritePaths">Approved source paths</param>
+        /// <returns>True if overwrite is approved</returns>
+        private bool IsOverwriteRequested(string sourcePath, List<string> overwritePaths)
+        {
+            bool result = false;
+
+            if (overwritePaths != null)
+            {
+                for (int i = 0; i < overwritePaths.Count; i++)
+                {
+                    if (this.AreSamePath(sourcePath, overwritePaths[i]))
+                    {
+                        result = true;
+                        break;
+                    }
+                }
+            }
+
+            return result;
         }
 
         /// <summary>

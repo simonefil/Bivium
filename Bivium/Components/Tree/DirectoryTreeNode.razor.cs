@@ -64,19 +64,18 @@ namespace Bivium.Components.Tree
         protected override void OnParametersSet()
         {
             // Only process when CurrentPath actually changed
-            if (string.Equals(this.CurrentPath, this._previousCurrentPath, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(this.CurrentPath, this._previousCurrentPath, this.GetPathComparison()))
             {
                 return;
             }
 
             this._previousCurrentPath = this.CurrentPath;
 
-            if (!string.IsNullOrEmpty(this.CurrentPath))
+            if (!string.IsNullOrEmpty(this.CurrentPath) && this.Entry != null)
             {
-                // Expand this node if the current path starts with this node's path
-                bool isAncestor = this.CurrentPath.StartsWith(this.Entry.FullPath, StringComparison.OrdinalIgnoreCase)
-                    && this.CurrentPath.Length > this.Entry.FullPath.Length;
-                bool isExactMatch = string.Equals(this.CurrentPath, this.Entry.FullPath, StringComparison.OrdinalIgnoreCase);
+                // Expand this node only for exact matches or real path descendants
+                bool isAncestor = this.IsAncestorPath(this.Entry.FullPath, this.CurrentPath);
+                bool isExactMatch = this.AreSamePath(this.CurrentPath, this.Entry.FullPath);
 
                 if ((isAncestor || isExactMatch) && !this._isExpanded)
                 {
@@ -131,7 +130,68 @@ namespace Bivium.Components.Tree
         /// <returns>True if this is the current directory</returns>
         private bool IsCurrentPath()
         {
-            bool result = string.Equals(this.Entry.FullPath, this.CurrentPath, StringComparison.OrdinalIgnoreCase);
+            bool result = this.Entry != null && !string.IsNullOrEmpty(this.CurrentPath) && this.AreSamePath(this.Entry.FullPath, this.CurrentPath);
+            return result;
+        }
+
+        /// <summary>
+        /// Checks whether a path is a descendant of an ancestor path
+        /// </summary>
+        /// <param name="ancestorPath">Candidate ancestor path</param>
+        /// <param name="currentPath">Current path</param>
+        /// <returns>True if current path is below ancestor path</returns>
+        private bool IsAncestorPath(string ancestorPath, string currentPath)
+        {
+            bool result = false;
+
+            string ancestorFull = this.NormalizePath(ancestorPath);
+            string currentFull = this.NormalizePath(currentPath);
+
+            if (!string.Equals(ancestorFull, currentFull, this.GetPathComparison()))
+            {
+                if (!ancestorFull.EndsWith(Path.DirectorySeparatorChar))
+                {
+                    ancestorFull += Path.DirectorySeparatorChar;
+                }
+
+                result = currentFull.StartsWith(ancestorFull, this.GetPathComparison());
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Checks if two paths resolve to the same path
+        /// </summary>
+        /// <param name="left">First path</param>
+        /// <param name="right">Second path</param>
+        /// <returns>True if paths are equal</returns>
+        private bool AreSamePath(string left, string right)
+        {
+            bool result = string.Equals(this.NormalizePath(left), this.NormalizePath(right), this.GetPathComparison());
+            return result;
+        }
+
+        /// <summary>
+        /// Normalizes a path for comparison
+        /// </summary>
+        /// <param name="path">Path to normalize</param>
+        /// <returns>Normalized full path without trailing separators</returns>
+        private string NormalizePath(string path)
+        {
+            string result = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+            return result;
+        }
+
+        /// <summary>
+        /// Gets the appropriate path comparison for the current platform
+        /// </summary>
+        /// <returns>String comparison for filesystem paths</returns>
+        private StringComparison GetPathComparison()
+        {
+            StringComparison result = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
             return result;
         }
 

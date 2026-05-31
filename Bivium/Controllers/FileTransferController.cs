@@ -166,6 +166,7 @@ namespace Bivium.Controllers
             string fileName = this.Request.Headers["X-File-Name"].ToString();
             string chunkIndexStr = this.Request.Headers["X-Chunk-Index"].ToString();
             string totalChunksStr = this.Request.Headers["X-Total-Chunks"].ToString();
+            string uploadIdStr = this.Request.Headers["X-Upload-Id"].ToString();
 
             if (string.IsNullOrWhiteSpace(destinationDir) || !this._securityService.IsPathSafe(destinationDir))
             {
@@ -183,6 +184,10 @@ namespace Bivium.Controllers
             {
                 result = this.BadRequest("Destination directory not found");
             }
+            else if (!Guid.TryParse(uploadIdStr, out Guid uploadId))
+            {
+                result = this.BadRequest("Invalid upload id");
+            }
             else
             {
                 int chunkIndex = 0;
@@ -199,7 +204,7 @@ namespace Bivium.Controllers
                     try
                     {
                         string destPath = Path.Combine(destinationDir, fileName);
-                        string tempPath = destPath + ".uploading";
+                        string tempPath = Path.Combine(destinationDir, "." + fileName + "." + uploadId.ToString("N") + ".uploading");
 
                         if (chunkIndex > 0)
                         {
@@ -229,13 +234,7 @@ namespace Bivium.Controllers
                         // Last chunk: rename temp file to final name
                         if (chunkIndex >= totalChunks - 1)
                         {
-                            // Remove existing file if present
-                            if (System.IO.File.Exists(destPath))
-                            {
-                                System.IO.File.Delete(destPath);
-                            }
-
-                            System.IO.File.Move(tempPath, destPath);
+                            System.IO.File.Move(tempPath, destPath, true);
                         }
 
                         result = this.Ok(new { success = true, chunk = chunkIndex, total = totalChunks });
