@@ -160,6 +160,40 @@ namespace Bivium.Controllers
         }
 
         /// <summary>
+        /// Changes the local administrator password
+        /// </summary>
+        /// <param name="request">Password change request</param>
+        /// <returns>Result</returns>
+        [HttpPost("authentication/password")]
+        public async System.Threading.Tasks.Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request)
+        {
+            IActionResult result;
+
+            try
+            {
+                if (!this._authenticationService.CanManageSettings(this.User))
+                {
+                    result = this.Unauthorized();
+                }
+                else
+                {
+                    await this._authenticationService.ChangePasswordAsync(request);
+                    result = this.Ok(new { success = true });
+                }
+            }
+            catch (InvalidOperationException ex)
+            {
+                result = this.BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                result = this.StatusCode(500, ex.Message);
+            }
+
+            return result;
+        }
+
+        /// <summary>
         /// Creates a pending TOTP setup
         /// </summary>
         /// <returns>Setup payload</returns>

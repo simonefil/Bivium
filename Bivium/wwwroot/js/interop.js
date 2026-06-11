@@ -349,6 +349,20 @@ export function reloadPage() {
     window.location.reload();
 }
 
+/**
+ * Copy text to the system clipboard
+ * @param {string} text - Text to copy
+ * @returns {Promise<boolean>} True if copy succeeded
+ */
+export async function copyText(text) {
+    try {
+        await navigator.clipboard.writeText(text || '');
+        return true;
+    } catch (err) {
+        return false;
+    }
+}
+
 async function sendJsonResult(url, method, jsonBody) {
     try {
         const response = await fetch(url, {

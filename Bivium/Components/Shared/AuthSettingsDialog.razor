@@ -3,7 +3,7 @@
 @if (this._isVisible)
 {
     <div class="context-menu-overlay" @onclick="this.HandleCancel">
-        <div class="context-menu" style="position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 52ch;"
+        <div class="context-menu" style="position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 78ch; max-width: min(96vw, 100ch);"
              @onclick:stopPropagation="true">
             <div style="background-color: var(--background1); padding: 0 1ch; border-bottom: 1px solid var(--foreground2);">
                 Authentication
@@ -11,59 +11,117 @@
             <div style="padding: 1lh 1ch;">
                 <table style="width: 100%;">
                     <tr>
-                        <td style="width: 16ch; color: var(--foreground2);">Enabled:</td>
-                        <td><input type="checkbox" @bind="this._enabled" /></td>
+                        <td style="width: 22ch; white-space: nowrap; color: var(--foreground2);">Enabled:</td>
+                        <td><input type="checkbox" @bind="this._enabled" disabled="@this._disabled" /></td>
                     </tr>
                     <tr>
-                        <td style="color: var(--foreground2);">Username:</td>
-                        <td><input @bind="this._username" style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /></td>
+                        <td style="white-space: nowrap; color: var(--foreground2);">Username:</td>
+                        <td><input @bind="this._username" disabled="@(this._hasUser || !this._enabled || this._disabled)" style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /></td>
                     </tr>
                     @if (this._hasUser)
                     {
                         <tr>
-                            <td style="color: var(--foreground2);">Current password:</td>
-                            <td><input type="password" @bind="this._currentPassword" style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /></td>
-                        </tr>
-                    }
-                    <tr>
-                        <td style="color: var(--foreground2);">@this._passwordLabel</td>
-                        <td><input type="password" @bind="this._newPassword" style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /></td>
-                    </tr>
-                    @if (this._hasUser)
-                    {
-                        <tr>
-                            <td style="color: var(--foreground2);">Disabled:</td>
+                            <td style="white-space: nowrap; color: var(--foreground2);">Disabled:</td>
                             <td>@this._disabledLabel</td>
                         </tr>
                         <tr>
-                            <td style="color: var(--foreground2);">2FA:</td>
+                            <td style="white-space: nowrap; color: var(--foreground2);">2FA:</td>
                             <td>@this._twoFactorLabel</td>
                         </tr>
                     }
                 </table>
 
-                @if (this._hasUser && !this._disabled)
+                @if (!this._hasUser && this._enabled && !this._disabled)
+                {
+                    <div style="border-top: 1px solid var(--foreground2); margin-top: 1lh; padding-top: 1lh;">
+                        <div style="color: var(--foreground2); margin-bottom: 0.5lh;">Create administrator</div>
+                        <table style="width: 100%;">
+                            <tr>
+                                <td style="width: 22ch; white-space: nowrap; color: var(--foreground2);">Password:</td>
+                                <td><input type="password" @bind="this._newPassword" style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /></td>
+                            </tr>
+                            <tr>
+                                <td style="white-space: nowrap; color: var(--foreground2);">Retype password:</td>
+                                <td><input type="password" @bind="this._confirmPassword" style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /></td>
+                            </tr>
+                        </table>
+                    </div>
+                }
+
+                @if (this._hasUser && this._enabled && !this._disabled)
                 {
                     <div style="display: flex; gap: 2ch; margin-top: 1lh;">
-                        @if (!this._twoFactorEnabled)
+                        <button @onclick="this.HandleToggleMfaPanel">MFA</button>
+                        <button @onclick="this.HandleTogglePasswordPanel">Change password</button>
+                    </div>
+                }
+
+                @if (this._mfaPanelVisible)
+                {
+                    <div style="border-top: 1px solid var(--foreground2); margin-top: 1lh; padding-top: 1lh;">
+                        <table style="width: 100%;">
+                            <tr>
+                                <td style="width: 22ch; white-space: nowrap; color: var(--foreground2);">Password:</td>
+                                <td><input type="password" @bind="this._mfaPassword" style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /></td>
+                            </tr>
+                        </table>
+
+                        @if (!this._twoFactorEnabled && string.IsNullOrEmpty(this._qrCodeDataUrl))
                         {
-                            <button @onclick="this.HandleStartTwoFactorSetup">Setup 2FA</button>
+                            <div style="display: flex; gap: 2ch; margin-top: 1lh;">
+                                <button @onclick="this.HandleStartTwoFactorSetup">Generate QR</button>
+                            </div>
                         }
+
                         @if (this._twoFactorEnabled)
                         {
-                            <button @onclick="this.HandleDisableTwoFactor">Disable 2FA</button>
+                            <div style="display: flex; gap: 2ch; margin-top: 1lh;">
+                                <button @onclick="this.HandleDisableTwoFactor">Disable 2FA</button>
+                            </div>
                         }
                     </div>
                 }
 
                 @if (!string.IsNullOrEmpty(this._qrCodeDataUrl))
                 {
-                    <div style="margin-top: 1lh;">
-                        <div style="color: var(--foreground2); margin-bottom: 0.5lh;">Scan QR, enter current code, then enable.</div>
+                    <div style="border-top: 1px solid var(--foreground2); margin-top: 1lh; padding-top: 1lh;">
+                        <div style="color: var(--foreground2); margin-bottom: 0.5lh;">Scan QR, copy/save the secret, enter current code, then enable.</div>
                         <img src="@this._qrCodeDataUrl" alt="2FA QR code" style="background: white; padding: 1ch; width: 160px; height: 160px;" />
-                        <div style="margin-top: 0.5lh;">
-                            <input @bind="this._twoFactorCode" style="width: 16ch; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" />
+                        <table style="width: 100%; margin-top: 0.5lh;">
+                            <tr>
+                                <td style="width: 22ch; white-space: nowrap; color: var(--foreground2);">Secret:</td>
+                                <td style="display: flex; gap: 1ch;"><input readonly value="@this._twoFactorSecret" style="flex: 1; min-width: 0; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /><button @onclick="this.HandleCopyTwoFactorSecret">Copy</button></td>
+                            </tr>
+                            <tr>
+                                <td style="white-space: nowrap; color: var(--foreground2);">2FA code:</td>
+                                <td><input @bind="this._twoFactorCode" style="width: 16ch; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /></td>
+                            </tr>
+                        </table>
+                        <div style="display: flex; gap: 2ch; margin-top: 1lh;">
                             <button @onclick="this.HandleEnableTwoFactor">Enable 2FA</button>
+                        </div>
+                    </div>
+                }
+
+                @if (this._passwordPanelVisible)
+                {
+                    <div style="border-top: 1px solid var(--foreground2); margin-top: 1lh; padding-top: 1lh;">
+                        <table style="width: 100%;">
+                            <tr>
+                                <td style="width: 22ch; white-space: nowrap; color: var(--foreground2);">Old password:</td>
+                                <td><input type="password" @bind="this._changeCurrentPassword" style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /></td>
+                            </tr>
+                            <tr>
+                                <td style="white-space: nowrap; color: var(--foreground2);">New password:</td>
+                                <td><input type="password" @bind="this._changeNewPassword" style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /></td>
+                            </tr>
+                            <tr>
+                                <td style="white-space: nowrap; color: var(--foreground2);">Retype new password:</td>
+                                <td><input type="password" @bind="this._changeConfirmPassword" style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /></td>
+                            </tr>
+                        </table>
+                        <div style="display: flex; gap: 2ch; margin-top: 1lh;">
+                            <button @onclick="this.HandleChangePassword">Change password</button>
                         </div>
                     </div>
                 }
@@ -77,7 +135,7 @@
             </div>
             <div style="display: flex; justify-content: flex-end; gap: 2ch; padding: 0 1ch 1lh 1ch;">
                 <button @onclick="this.HandleCancel">Cancel</button>
-                <button @onclick="this.HandleSave">Save</button>
+                <button @onclick="this.HandleSave" disabled="@this._disabled">Save</button>
             </div>
         </div>
     </div>

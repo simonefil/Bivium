@@ -235,6 +235,7 @@ namespace Bivium.Services
 
             string currentPassword = request.CurrentPassword ?? "";
             string password = request.NewPassword ?? "";
+            string confirmPassword = request.ConfirmPassword ?? "";
 
             AuthenticationSettings current = this.GetAuthenticationSettings();
             bool hasUser = this.HasConfiguredUser(current);
@@ -242,10 +243,20 @@ namespace Bivium.Services
             {
                 username = current.User.Username ?? "";
             }
+            if (!hasUser && !request.Enabled)
+            {
+                username = "";
+                password = "";
+            }
 
             bool usernameChanged = hasUser && !string.IsNullOrWhiteSpace(username) && !string.Equals(username, current.User.Username, StringComparison.OrdinalIgnoreCase);
             bool passwordChanged = !string.IsNullOrWhiteSpace(password);
             bool enabledChanged = hasUser && current.Enabled != request.Enabled;
+
+            if (hasUser && passwordChanged)
+            {
+                throw new InvalidOperationException("Use change password to update administrator credentials");
+            }
 
             if (request.Enabled && string.IsNullOrWhiteSpace(username))
             {
@@ -267,17 +278,22 @@ namespace Bivium.Services
                 throw new InvalidOperationException("Password is required for a new administrator");
             }
 
+            if (!hasUser && request.Enabled && !string.Equals(password, confirmPassword, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Password confirmation does not match");
+            }
+
             if (passwordChanged)
             {
                 this.ValidatePasswordComplexity(password);
             }
 
-            if (hasUser && current.User.Disabled && (request.Enabled || usernameChanged || passwordChanged))
+            if (hasUser && current.User.Disabled)
             {
                 throw new InvalidOperationException("Configured administrator is disabled. Remove User from appsettings.json to reset authentication.");
             }
 
-            if (hasUser && (usernameChanged || passwordChanged || enabledChanged))
+            if (hasUser && usernameChanged)
             {
                 PasswordVerificationResult currentPasswordResult = this._passwordHasher.VerifyHashedPassword(current.User, current.User.PasswordHash, currentPassword);
 
@@ -318,6 +334,61 @@ namespace Bivium.Services
                         userNode["SecurityStamp"] = Guid.NewGuid().ToString("N");
                     }
                 }
+                else if (!hasUser && !request.Enabled)
+                {
+                    authNode.Remove("User");
+                }
+            });
+
+            lock (this._lock)
+            {
+                this._pendingTwoFactorSecret = "";
+            }
+
+            this.ResetFailures();
+        }
+
+        /// <summary>
+        /// Changes the configured administrator password
+        /// </summary>
+        /// <param name="request">Password change request</param>
+        public async System.Threading.Tasks.Task ChangePasswordAsync(ChangePasswordRequest request)
+        {
+            if (request == null)
+            {
+                throw new InvalidOperationException("Missing password change request");
+            }
+
+            AuthenticationSettings auth = this.GetAuthenticationSettings();
+            if (!this.HasConfiguredUser(auth))
+            {
+                throw new InvalidOperationException("Configure the administrator before changing password");
+            }
+            if (auth.User.Disabled)
+            {
+                throw new InvalidOperationException("Configured administrator is disabled. Remove User from appsettings.json to reset authentication.");
+            }
+            if (!string.Equals(request.NewPassword ?? "", request.ConfirmPassword ?? "", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Password confirmation does not match");
+            }
+
+            PasswordVerificationResult currentPasswordResult = this._passwordHasher.VerifyHashedPassword(auth.User, auth.User.PasswordHash, request.CurrentPassword ?? "");
+            if (currentPasswordResult != PasswordVerificationResult.Success && currentPasswordResult != PasswordVerificationResult.SuccessRehashNeeded)
+            {
+                await this.RegisterFailureAsync();
+                throw new InvalidOperationException("Current password is invalid");
+            }
+
+            this.ValidatePasswordComplexity(request.NewPassword ?? "");
+
+            this.UpdateAuthenticationNode(authNode =>
+            {
+                JsonObject userNode = this.GetOrCreateObject(authNode, "User");
+                AuthenticationUserSettings hashUser = new AuthenticationUserSettings();
+                hashUser.Username = auth.User.Username;
+                userNode["PasswordHash"] = this._passwordHasher.HashPassword(hashUser, request.NewPassword ?? "");
+                userNode["SecurityStamp"] = Guid.NewGuid().ToString("N");
             });
 
             lock (this._lock)
@@ -373,6 +444,7 @@ namespace Bivium.Services
 
             TwoFactorSetupResult result = new TwoFactorSetupResult();
             result.QrCodeDataUrl = "data:image/png;base64," + Convert.ToBase64String(qrBytes);
+            result.Secret = secret;
             return result;
         }
 

@@ -1271,9 +1271,9 @@ namespace Bivium.Components.Pages
         /// <summary>
         /// Shows the authentication settings dialog
         /// </summary>
-        private void DoAuthenticationSettings()
+        private async System.Threading.Tasks.Task DoAuthenticationSettings()
         {
-            _ = this._authSettingsDialog.Show();
+            await this._authSettingsDialog.Show();
         }
 
         /// <summary>

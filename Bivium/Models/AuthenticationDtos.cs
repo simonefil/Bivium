@@ -57,6 +57,8 @@ namespace Bivium.Models
 
         public string NewPassword { get; set; } = "";
 
+        public string ConfirmPassword { get; set; } = "";
+
         #endregion
     }
 
@@ -68,6 +70,8 @@ namespace Bivium.Models
         #region Properties
 
         public string QrCodeDataUrl { get; set; } = "";
+
+        public string Secret { get; set; } = "";
 
         #endregion
     }
@@ -82,6 +86,22 @@ namespace Bivium.Models
         public string CurrentPassword { get; set; } = "";
 
         public string Code { get; set; } = "";
+
+        #endregion
+    }
+
+    /// <summary>
+    /// Password change request
+    /// </summary>
+    public class ChangePasswordRequest
+    {
+        #region Properties
+
+        public string CurrentPassword { get; set; } = "";
+
+        public string NewPassword { get; set; } = "";
+
+        public string ConfirmPassword { get; set; } = "";
 
         #endregion
     }
