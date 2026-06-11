@@ -111,6 +111,18 @@ namespace Bivium.Components.Shared
         public EventCallback OnEditorExtensions { get; set; }
 
         /// <summary>
+        /// Callback for Authentication Settings action
+        /// </summary>
+        [Parameter]
+        public EventCallback OnAuthenticationSettings { get; set; }
+
+        /// <summary>
+        /// Callback for Logout action
+        /// </summary>
+        [Parameter]
+        public EventCallback OnLogout { get; set; }
+
+        /// <summary>
         /// Callback for About action
         /// </summary>
         [Parameter]
@@ -157,6 +169,18 @@ namespace Bivium.Components.Shared
         /// </summary>
         [Parameter]
         public bool CanCompress { get; set; } = false;
+
+        /// <summary>
+        /// Whether logout should be available
+        /// </summary>
+        [Parameter]
+        public bool CanLogout { get; set; } = false;
+
+        /// <summary>
+        /// Whether authentication settings should be available
+        /// </summary>
+        [Parameter]
+        public bool CanManageAuthenticationSettings { get; set; } = false;
 
         #endregion
 
@@ -381,6 +405,22 @@ namespace Bivium.Components.Shared
         private async System.Threading.Tasks.Task HandleEditorExtensions()
         {
             await this.HandleAction(this.OnEditorExtensions);
+        }
+
+        /// <summary>
+        /// Handles Authentication Settings action
+        /// </summary>
+        private async System.Threading.Tasks.Task HandleAuthenticationSettings()
+        {
+            await this.HandleAction(this.OnAuthenticationSettings);
+        }
+
+        /// <summary>
+        /// Handles Logout action
+        /// </summary>
+        private async System.Threading.Tasks.Task HandleLogout()
+        {
+            await this.HandleAction(this.OnLogout);
         }
 
         /// <summary>

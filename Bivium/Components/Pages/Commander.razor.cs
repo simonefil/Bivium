@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.Options;
 using Microsoft.JSInterop;
 using Bivium.Models;
@@ -38,6 +39,18 @@ namespace Bivium.Components.Pages
         /// </summary>
         [Inject]
         private IArchiveService _archiveService { get; set; }
+
+        /// <summary>
+        /// Local authentication service
+        /// </summary>
+        [Inject]
+        private AuthenticationService _authenticationService { get; set; }
+
+        /// <summary>
+        /// Authentication state provider
+        /// </summary>
+        [Inject]
+        private AuthenticationStateProvider _authenticationStateProvider { get; set; }
 
         #endregion
 
@@ -148,6 +161,11 @@ namespace Bivium.Components.Pages
         private SettingsDialog _settingsDialog;
 
         /// <summary>
+        /// Reference to authentication settings dialog component
+        /// </summary>
+        private AuthSettingsDialog _authSettingsDialog;
+
+        /// <summary>
         /// Reference to renamer dialog component
         /// </summary>
         private RenamerDialog _renamerDialog;
@@ -208,6 +226,11 @@ namespace Bivium.Components.Pages
         private bool _singlePanelMode = false;
 
         /// <summary>
+        /// CSS class for the panels area
+        /// </summary>
+        private string _panelsAreaClass = "panels-area";
+
+        /// <summary>
         /// Flag to scroll cursor into view after next render
         /// </summary>
         private bool _scrollAfterRender = false;
@@ -247,6 +270,36 @@ namespace Bivium.Components.Pages
         /// </summary>
         private int _pendingPasteConflictIndex = 0;
 
+        /// <summary>
+        /// Whether authentication state has been checked
+        /// </summary>
+        private bool _authReady = false;
+
+        /// <summary>
+        /// Whether the current user can access the commander
+        /// </summary>
+        private bool _canAccess = false;
+
+        /// <summary>
+        /// Current authentication status
+        /// </summary>
+        private AuthenticationStatus _authStatus = new AuthenticationStatus();
+
+        /// <summary>
+        /// Settings change subscription used to refresh authentication state
+        /// </summary>
+        private IDisposable _settingsChangeSubscription;
+
+        /// <summary>
+        /// Whether file panels have been initialized
+        /// </summary>
+        private bool _panelsInitialized = false;
+
+        /// <summary>
+        /// Whether keyboard capture has been initialized
+        /// </summary>
+        private bool _keyboardInitialized = false;
+
         #endregion
 
         #region Overrides
@@ -254,15 +307,10 @@ namespace Bivium.Components.Pages
         /// <summary>
         /// Initialize panels with user home directory
         /// </summary>
-        protected override void OnInitialized()
+        protected override async System.Threading.Tasks.Task OnInitializedAsync()
         {
-            // BIVIUM_HOME environment variable overrides default home
-            string homePath = Environment.GetEnvironmentVariable("BIVIUM_HOME") ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-
-            this._leftPanel = new PanelState(homePath);
-            this._rightPanel = new PanelState(homePath);
-
-            this.RefreshVisiblePanels();
+            this._settingsChangeSubscription = this._settings.OnChange(this.HandleSettingsChanged);
+            await this.RefreshAuthenticationState();
         }
 
         /// <summary>
@@ -270,8 +318,9 @@ namespace Bivium.Components.Pages
         /// </summary>
         protected override void OnAfterRender(bool firstRender)
         {
-            if (firstRender)
+            if (!this._keyboardInitialized && this._canAccess)
             {
+                this._keyboardInitialized = true;
                 _ = this.InitializeKeyboardCapture();
             }
 
@@ -288,7 +337,53 @@ namespace Bivium.Components.Pages
 
         #endregion
 
+        #region Authentication
+
+        /// <summary>
+        /// Refreshes authentication status and access state
+        /// </summary>
+        private async System.Threading.Tasks.Task RefreshAuthenticationState()
+        {
+            AuthenticationState state = await this._authenticationStateProvider.GetAuthenticationStateAsync();
+            this._authStatus = this._authenticationService.GetStatus(state.User);
+            this._canAccess = this._authenticationService.CanAccess(state.User);
+            this._authReady = true;
+            if (this._canAccess)
+            {
+                this.InitializePanels();
+            }
+        }
+
+        /// <summary>
+        /// Refreshes authentication state after appsettings.json changes
+        /// </summary>
+        /// <param name="settings">Updated settings</param>
+        /// <param name="name">Options name</param>
+        private void HandleSettingsChanged(CommanderSettings settings, string name)
+        {
+            _ = this.InvokeAsync(async () => { await this.RefreshAuthenticationState(); this.StateHasChanged(); });
+        }
+
+        #endregion
+
         #region Panel Navigation
+
+        /// <summary>
+        /// Initializes panels once access is allowed
+        /// </summary>
+        private void InitializePanels()
+        {
+            if (this._panelsInitialized)
+            {
+                return;
+            }
+
+            string homePath = Environment.GetEnvironmentVariable("BIVIUM_HOME") ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            this._leftPanel = new PanelState(homePath);
+            this._rightPanel = new PanelState(homePath);
+            this.RefreshVisiblePanels();
+            this._panelsInitialized = true;
+        }
 
         /// <summary>
         /// Returns the currently active panel state
@@ -1119,6 +1214,11 @@ namespace Bivium.Components.Pages
             if (this._singlePanelMode)
             {
                 this._activePanel = 0;
+                this._panelsAreaClass = "panels-area single-panel";
+            }
+            else
+            {
+                this._panelsAreaClass = "panels-area";
             }
         }
 
@@ -1166,6 +1266,31 @@ namespace Bivium.Components.Pages
         {
             List<string> extensions = this._settings.CurrentValue.EditableExtensions;
             this._settingsDialog.Show(extensions);
+        }
+
+        /// <summary>
+        /// Shows the authentication settings dialog
+        /// </summary>
+        private void DoAuthenticationSettings()
+        {
+            _ = this._authSettingsDialog.Show();
+        }
+
+        /// <summary>
+        /// Logs out the current administrator
+        /// </summary>
+        private async System.Threading.Tasks.Task DoLogout()
+        {
+            if (this._jsModule == null)
+            {
+                this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js");
+            }
+
+            bool success = await this._jsModule.InvokeAsync<bool>("postJson", "/api/Auth/logout", "{}");
+            if (success)
+            {
+                await this._jsModule.InvokeVoidAsync("reloadPage");
+            }
         }
 
         /// <summary>
@@ -1909,8 +2034,18 @@ namespace Bivium.Components.Pages
         /// <summary>
         /// Handles settings dialog close
         /// </summary>
-        private void HandleSettingsDialogClose()
+        private async System.Threading.Tasks.Task HandleSettingsDialogClose()
         {
+            await this.RefreshAuthenticationState();
+            this.StateHasChanged();
+        }
+
+        /// <summary>
+        /// Handles a completed login
+        /// </summary>
+        private async System.Threading.Tasks.Task HandleLoginComplete()
+        {
+            await this.RefreshAuthenticationState();
         }
 
         /// <summary>
@@ -2321,6 +2456,10 @@ namespace Bivium.Components.Pages
             if (this._dotNetRef != null)
             {
                 this._dotNetRef.Dispose();
+            }
+            if (this._settingsChangeSubscription != null)
+            {
+                this._settingsChangeSubscription.Dispose();
             }
         }
 

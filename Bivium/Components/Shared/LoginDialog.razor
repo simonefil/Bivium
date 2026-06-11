@@ -1,0 +1,39 @@
+@inject IJSRuntime JSRuntime
+
+<div class="context-menu-overlay">
+    <div class="context-menu" style="position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 42ch;"
+         @onclick:stopPropagation="true">
+        <div style="background-color: var(--background1); padding: 0 1ch; border-bottom: 1px solid var(--foreground2);">
+            Login
+        </div>
+        <div style="padding: 1lh 1ch;">
+            <table style="width: 100%;">
+                <tr>
+                    <td style="width: 14ch; color: var(--foreground2);">Username:</td>
+                    <td><input @bind="this._username" style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /></td>
+                </tr>
+                <tr>
+                    <td style="color: var(--foreground2);">Password:</td>
+                    <td><input type="password" @bind="this._password" style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /></td>
+                </tr>
+                @if (this.RequiresTwoFactor)
+                {
+                    <tr>
+                        <td style="color: var(--foreground2);">2FA code:</td>
+                        <td><input @bind="this._twoFactorCode" style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /></td>
+                    </tr>
+                }
+            </table>
+
+            @if (!string.IsNullOrEmpty(this._statusText))
+            {
+                <div style="color: var(--foreground2); margin-top: 0.5lh;">
+                    @this._statusText
+                </div>
+            }
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 2ch; padding: 0 1ch 1lh 1ch;">
+            <button @onclick="this.HandleLogin">Login</button>
+        </div>
+    </div>
+</div>

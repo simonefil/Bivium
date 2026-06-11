@@ -62,6 +62,14 @@
                 <span>Upload</span>
                 <span class="shortcut"></span>
             </div>
+            @if (this.CanLogout)
+            {
+                <hr />
+                <div class="context-menu-item" @onclick="this.HandleLogout">
+                    <span>Logout</span>
+                    <span class="shortcut"></span>
+                </div>
+            }
             @if (this.CanExtract || this.CanCompress)
             {
                 <hr />
@@ -173,6 +181,13 @@
                 <span>Editor Extensions...</span>
                 <span class="shortcut"></span>
             </div>
+            @if (this.CanManageAuthenticationSettings)
+            {
+                <div class="context-menu-item" @onclick="this.HandleAuthenticationSettings">
+                    <span>Authentication...</span>
+                    <span class="shortcut"></span>
+                </div>
+            }
         </div>
     }
 

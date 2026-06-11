@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Bivium.Models;
+using Bivium.Services;
 
 namespace Bivium.Controllers
 {
@@ -24,6 +25,11 @@ namespace Bivium.Controllers
         /// </summary>
         private readonly IWebHostEnvironment _environment;
 
+        /// <summary>
+        /// Local authentication service
+        /// </summary>
+        private readonly AuthenticationService _authenticationService;
+
         #endregion
 
         #region Constructor
@@ -33,10 +39,12 @@ namespace Bivium.Controllers
         /// </summary>
         /// <param name="settingsMonitor">Settings monitor for hot-reload</param>
         /// <param name="environment">Hosting environment</param>
-        public SettingsController(IOptionsMonitor<CommanderSettings> settingsMonitor, IWebHostEnvironment environment)
+        /// <param name="authenticationService">Authentication service</param>
+        public SettingsController(IOptionsMonitor<CommanderSettings> settingsMonitor, IWebHostEnvironment environment, AuthenticationService authenticationService)
         {
             this._settingsMonitor = settingsMonitor;
             this._environment = environment;
+            this._authenticationService = authenticationService;
         }
 
         #endregion
@@ -100,6 +108,172 @@ namespace Bivium.Controllers
             catch (IOException ex)
             {
                 result = this.StatusCode(500, "Failed to write settings: " + ex.Message);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Gets current authentication settings status
+        /// </summary>
+        /// <returns>Authentication status</returns>
+        [HttpGet("authentication")]
+        public IActionResult GetAuthentication()
+        {
+            AuthenticationStatus status = this._authenticationService.GetStatus(this.User);
+            IActionResult result = this.Ok(status);
+            return result;
+        }
+
+        /// <summary>
+        /// Updates local authentication settings
+        /// </summary>
+        /// <param name="request">Authentication settings request</param>
+        /// <returns>Result</returns>
+        [HttpPut("authentication")]
+        public async System.Threading.Tasks.Task<IActionResult> UpdateAuthentication([FromBody] AuthenticationSettingsRequest request)
+        {
+            IActionResult result;
+
+            try
+            {
+                if (!this._authenticationService.CanManageSettings(this.User))
+                {
+                    result = this.Unauthorized();
+                }
+                else
+                {
+                    await this._authenticationService.UpdateAuthenticationAsync(request);
+                    result = this.Ok(new { success = true });
+                }
+            }
+            catch (InvalidOperationException ex)
+            {
+                result = this.BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                result = this.StatusCode(500, ex.Message);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Creates a pending TOTP setup
+        /// </summary>
+        /// <returns>Setup payload</returns>
+        [HttpPost("authentication/twofactor/setup")]
+        public async System.Threading.Tasks.Task<IActionResult> SetupTwoFactor([FromBody] TwoFactorVerifyRequest request)
+        {
+            IActionResult result;
+
+            try
+            {
+                if (!this._authenticationService.CanManageSettings(this.User))
+                {
+                    result = this.Unauthorized();
+                }
+                else
+                {
+                    string currentPassword = "";
+                    if (request != null)
+                    {
+                        currentPassword = request.CurrentPassword;
+                    }
+
+                    TwoFactorSetupResult setup = await this._authenticationService.CreateTwoFactorSetupAsync(currentPassword);
+                    result = this.Ok(setup);
+                }
+            }
+            catch (InvalidOperationException ex)
+            {
+                result = this.BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                result = this.StatusCode(500, ex.Message);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Enables TOTP after verifying a setup code
+        /// </summary>
+        /// <param name="request">Verification request</param>
+        /// <returns>Result</returns>
+        [HttpPost("authentication/twofactor/enable")]
+        public async System.Threading.Tasks.Task<IActionResult> EnableTwoFactor([FromBody] TwoFactorVerifyRequest request)
+        {
+            IActionResult result;
+
+            try
+            {
+                if (!this._authenticationService.CanManageSettings(this.User))
+                {
+                    result = this.Unauthorized();
+                }
+                else
+                {
+                    string code = "";
+                    string currentPassword = "";
+                    if (request != null)
+                    {
+                        code = request.Code;
+                        currentPassword = request.CurrentPassword;
+                    }
+
+                    await this._authenticationService.EnableTwoFactorAsync(code, currentPassword);
+                    result = this.Ok(new { success = true });
+                }
+            }
+            catch (InvalidOperationException ex)
+            {
+                result = this.BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                result = this.StatusCode(500, ex.Message);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Disables TOTP
+        /// </summary>
+        /// <returns>Result</returns>
+        [HttpPost("authentication/twofactor/disable")]
+        public async System.Threading.Tasks.Task<IActionResult> DisableTwoFactor([FromBody] TwoFactorVerifyRequest request)
+        {
+            IActionResult result;
+
+            try
+            {
+                if (!this._authenticationService.CanManageSettings(this.User))
+                {
+                    result = this.Unauthorized();
+                }
+                else
+                {
+                    string currentPassword = "";
+                    if (request != null)
+                    {
+                        currentPassword = request.CurrentPassword;
+                    }
+
+                    await this._authenticationService.DisableTwoFactorAsync(currentPassword);
+                    result = this.Ok(new { success = true });
+                }
+            }
+            catch (InvalidOperationException ex)
+            {
+                result = this.BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                result = this.StatusCode(500, ex.Message);
             }
 
             return result;

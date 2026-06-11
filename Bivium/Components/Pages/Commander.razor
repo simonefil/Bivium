@@ -4,6 +4,16 @@
 
 <PageTitle>Bivium File Manager</PageTitle>
 
+@if (!this._authReady)
+{
+    <div></div>
+}
+else if (!this._canAccess)
+{
+    <Bivium.Components.Shared.LoginDialog RequiresTwoFactor="@this._authStatus.TwoFactorEnabled" OnLogin="this.HandleLoginComplete" />
+}
+else
+{
 <div class="commander-layout">
     <!-- Top menu bar -->
     <Bivium.Components.Shared.MenuBar
@@ -22,17 +32,21 @@
         OnRefresh="this.DoRefresh"
         OnTerminal="this.DoToggleTerminal"
         OnEditorExtensions="this.DoEditorExtensions"
+        OnAuthenticationSettings="this.DoAuthenticationSettings"
         OnExtract="this.DoExtract"
         OnCompress="this.DoCompress"
         OnToggleSinglePanel="this.DoToggleSinglePanel"
+        OnLogout="this.DoLogout"
         SinglePanelMode="@this._singlePanelMode"
         IsMultiSelection="@(this.GetActivePanel().SelectedPaths.Count > 1)"
         CanExtract="@this.CanExtractActiveTarget()"
         CanCompress="@this.CanCompressActiveTarget()"
+        CanLogout="@this._authStatus.Authenticated"
+        CanManageAuthenticationSettings="@this._authStatus.CanManageSettings"
         OnAbout="() => this._aboutDialog.Show()" />
 
     <!-- Panels area -->
-    <div class="panels-area @(this._singlePanelMode ? "single-panel" : "")">
+    <div class="@this._panelsAreaClass">
         <!-- Left panel -->
         <Bivium.Components.Panel.FilePanel
             State="@this._leftPanel"
@@ -148,6 +162,9 @@
 <Bivium.Components.Shared.SettingsDialog @ref="this._settingsDialog"
     OnClose="this.HandleSettingsDialogClose" />
 
+<Bivium.Components.Shared.AuthSettingsDialog @ref="this._authSettingsDialog"
+    OnClose="this.HandleSettingsDialogClose" />
+
 <!-- Floating windows -->
 <Bivium.Components.Shared.EditorDialog @ref="this._editorDialog"
     OnClose="this.HandleEditorDialogClose" />
@@ -159,3 +176,4 @@
 <Bivium.Components.Shared.TerminalPanel @ref="this._terminalPanel"
     WorkingDirectory="@this.GetActivePanel().CurrentPath"
     OnClose="this.HandleTerminalClose" />
+}

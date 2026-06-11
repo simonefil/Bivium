@@ -269,6 +269,119 @@ export async function putJson(url, jsonBody) {
 }
 
 /**
+ * Send a POST request with JSON body and return success status
+ * @param {string} url - Request URL
+ * @param {string} jsonBody - JSON string to send as a body
+ * @returns {Promise<boolean>} True if response is OK
+ */
+export async function postJson(url, jsonBody) {
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: jsonBody || '{}'
+        });
+        return response.ok;
+    } catch (err) {
+        return false;
+    }
+}
+
+/**
+ * Send a POST request and return parsed JSON payload
+ * @param {string} url - Request URL
+ * @param {string} jsonBody - JSON string to send as a body
+ * @returns {Promise<object>} Response envelope
+ */
+export async function postJsonResult(url, jsonBody) {
+    return await sendJsonResult(url, 'POST', jsonBody || '{}');
+}
+
+/**
+ * Send a PUT request and return parsed JSON payload
+ * @param {string} url - Request URL
+ * @param {string} jsonBody - JSON string to send as a body
+ * @returns {Promise<object>} Response envelope
+ */
+export async function putJsonResult(url, jsonBody) {
+    return await sendJsonResult(url, 'PUT', jsonBody || '{}');
+}
+
+/**
+ * Send a GET request and return parsed JSON payload
+ * @param {string} url - Request URL
+ * @returns {Promise<object>} Response envelope
+ */
+export async function getJsonResult(url) {
+    try {
+        const response = await fetch(url, {
+            method: 'GET'
+        });
+        const text = await response.text();
+        let data = null;
+        if (text) {
+            try {
+                data = JSON.parse(text);
+            } catch (err) {
+                data = null;
+            }
+        }
+        return {
+            ok: response.ok,
+            status: response.status,
+            text: text,
+            data: data
+        };
+    } catch (err) {
+        return {
+            ok: false,
+            status: 0,
+            text: '',
+            data: null
+        };
+    }
+}
+
+/**
+ * Reload the current browser page
+ */
+export function reloadPage() {
+    window.location.reload();
+}
+
+async function sendJsonResult(url, method, jsonBody) {
+    try {
+        const response = await fetch(url, {
+            method: method,
+            headers: { 'Content-Type': 'application/json' },
+            body: jsonBody
+        });
+        const text = await response.text();
+        let data = null;
+        if (text) {
+            try {
+                data = JSON.parse(text);
+            } catch (err) {
+                data = null;
+            }
+        }
+        return {
+            ok: response.ok,
+            status: response.status,
+            text: text,
+            data: data
+        };
+    } catch (err) {
+        return {
+            ok: false,
+            status: 0,
+            text: '',
+            data: null
+        };
+    }
+}
+
+/**
  * Adjust context menu position to keep it within viewport
  */
 export function adjustContextMenuPosition() {

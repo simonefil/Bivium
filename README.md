@@ -24,6 +24,8 @@ Runs on Linux, Windows and macOS. Accessible from any browser.
 
 **Archive support** — extract and create archives in ZIP, TAR, TAR.GZ, TAR.BZ2, TAR.XZ and TAR.ZST formats, with progress tracking.
 
+**Optional local authentication** — single local administrator account stored in `appsettings.json`, configurable from the Settings menu. Supports password hashing, optional TOTP 2FA with QR code setup, persistent cookie sessions, and incremental failed-attempt delays up to permanent account disable.
+
 **Permissions management** — view and edit file permissions. Shows Unix modes on Linux/macOS and RHSA attributes on Windows.
 
 **Properties inspector** — file metadata, recursive directory size calculation with file/folder count.
@@ -69,6 +71,7 @@ services:
     environment:
       - BIVIUM_PORT=5000
       - BIVIUM_HOME=/data
+      - BIVIUM_DATA_DIR=/data/.bivium
     volumes:
       - /srv:/data:rw
 ```
@@ -91,15 +94,31 @@ Then run the compiled binary:
 
 The port can also be set via the `BIVIUM_PORT` environment variable. `BIVIUM_HOME` controls which directory the panels open on startup — when not set, it defaults to the current user's home directory.
 
+`BIVIUM_DATA_DIR` controls where Data Protection keys are stored for authentication cookies. Set it to a persistent writable directory if authentication is enabled, otherwise existing browser sessions will be invalidated when keys are lost.
+
 To build the Docker image:
 
 ```bash
 docker build -t bivium .
 ```
 
+## Authentication
+
+Authentication is disabled by default and no user is created on first start. Open `Settings` -> `Authentication...` to create the single local administrator, enable or disable authentication, change credentials, and optionally configure TOTP 2FA.
+
+Even when authentication is enabled, Bivium is not designed to be exposed directly to the public Internet. Run it on a trusted local network, behind a VPN, or behind infrastructure you control.
+
+The configuration is stored under `CommanderSettings.Authentication.User` in `appsettings.json`. Passwords are stored as hashes; TOTP secrets are stored only when 2FA is enabled. The application process must have write access to `appsettings.json` for UI-based settings changes to work.
+
+Failed login attempts, invalid current-password checks, and invalid 2FA verification attempts share the same in-memory retry counter. Delays increase after each failure; after the permanent threshold, the configured user is written with `Disabled: true`. To reset a permanently disabled account or forgotten 2FA setup, edit `appsettings.json` manually and remove the `User` section, or remove the `TwoFactor` section to reset only 2FA.
+
+Authenticated sessions use cookies with an 8-hour lifetime and sliding expiration. Credential, enabled-state, disabled-state, and 2FA changes rotate the user security stamp so existing sessions are invalidated.
+
 ## Dependencies
 
-- [SharpCompress](https://github.com/adamhathcock/sharpcompress) 0.47.0 — archive format support
+- [Otp.NET](https://github.com/kspearrin/Otp.NET) 1.4.0 — TOTP verification
+- [QRCoder](https://github.com/codebude/QRCoder) 1.6.0 — QR code generation for 2FA setup
+- [SharpCompress](https://github.com/adamhathcock/sharpcompress) 0.48.1 — archive format support
 - [ZstdSharp](https://github.com/oleg-st/ZstdSharp) 0.8.7 — Zstandard compression
 - [Monaco Editor](https://microsoft.github.io/monaco-editor/) — file editor
 - [xterm.js](https://xtermjs.org/) — terminal emulator
