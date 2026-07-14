@@ -12,7 +12,7 @@ namespace Bivium.Services
         /// </summary>
         /// <param name="sourcePaths">List of source file/directory paths</param>
         /// <param name="destinationDir">Destination directory path</param>
-        /// <param name="overwritePaths">Source file paths approved for overwrite</param>
+        /// <param name="overwritePaths">Source paths approved for overwrite</param>
         /// <returns>Operation result</returns>
         FileOperationResult CopyEntries(List<string> sourcePaths, string destinationDir, List<string> overwritePaths = null);
 
@@ -22,7 +22,7 @@ namespace Bivium.Services
         /// <param name="sourcePaths">List of source file/directory paths</param>
         /// <param name="destinationDir">Destination directory path</param>
         /// <param name="onProgress">Callback invoked after each file (currentFile, totalFiles, currentFileName)</param>
-        /// <param name="overwritePaths">Source file paths approved for overwrite</param>
+        /// <param name="overwritePaths">Source paths approved for overwrite</param>
         /// <returns>Operation result</returns>
         FileOperationResult CopyEntriesWithProgress(List<string> sourcePaths, string destinationDir, Action<int, int, string> onProgress, List<string> overwritePaths = null);
 
@@ -31,7 +31,7 @@ namespace Bivium.Services
         /// </summary>
         /// <param name="sourcePaths">List of source file/directory paths</param>
         /// <param name="destinationDir">Destination directory path</param>
-        /// <param name="overwritePaths">Source file paths approved for overwrite</param>
+        /// <param name="overwritePaths">Source paths approved for overwrite</param>
         /// <returns>Operation result</returns>
         FileOperationResult MoveEntries(List<string> sourcePaths, string destinationDir, List<string> overwritePaths = null);
 
@@ -41,7 +41,7 @@ namespace Bivium.Services
         /// <param name="sourcePaths">List of source file/directory paths</param>
         /// <param name="destinationDir">Destination directory path</param>
         /// <param name="onProgress">Callback invoked after each entry (currentEntry, totalEntries, currentEntryName)</param>
-        /// <param name="overwritePaths">Source file paths approved for overwrite</param>
+        /// <param name="overwritePaths">Source paths approved for overwrite</param>
         /// <returns>Operation result</returns>
         FileOperationResult MoveEntriesWithProgress(List<string> sourcePaths, string destinationDir, Action<int, int, string> onProgress, List<string> overwritePaths = null);
 

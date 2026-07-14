@@ -241,12 +241,12 @@ namespace Bivium.Components.Pages
         private List<string> _pendingPastePaths = new List<string>();
 
         /// <summary>
-        /// Source file paths that have an overwrite conflict
+        /// Source paths that have an overwrite conflict
         /// </summary>
         private List<string> _pendingPasteConflictPaths = new List<string>();
 
         /// <summary>
-        /// Source file paths approved for overwrite
+        /// Source paths approved for overwrite
         /// </summary>
         private List<string> _pendingPasteOverwritePaths = new List<string>();
 
@@ -844,7 +844,7 @@ namespace Bivium.Components.Pages
                 List<string> paths = new List<string>(this._clipboard.Paths);
                 bool isCut = this._clipboard.IsCut;
 
-                List<string> conflictPaths = this.GetPasteFileConflicts(paths, destinationDir);
+                List<string> conflictPaths = this.GetPasteConflicts(paths, destinationDir);
                 if (conflictPaths.Count > 0)
                 {
                     this.PreparePendingPaste(paths, conflictPaths, destinationDir, isCut);
@@ -921,25 +921,28 @@ namespace Bivium.Components.Pages
         }
 
         /// <summary>
-        /// Finds paste file conflicts that need an overwrite decision
+        /// Finds paste conflicts that need an overwrite decision
         /// </summary>
         /// <param name="paths">Source paths from clipboard</param>
         /// <param name="destinationDir">Destination directory</param>
-        /// <returns>Source file paths with destination conflicts</returns>
-        private List<string> GetPasteFileConflicts(List<string> paths, string destinationDir)
+        /// <returns>Source paths with destination conflicts</returns>
+        private List<string> GetPasteConflicts(List<string> paths, string destinationDir)
         {
             List<string> result = new List<string>();
 
             for (int i = 0; i < paths.Count; i++)
             {
                 string source = paths[i];
-                if (!File.Exists(source))
+                bool sourceIsFile = File.Exists(source);
+                bool sourceIsDirectory = Directory.Exists(source);
+                if (!sourceIsFile && !sourceIsDirectory)
                 {
                     continue;
                 }
 
                 string destPath = Path.Combine(destinationDir, Path.GetFileName(source));
-                if (!this.AreSamePath(source, destPath) && File.Exists(destPath))
+                bool destinationExists = sourceIsFile ? File.Exists(destPath) : Directory.Exists(destPath);
+                if (!this.AreSamePath(source, destPath) && destinationExists)
                 {
                     result.Add(source);
                 }
@@ -952,7 +955,7 @@ namespace Bivium.Components.Pages
         /// Stores paste state while overwrite prompts are shown
         /// </summary>
         /// <param name="paths">Source paths to paste</param>
-        /// <param name="conflictPaths">Source file paths with conflicts</param>
+        /// <param name="conflictPaths">Source paths with conflicts</param>
         /// <param name="destinationDir">Destination directory</param>
         /// <param name="isCut">True when moving, false when copying</param>
         private void PreparePendingPaste(List<string> paths, List<string> conflictPaths, string destinationDir, bool isCut)
@@ -979,12 +982,15 @@ namespace Bivium.Components.Pages
 
             string sourcePath = this._pendingPasteConflictPaths[this._pendingPasteConflictIndex];
             string destinationPath = Path.Combine(this._pendingPasteDestinationDir, Path.GetFileName(sourcePath));
-            string message = "A file named '" + Path.GetFileName(sourcePath) + "' already exists in the destination.\n\n"
+            bool isDirectory = Directory.Exists(sourcePath);
+            string entryType = isDirectory ? "directory" : "file";
+            string overwriteQuestion = isDirectory ? "Merge it and overwrite conflicting contents?" : "Overwrite it?";
+            string message = "A " + entryType + " named '" + Path.GetFileName(sourcePath) + "' already exists in the destination.\n\n"
                 + "Source: " + sourcePath + "\n"
                 + "Destination: " + destinationPath + "\n\n"
-                + "Overwrite it?";
+                + overwriteQuestion;
 
-            this._overwriteDialog.Show("Overwrite file", message);
+            this._overwriteDialog.Show("Overwrite " + entryType, message);
         }
 
         /// <summary>
@@ -1257,6 +1263,24 @@ namespace Bivium.Components.Pages
             {
                 this._terminalPanel.Toggle();
             }
+        }
+
+        /// <summary>
+        /// Returns whether the terminal window is visible
+        /// </summary>
+        /// <returns>True if terminal window is visible</returns>
+        private bool IsTerminalVisible()
+        {
+            return this._terminalPanel != null && this._terminalPanel.IsVisible();
+        }
+
+        /// <summary>
+        /// Returns whether the terminal window is minimized
+        /// </summary>
+        /// <returns>True if terminal window is minimized</returns>
+        private bool IsTerminalMinimized()
+        {
+            return this._terminalPanel != null && this._terminalPanel.IsMinimized();
         }
 
         /// <summary>
@@ -2069,6 +2093,14 @@ namespace Bivium.Components.Pages
             this.StateHasChanged();
         }
 
+        /// <summary>
+        /// Handles terminal state changes
+        /// </summary>
+        private void HandleTerminalStateChanged()
+        {
+            this.StateHasChanged();
+        }
+
         #endregion
 
         #region Keyboard Handling
@@ -2079,7 +2111,7 @@ namespace Bivium.Components.Pages
         private async System.Threading.Tasks.Task InitializeKeyboardCapture()
         {
             this._dotNetRef = DotNetObjectReference.Create(this);
-            this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js");
+            this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260612-f12-reset");
             await this._jsModule.InvokeVoidAsync("captureKeyboard", this._dotNetRef);
             await this._jsModule.InvokeVoidAsync("initLongPress");
         }

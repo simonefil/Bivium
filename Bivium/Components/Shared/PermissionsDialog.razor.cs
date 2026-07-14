@@ -169,11 +169,12 @@ namespace Bivium.Components.Shared
                 return;
             }
 
-            // Apply ownership changes if owner or group changed
+            // Apply ownership changes, or reapply current ownership recursively to directory contents
             bool ownerChanged = this._model.Owner != this._originalOwner;
             bool groupChanged = this._model.IsUnix && this._model.Group != this._originalGroup;
+            bool applyOwner = ownerChanged || groupChanged || (this._isDirectory && this._recursive);
 
-            if (ownerChanged || groupChanged)
+            if (applyOwner)
             {
                 FileOperationResult ownResult = this._permissionService.SetOwner(this._entryPath, this._model.Owner, this._model.Group, this._recursive);
                 if (!ownResult.Success)

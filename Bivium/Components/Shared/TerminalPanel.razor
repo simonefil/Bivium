@@ -3,17 +3,40 @@
 <div id="terminal-window" class="terminal-window @(this._isVisible ? "visible" : "")"
      style="left: @(this._windowLeft)px; top: @(this._windowTop)px; width: @(this._windowWidth)px; height: @(this._windowHeight)px;">
 
-    <!-- Title bar (draggable) -->
     <div class="terminal-titlebar" id="terminal-titlebar">
-        <span class="terminal-titlebar-title">Terminal - @this._shellName</span>
+        <span class="terminal-titlebar-title">Terminal</span>
         <div class="terminal-titlebar-actions">
-            <span class="terminal-titlebar-btn" @onclick="this.HandleClose" title="Close (F12)">X</span>
+            <span class="terminal-titlebar-btn" @onclick="this.Minimize" title="Minimize terminal">-</span>
+            <span class="terminal-titlebar-btn" @onclick="this.RequestCloseContainer" title="Close terminal">X</span>
         </div>
     </div>
 
-    <!-- xterm.js container -->
-    <div id="terminal-container" class="terminal-body"></div>
+    <div class="terminal-tabbar">
+        @foreach (TerminalSession session in this._sessions)
+        {
+            <div class="@this.GetTabCssClass(session)" @onclick="() => this.SelectTab(session.Id)" @ondblclick="() => this.BeginRename(session)" title="@session.WorkingDirectory">
+                @if (this._renamingSessionId == session.Id)
+                {
+                    <input class="terminal-tab-rename" @ref="this._renameInputElement" value="@this._renameText" @oninput="this.HandleRenameInput" @onkeydown="this.HandleRenameKeyDown" @onblur="() => this.FinishRename(true)" @onclick:stopPropagation="true" />
+                }
+                else
+                {
+                    <span class="terminal-tab-label">@session.Label</span>
+                }
+                <span class="terminal-tab-close" @onclick="async () => await this.RequestCloseTab(session.Id)" @onclick:stopPropagation="true" title="Close tab">X</span>
+            </div>
+        }
+        <button type="button" class="terminal-tab-add" @onclick="async () => await this.CreateTab()" title="New terminal tab">+</button>
+    </div>
 
-    <!-- Resize handle -->
+    <div class="terminal-body">
+        @foreach (TerminalSession session in this._sessions)
+        {
+            <div id="terminal-container-@session.Id" class="terminal-session @(session.Id == this._activeSessionId ? "active" : "")"></div>
+        }
+    </div>
+
     <div class="terminal-resize-handle" id="terminal-resize-handle">/</div>
 </div>
+
+<Bivium.Components.Shared.ConfirmDialog @ref="this._confirmDialog" OnClose="this.HandleConfirmClose" />

@@ -13,6 +13,6 @@
     {
         <span class="cmd-key" @onclick="async () => await this.OnProperties.InvokeAsync()"><span class="key-label">Alt+Enter</span> Properties</span>
     }
-    <span class="cmd-key" @onclick="async () => await this.OnTerminal.InvokeAsync()"><span class="key-label">F12</span> Terminal</span>
+    <span class="@this.TerminalCssClass" @onclick="async () => await this.OnTerminal.InvokeAsync()"><span class="key-label">F12</span> Terminal</span>
     <span class="cmd-key" style="margin-left: auto;" @onclick="async () => await this.OnAbout.InvokeAsync()"><span class="key-label">Ctrl+?</span> About</span>
 </div>

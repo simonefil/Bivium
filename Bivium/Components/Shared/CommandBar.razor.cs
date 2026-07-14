@@ -70,10 +70,47 @@ namespace Bivium.Components.Shared
         public EventCallback OnTerminal { get; set; }
 
         /// <summary>
+        /// Whether the terminal window is visible
+        /// </summary>
+        [Parameter]
+        public bool TerminalVisible { get; set; } = false;
+
+        /// <summary>
+        /// Whether the terminal window is minimized
+        /// </summary>
+        [Parameter]
+        public bool TerminalMinimized { get; set; } = false;
+
+        /// <summary>
         /// Whether the active panel has multiple selected entries
         /// </summary>
         [Parameter]
         public bool IsMultiSelection { get; set; } = false;
+
+        #endregion
+
+        #region Properties
+
+        /// <summary>
+        /// CSS class for terminal command state
+        /// </summary>
+        private string TerminalCssClass
+        {
+            get
+            {
+                string result = "cmd-key";
+                if (this.TerminalVisible)
+                {
+                    result += " terminal-visible";
+                }
+                else if (this.TerminalMinimized)
+                {
+                    result += " terminal-minimized";
+                }
+
+                return result;
+            }
+        }
 
         #endregion
     }

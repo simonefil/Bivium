@@ -100,6 +100,8 @@ else
         OnRefresh="this.DoRefresh"
         OnProperties="this.DoProperties"
         OnTerminal="this.DoToggleTerminal"
+        TerminalVisible="@this.IsTerminalVisible()"
+        TerminalMinimized="@this.IsTerminalMinimized()"
         IsMultiSelection="@(this.GetActivePanel().SelectedPaths.Count > 1)" />
 </div>
 
@@ -175,5 +177,6 @@ else
 
 <Bivium.Components.Shared.TerminalPanel @ref="this._terminalPanel"
     WorkingDirectory="@this.GetActivePanel().CurrentPath"
-    OnClose="this.HandleTerminalClose" />
+    OnClose="this.HandleTerminalClose"
+    OnStateChanged="this.HandleTerminalStateChanged" />
 }

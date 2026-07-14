@@ -36,7 +36,7 @@ namespace Bivium.Services
         /// </summary>
         /// <param name="sourcePaths">List of source file/directory paths</param>
         /// <param name="destinationDir">Destination directory path</param>
-        /// <param name="overwritePaths">Source file paths approved for overwrite</param>
+        /// <param name="overwritePaths">Source paths approved for overwrite</param>
         /// <returns>Operation result</returns>
         public FileOperationResult CopyEntries(List<string> sourcePaths, string destinationDir, List<string> overwritePaths = null)
         {
@@ -69,13 +69,6 @@ namespace Bivium.Services
 
                     if (Directory.Exists(source))
                     {
-                        if (overwrite && Directory.Exists(destPath))
-                        {
-                            failed++;
-                            lastError = "Directory overwrite is not supported: " + destPath;
-                            continue;
-                        }
-
                         // Recursive directory copy
                         this.CopyDirectoryRecursive(source, destPath);
                         processed++;
@@ -124,7 +117,7 @@ namespace Bivium.Services
         /// <param name="sourcePaths">List of source file/directory paths</param>
         /// <param name="destinationDir">Destination directory path</param>
         /// <param name="onProgress">Callback invoked after each file (currentFile, totalFiles, currentFileName)</param>
-        /// <param name="overwritePaths">Source file paths approved for overwrite</param>
+        /// <param name="overwritePaths">Source paths approved for overwrite</param>
         /// <returns>Operation result</returns>
         public FileOperationResult CopyEntriesWithProgress(List<string> sourcePaths, string destinationDir, Action<int, int, string> onProgress, List<string> overwritePaths = null)
         {
@@ -166,13 +159,6 @@ namespace Bivium.Services
 
                     if (Directory.Exists(source))
                     {
-                        if (overwrite && Directory.Exists(destPath))
-                        {
-                            failed++;
-                            lastError = "Directory overwrite is not supported: " + destPath;
-                            continue;
-                        }
-
                         // Recursive directory copy with progress
                         this.CopyDirectoryRecursiveWithProgress(source, destPath, onProgress, ref currentCount, totalFiles);
                         processed++;
@@ -222,7 +208,7 @@ namespace Bivium.Services
         /// </summary>
         /// <param name="sourcePaths">List of source file/directory paths</param>
         /// <param name="destinationDir">Destination directory path</param>
-        /// <param name="overwritePaths">Source file paths approved for overwrite</param>
+        /// <param name="overwritePaths">Source paths approved for overwrite</param>
         /// <returns>Operation result</returns>
         public FileOperationResult MoveEntries(List<string> sourcePaths, string destinationDir, List<string> overwritePaths = null)
         {
@@ -256,14 +242,30 @@ namespace Bivium.Services
 
                     if (Directory.Exists(source))
                     {
-                        if (File.Exists(destPath) || Directory.Exists(destPath))
+                        if (File.Exists(destPath))
+                        {
+                            failed++;
+                            lastError = "Cannot overwrite file with directory: " + destPath;
+                            continue;
+                        }
+
+                        if (Directory.Exists(destPath) && !overwrite)
                         {
                             failed++;
                             lastError = "Destination already exists: " + destPath;
                             continue;
                         }
 
-                        Directory.Move(source, destPath);
+                        if (Directory.Exists(destPath))
+                        {
+                            this.CopyDirectoryRecursive(source, destPath);
+                            Directory.Delete(source, true);
+                        }
+                        else
+                        {
+                            Directory.Move(source, destPath);
+                        }
+
                         processed++;
                     }
                     else if (File.Exists(source))
@@ -329,7 +331,7 @@ namespace Bivium.Services
         /// <param name="sourcePaths">List of source file/directory paths</param>
         /// <param name="destinationDir">Destination directory path</param>
         /// <param name="onProgress">Callback invoked after each entry (currentEntry, totalEntries, currentEntryName)</param>
-        /// <param name="overwritePaths">Source file paths approved for overwrite</param>
+        /// <param name="overwritePaths">Source paths approved for overwrite</param>
         /// <returns>Operation result</returns>
         public FileOperationResult MoveEntriesWithProgress(List<string> sourcePaths, string destinationDir, Action<int, int, string> onProgress, List<string> overwritePaths = null)
         {
@@ -364,14 +366,30 @@ namespace Bivium.Services
 
                     if (Directory.Exists(source))
                     {
-                        if (File.Exists(destPath) || Directory.Exists(destPath))
+                        if (File.Exists(destPath))
+                        {
+                            failed++;
+                            lastError = "Cannot overwrite file with directory: " + destPath;
+                            continue;
+                        }
+
+                        if (Directory.Exists(destPath) && !overwrite)
                         {
                             failed++;
                             lastError = "Destination already exists: " + destPath;
                             continue;
                         }
 
-                        Directory.Move(source, destPath);
+                        if (Directory.Exists(destPath))
+                        {
+                            this.CopyDirectoryRecursive(source, destPath);
+                            Directory.Delete(source, true);
+                        }
+                        else
+                        {
+                            Directory.Move(source, destPath);
+                        }
+
                         processed++;
                         onProgress(i + 1, totalEntries, destName);
                     }

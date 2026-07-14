@@ -68,6 +68,7 @@ export function captureKeyboard(dotNetRef) {
         // F12 always goes to .NET (toggle terminal)
         if (key === 'F12') {
             e.preventDefault();
+            e.stopPropagation();
             dotNetRef.invokeMethodAsync('OnKeyDown', key, ctrl, shift, alt);
             return;
         }
@@ -160,7 +161,7 @@ export function captureKeyboard(dotNetRef) {
 
         // Send key event to .NET
         dotNetRef.invokeMethodAsync('OnKeyDown', key, ctrl, shift, alt);
-    });
+    }, true);
 }
 
 /**
