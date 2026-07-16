@@ -591,7 +591,7 @@ namespace Bivium.Components.Shared
 
             if (this._interopModule == null)
             {
-                this._interopModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260612-tabs");
+                this._interopModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260716-window-manager");
             }
 
             if (this._dotNetRef == null)

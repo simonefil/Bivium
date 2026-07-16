@@ -1,7 +1,92 @@
 // Bivium JS Interop
-// Handles: resize drag, keyboard capture, theme switching
+// Handles: resize drag, floating window stacking, keyboard capture, theme switching
 
-const initializedWindowDragElements = new WeakSet();
+const FLOATING_WINDOW_BASE_Z_INDEX = 2000;
+const FLOATING_WINDOW_FOCUS_SELECTOR = '.xterm-helper-textarea, .monaco-editor textarea, .renamer-body input:not([disabled]), .renamer-body select:not([disabled]), .renamer-body button:not([disabled])';
+const FLOATING_WINDOW_MANAGER_KEY = Symbol.for('bivium.floatingWindowManager');
+
+let floatingWindowManager = globalThis[FLOATING_WINDOW_MANAGER_KEY];
+if (!floatingWindowManager) {
+    floatingWindowManager = {
+        windows: [],
+        initializedDragElements: new WeakSet(),
+        lastFocusedElements: new WeakMap()
+    };
+    globalThis[FLOATING_WINDOW_MANAGER_KEY] = floatingWindowManager;
+}
+
+const initializedWindowDragElements = floatingWindowManager.initializedDragElements;
+
+function isFloatingWindowVisible(win) {
+    return win && win.isConnected && win.classList.contains('visible');
+}
+
+function normalizeFloatingWindowStack() {
+    floatingWindowManager.windows = floatingWindowManager.windows.filter(function (item) {
+        return item && item.isConnected;
+    });
+
+    for (let i = 0; i < floatingWindowManager.windows.length; i++) {
+        floatingWindowManager.windows[i].style.zIndex = String(FLOATING_WINDOW_BASE_Z_INDEX + i);
+    }
+}
+
+function getTopVisibleFloatingWindow() {
+    for (let i = floatingWindowManager.windows.length - 1; i >= 0; i--) {
+        const win = floatingWindowManager.windows[i];
+        if (isFloatingWindowVisible(win)) return win;
+    }
+
+    return null;
+}
+
+function restoreFloatingWindowFocus(win) {
+    let focusTarget = floatingWindowManager.lastFocusedElements.get(win);
+    if (!focusTarget || !focusTarget.isConnected || !win.contains(focusTarget)) {
+        focusTarget = win.querySelector(FLOATING_WINDOW_FOCUS_SELECTOR);
+    }
+    if (!focusTarget || !focusTarget.isConnected || !win.contains(focusTarget)) return;
+
+    requestAnimationFrame(function () {
+        if (!isFloatingWindowVisible(win) || getTopVisibleFloatingWindow() !== win || !focusTarget.isConnected) return;
+
+        try {
+            focusTarget.focus({ preventScroll: true });
+        } catch {
+            focusTarget.focus();
+        }
+    });
+}
+
+function bringFloatingWindowToFront(win, restoreFocus) {
+    floatingWindowManager.windows = floatingWindowManager.windows.filter(function (item) {
+        return item !== win && item && item.isConnected;
+    });
+    floatingWindowManager.windows.push(win);
+    normalizeFloatingWindowStack();
+
+    if (restoreFocus) restoreFloatingWindowFocus(win);
+}
+
+function activateTopVisibleFloatingWindow() {
+    normalizeFloatingWindowStack();
+    const topWindow = getTopVisibleFloatingWindow();
+    if (topWindow) restoreFloatingWindowFocus(topWindow);
+}
+
+function registerFloatingWindow(win) {
+    if (!floatingWindowManager.windows.includes(win)) {
+        floatingWindowManager.windows.push(win);
+    }
+
+    const activeElement = document.activeElement;
+    if (activeElement && win.contains(activeElement)) {
+        floatingWindowManager.lastFocusedElements.set(win, activeElement);
+    }
+
+    normalizeFloatingWindowStack();
+    if (isFloatingWindowVisible(win)) bringFloatingWindowToFront(win, true);
+}
 
 /**
  * Initialize a resizable splitter element
@@ -443,6 +528,7 @@ export function initWindowDrag(windowId, titlebarId, resizeHandleId) {
     const titlebar = document.getElementById(titlebarId);
     const resizeHandle = document.getElementById(resizeHandleId);
     if (!win || !titlebar) return;
+    registerFloatingWindow(win);
     if (initializedWindowDragElements.has(win)) return;
     initializedWindowDragElements.add(win);
 
@@ -451,8 +537,32 @@ export function initWindowDrag(windowId, titlebarId, resizeHandleId) {
     let dragOffsetX = 0;
     let dragOffsetY = 0;
 
+    win.addEventListener('pointerdown', function () {
+        bringFloatingWindowToFront(win, false);
+    }, true);
+
+    win.addEventListener('focusin', function (e) {
+        if (e.target && typeof e.target.focus === 'function') {
+            floatingWindowManager.lastFocusedElements.set(win, e.target);
+        }
+        bringFloatingWindowToFront(win, false);
+    });
+
+    let wasVisible = isFloatingWindowVisible(win);
+    const visibilityObserver = new MutationObserver(function () {
+        const isVisible = isFloatingWindowVisible(win);
+        if (isVisible && !wasVisible) {
+            bringFloatingWindowToFront(win, true);
+        } else if (!isVisible && wasVisible) {
+            activateTopVisibleFloatingWindow();
+        }
+        wasVisible = isVisible;
+    });
+    visibilityObserver.observe(win, { attributes: true, attributeFilter: ['class'] });
+
     // Drag via titlebar
     titlebar.addEventListener('mousedown', function (e) {
+        bringFloatingWindowToFront(win, true);
         isDragging = true;
         dragOffsetX = e.clientX - win.offsetLeft;
         dragOffsetY = e.clientY - win.offsetTop;

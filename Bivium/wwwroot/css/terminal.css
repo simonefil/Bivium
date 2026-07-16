@@ -2,7 +2,7 @@
 .terminal-window {
     display: none;
     position: fixed;
-    z-index: 100;
+    z-index: 2000;
     border: 1px solid var(--foreground0);
     background-color: var(--background0);
     box-shadow: 2px 2px 0 var(--background3);
