@@ -300,15 +300,19 @@ namespace Bivium.Components.Shared
         private void SelectTab(int sessionId)
         {
             TerminalSession session = this.FindSession(sessionId);
-            if (session == null || this._activeSessionId == sessionId)
+            if (session == null)
             {
                 return;
             }
 
             this.FinishRename(true);
-            this._activeSessionId = sessionId;
             session.HasUnreadOutput = false;
-            this.StateHasChanged();
+            if (this._activeSessionId != sessionId)
+            {
+                this._activeSessionId = sessionId;
+                this.StateHasChanged();
+            }
+
             _ = this.ShowActiveSession(true);
         }
 
@@ -582,7 +586,7 @@ namespace Bivium.Components.Shared
         {
             if (this._jsModule == null)
             {
-                this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/terminal.js?v=20260612-tabs");
+                this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/terminal.js?v=20260716-tab-focus");
             }
 
             if (this._interopModule == null)

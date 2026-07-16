@@ -113,6 +113,8 @@ export async function initTerminal(sessionId, containerId, dotNetReference) {
     requestAnimationFrame(function () {
         requestAnimationFrame(function () {
             fitTerminal(sessionId);
+            const currentState = getTerminalState(sessionId);
+            if (currentState && currentState.terminal === terminal && terminalContainer.classList.contains('active')) terminal.focus();
         });
     });
 

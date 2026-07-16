@@ -82,8 +82,8 @@ export async function uploadFile(destinationDir, fileName) {
                 const response = await fetch('/api/FileTransfer/upload', {
                     method: 'POST',
                     headers: {
-                        'X-Destination-Dir': destinationDir,
-                        'X-File-Name': fileName,
+                        'X-Destination-Dir': encodeURIComponent(destinationDir),
+                        'X-File-Name': encodeURIComponent(fileName),
                         'X-Chunk-Index': i.toString(),
                         'X-Total-Chunks': totalChunks.toString(),
                         'X-Upload-Id': uploadId

@@ -14,7 +14,7 @@
     <div class="terminal-tabbar">
         @foreach (TerminalSession session in this._sessions)
         {
-            <div class="@this.GetTabCssClass(session)" @onclick="() => this.SelectTab(session.Id)" @ondblclick="() => this.BeginRename(session)" title="@session.WorkingDirectory">
+            <div @key="session.Id" class="@this.GetTabCssClass(session)" @onclick="() => this.SelectTab(session.Id)" @ondblclick="() => this.BeginRename(session)" title="@session.WorkingDirectory">
                 @if (this._renamingSessionId == session.Id)
                 {
                     <input class="terminal-tab-rename" @ref="this._renameInputElement" value="@this._renameText" @oninput="this.HandleRenameInput" @onkeydown="this.HandleRenameKeyDown" @onblur="() => this.FinishRename(true)" @onclick:stopPropagation="true" />
@@ -32,7 +32,7 @@
     <div class="terminal-body">
         @foreach (TerminalSession session in this._sessions)
         {
-            <div id="terminal-container-@session.Id" class="terminal-session @(session.Id == this._activeSessionId ? "active" : "")"></div>
+            <div @key="session.Id" id="terminal-container-@session.Id" class="terminal-session @(session.Id == this._activeSessionId ? "active" : "")"></div>
         }
     </div>
 

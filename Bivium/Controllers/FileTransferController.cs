@@ -162,8 +162,8 @@ namespace Bivium.Controllers
         {
             IActionResult result;
 
-            string destinationDir = this.Request.Headers["X-Destination-Dir"].ToString();
-            string fileName = this.Request.Headers["X-File-Name"].ToString();
+            string destinationDir = Uri.UnescapeDataString(this.Request.Headers["X-Destination-Dir"].ToString());
+            string fileName = Uri.UnescapeDataString(this.Request.Headers["X-File-Name"].ToString());
             string chunkIndexStr = this.Request.Headers["X-Chunk-Index"].ToString();
             string totalChunksStr = this.Request.Headers["X-Total-Chunks"].ToString();
             string uploadIdStr = this.Request.Headers["X-Upload-Id"].ToString();
