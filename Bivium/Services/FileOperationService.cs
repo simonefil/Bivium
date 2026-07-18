@@ -118,8 +118,9 @@ namespace Bivium.Services
         /// <param name="destinationDir">Destination directory path</param>
         /// <param name="onProgress">Callback invoked after each file (currentFile, totalFiles, currentFileName)</param>
         /// <param name="overwritePaths">Source paths approved for overwrite</param>
+        /// <param name="cancellationToken">Cancellation token for lease revocation</param>
         /// <returns>Operation result</returns>
-        public FileOperationResult CopyEntriesWithProgress(List<string> sourcePaths, string destinationDir, Action<int, int, string> onProgress, List<string> overwritePaths = null)
+        public FileOperationResult CopyEntriesWithProgress(List<string> sourcePaths, string destinationDir, Action<int, int, string> onProgress, List<string> overwritePaths = null, CancellationToken cancellationToken = default)
         {
             int processed = 0;
             int failed = 0;
@@ -129,13 +130,15 @@ namespace Bivium.Services
             int totalFiles = 0;
             for (int i = 0; i < sourcePaths.Count; i++)
             {
-                totalFiles += this.CountFilesRecursive(sourcePaths[i]);
+                cancellationToken.ThrowIfCancellationRequested();
+                totalFiles += this.CountFilesRecursive(sourcePaths[i], cancellationToken);
             }
 
             int currentCount = 0;
 
             for (int i = 0; i < sourcePaths.Count; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 string source = sourcePaths[i];
 
                 if (!this._securityService.ArePathsSafe(source, destinationDir))
@@ -160,7 +163,7 @@ namespace Bivium.Services
                     if (Directory.Exists(source))
                     {
                         // Recursive directory copy with progress
-                        this.CopyDirectoryRecursiveWithProgress(source, destPath, onProgress, ref currentCount, totalFiles);
+                        this.CopyDirectoryRecursiveWithProgress(source, destPath, onProgress, ref currentCount, totalFiles, cancellationToken);
                         processed++;
                     }
                     else if (File.Exists(source))
@@ -172,7 +175,7 @@ namespace Bivium.Services
                             continue;
                         }
 
-                        File.Copy(source, destPath, overwrite);
+                        this.CopyFileCancellable(source, destPath, overwrite, cancellationToken);
                         currentCount++;
                         onProgress(currentCount, totalFiles, Path.GetFileName(source));
                         processed++;
@@ -300,7 +303,7 @@ namespace Bivium.Services
                 }
                 catch (IOException ex)
                 {
-                    // Verifica se il move e' riuscito nonostante l'eccezione
+                    // Check whether the move succeeded despite the exception
                     string destName2 = Path.GetFileName(source);
                     string destPath2 = Path.Combine(destinationDir, destName2);
                     bool movedAnyway = (File.Exists(destPath2) || Directory.Exists(destPath2)) && !File.Exists(source) && !Directory.Exists(source);
@@ -332,8 +335,9 @@ namespace Bivium.Services
         /// <param name="destinationDir">Destination directory path</param>
         /// <param name="onProgress">Callback invoked after each entry (currentEntry, totalEntries, currentEntryName)</param>
         /// <param name="overwritePaths">Source paths approved for overwrite</param>
+        /// <param name="cancellationToken">Cancellation token for lease revocation</param>
         /// <returns>Operation result</returns>
-        public FileOperationResult MoveEntriesWithProgress(List<string> sourcePaths, string destinationDir, Action<int, int, string> onProgress, List<string> overwritePaths = null)
+        public FileOperationResult MoveEntriesWithProgress(List<string> sourcePaths, string destinationDir, Action<int, int, string> onProgress, List<string> overwritePaths = null, CancellationToken cancellationToken = default)
         {
             int processed = 0;
             int failed = 0;
@@ -342,6 +346,7 @@ namespace Bivium.Services
 
             for (int i = 0; i < sourcePaths.Count; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 string source = sourcePaths[i];
 
                 if (!this._securityService.ArePathsSafe(source, destinationDir))
@@ -382,11 +387,13 @@ namespace Bivium.Services
 
                         if (Directory.Exists(destPath))
                         {
-                            this.CopyDirectoryRecursive(source, destPath);
+                            this.CopyDirectoryRecursive(source, destPath, cancellationToken);
+                            cancellationToken.ThrowIfCancellationRequested();
                             Directory.Delete(source, true);
                         }
                         else
                         {
+                            cancellationToken.ThrowIfCancellationRequested();
                             Directory.Move(source, destPath);
                         }
 
@@ -409,6 +416,7 @@ namespace Bivium.Services
                             continue;
                         }
 
+                        cancellationToken.ThrowIfCancellationRequested();
                         File.Move(source, destPath, overwrite);
                         processed++;
                         onProgress(i + 1, totalEntries, destName);
@@ -426,7 +434,7 @@ namespace Bivium.Services
                 }
                 catch (IOException ex)
                 {
-                    // Verifica se il move e' riuscito nonostante l'eccezione
+                    // Check whether the move succeeded despite the exception
                     string destName2 = Path.GetFileName(source);
                     string destPath2 = Path.Combine(destinationDir, destName2);
                     bool movedAnyway = (File.Exists(destPath2) || Directory.Exists(destPath2)) && !File.Exists(source) && !Directory.Exists(source);
@@ -456,8 +464,9 @@ namespace Bivium.Services
         /// Deletes files and directories
         /// </summary>
         /// <param name="paths">List of paths to delete</param>
+        /// <param name="cancellationToken">Cancellation token for lease revocation</param>
         /// <returns>Operation result</returns>
-        public FileOperationResult DeleteEntries(List<string> paths)
+        public FileOperationResult DeleteEntries(List<string> paths, CancellationToken cancellationToken = default)
         {
             int processed = 0;
             int failed = 0;
@@ -465,6 +474,7 @@ namespace Bivium.Services
 
             for (int i = 0; i < paths.Count; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 string path = paths[i];
 
                 if (!this._securityService.IsPathSafe(path))
@@ -478,7 +488,7 @@ namespace Bivium.Services
                 {
                     if (Directory.Exists(path))
                     {
-                        Directory.Delete(path, true);
+                        this.DeleteDirectoryCancellable(path, cancellationToken);
                         processed++;
                     }
                     else if (File.Exists(path))
@@ -721,14 +731,20 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Writes text content to a file
+        /// Writes content to a temporary file and publishes it only after final authorization
         /// </summary>
-        /// <param name="path">File path</param>
-        /// <param name="content">Text content to write</param>
+        /// <param name="path">Existing file path</param>
+        /// <param name="content">Content to write</param>
+        /// <param name="tryCommit">Callback that atomically authorizes the final move</param>
+        /// <param name="cancellationToken">Lease revocation token</param>
         /// <returns>Operation result</returns>
-        public FileOperationResult WriteFileText(string path, string content)
+        public async System.Threading.Tasks.Task<FileOperationResult> WriteFileTextAsync(string path, string content, Func<Action, bool> tryCommit, CancellationToken cancellationToken = default)
         {
-            FileOperationResult result = new FileOperationResult();
+            FileOperationResult result;
+            string tempPath = "";
+
+            if (tryCommit == null)
+                throw new ArgumentNullException(nameof(tryCommit));
 
             if (!this._securityService.IsPathSafe(path))
             {
@@ -742,8 +758,23 @@ namespace Bivium.Services
             {
                 try
                 {
-                    File.WriteAllText(path, content);
-                    result = FileOperationResult.Ok(1);
+                    // The long write targets a temporary file without retaining the lease lock
+                    cancellationToken.ThrowIfCancellationRequested();
+                    tempPath = path + ".bivium-save-" + Guid.NewGuid().ToString("N") + ".tmp";
+                    await File.WriteAllTextAsync(tempPath, content, cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    // Only the final publish runs inside the atomic workspace-authorized mutation
+                    bool committed = tryCommit(() => File.Move(tempPath, path, true));
+                    if (committed)
+                    {
+                        tempPath = "";
+                        result = FileOperationResult.Ok(1);
+                    }
+                    else
+                    {
+                        result = FileOperationResult.Fail("Workspace lease revoked");
+                    }
                 }
                 catch (UnauthorizedAccessException ex)
                 {
@@ -752,6 +783,29 @@ namespace Bivium.Services
                 catch (IOException ex)
                 {
                     result = FileOperationResult.Fail("I/O error: " + ex.Message);
+                }
+                catch (OperationCanceledException)
+                {
+                    result = FileOperationResult.Fail("Workspace lease revoked");
+                }
+                finally
+                {
+                    if (!string.IsNullOrEmpty(tempPath))
+                    {
+                        try
+                        {
+                            if (File.Exists(tempPath))
+                                File.Delete(tempPath);
+                        }
+                        catch (IOException)
+                        {
+                            // Best-effort cleanup must not hide the primary result
+                        }
+                        catch (UnauthorizedAccessException)
+                        {
+                            // Best-effort cleanup must not hide the primary result
+                        }
+                    }
                 }
             }
 
@@ -864,10 +918,7 @@ namespace Bivium.Services
         /// <returns>True if paths are equal</returns>
         private bool AreSamePath(string left, string right)
         {
-            bool result = string.Equals(
-                Path.TrimEndingDirectorySeparator(left),
-                Path.TrimEndingDirectorySeparator(right),
-                this.GetPathComparison());
+            bool result = string.Equals(Path.TrimEndingDirectorySeparator(left), Path.TrimEndingDirectorySeparator(right), this.GetPathComparison());
             return result;
         }
 
@@ -897,9 +948,7 @@ namespace Bivium.Services
         /// <returns>String comparison for filesystem paths</returns>
         private StringComparison GetPathComparison()
         {
-            StringComparison result = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
-                ? StringComparison.OrdinalIgnoreCase
-                : StringComparison.Ordinal;
+            StringComparison result = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
             return result;
         }
 
@@ -908,8 +957,9 @@ namespace Bivium.Services
         /// </summary>
         /// <param name="sourceDir">Source directory path</param>
         /// <param name="destDir">Destination directory path</param>
-        private void CopyDirectoryRecursive(string sourceDir, string destDir)
+        private void CopyDirectoryRecursive(string sourceDir, string destDir, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             // Create destination directory
             Directory.CreateDirectory(destDir);
 
@@ -919,8 +969,9 @@ namespace Bivium.Services
 
             for (int i = 0; i < files.Length; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 string destFile = Path.Combine(destDir, files[i].Name);
-                files[i].CopyTo(destFile, true);
+                this.CopyFileCancellable(files[i].FullName, destFile, true, cancellationToken);
             }
 
             // Copy subdirectories recursively
@@ -928,8 +979,9 @@ namespace Bivium.Services
 
             for (int i = 0; i < subDirs.Length; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 string destSubDir = Path.Combine(destDir, subDirs[i].Name);
-                this.CopyDirectoryRecursive(subDirs[i].FullName, destSubDir);
+                this.CopyDirectoryRecursive(subDirs[i].FullName, destSubDir, cancellationToken);
             }
         }
 
@@ -941,8 +993,9 @@ namespace Bivium.Services
         /// <param name="onProgress">Progress callback (currentFile, totalFiles, fileName)</param>
         /// <param name="currentCount">Current file counter (passed by reference)</param>
         /// <param name="totalCount">Total number of files to copy</param>
-        private void CopyDirectoryRecursiveWithProgress(string sourceDir, string destDir, Action<int, int, string> onProgress, ref int currentCount, int totalCount)
+        private void CopyDirectoryRecursiveWithProgress(string sourceDir, string destDir, Action<int, int, string> onProgress, ref int currentCount, int totalCount, CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             // Create destination directory
             Directory.CreateDirectory(destDir);
 
@@ -952,8 +1005,9 @@ namespace Bivium.Services
 
             for (int i = 0; i < files.Length; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 string destFile = Path.Combine(destDir, files[i].Name);
-                files[i].CopyTo(destFile, true);
+                this.CopyFileCancellable(files[i].FullName, destFile, true, cancellationToken);
                 currentCount++;
                 onProgress(currentCount, totalCount, files[i].Name);
             }
@@ -963,8 +1017,9 @@ namespace Bivium.Services
 
             for (int i = 0; i < subDirs.Length; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 string destSubDir = Path.Combine(destDir, subDirs[i].Name);
-                this.CopyDirectoryRecursiveWithProgress(subDirs[i].FullName, destSubDir, onProgress, ref currentCount, totalCount);
+                this.CopyDirectoryRecursiveWithProgress(subDirs[i].FullName, destSubDir, onProgress, ref currentCount, totalCount, cancellationToken);
             }
         }
 
@@ -973,8 +1028,9 @@ namespace Bivium.Services
         /// </summary>
         /// <param name="path">File or directory path</param>
         /// <returns>Total file count</returns>
-        private int CountFilesRecursive(string path)
+        private int CountFilesRecursive(string path, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             int count = 0;
 
             if (File.Exists(path))
@@ -994,7 +1050,8 @@ namespace Bivium.Services
                     DirectoryInfo[] subDirs = dirInfo.GetDirectories();
                     for (int i = 0; i < subDirs.Length; i++)
                     {
-                        count += this.CountFilesRecursive(subDirs[i].FullName);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        count += this.CountFilesRecursive(subDirs[i].FullName, cancellationToken);
                     }
                 }
                 catch (UnauthorizedAccessException)
@@ -1008,6 +1065,49 @@ namespace Bivium.Services
             }
 
             return count;
+        }
+
+        /// <summary>
+        /// Copies one file in blocks while observing revocation even for very large files
+        /// </summary>
+        private void CopyFileCancellable(string sourcePath, string destinationPath, bool overwrite, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            FileMode destinationMode = overwrite ? FileMode.Create : FileMode.CreateNew;
+            using FileStream source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using FileStream destination = new FileStream(destinationPath, destinationMode, FileAccess.Write, FileShare.None);
+            source.CopyToAsync(destination, 128 * 1024, cancellationToken).GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// Recursively removes a directory while checking revocation between entries
+        /// </summary>
+        private void DeleteDirectoryCancellable(string directoryPath, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            FileAttributes attributes = File.GetAttributes(directoryPath);
+            if ((attributes & FileAttributes.ReparsePoint) == FileAttributes.ReparsePoint)
+            {
+                Directory.Delete(directoryPath, false);
+                return;
+            }
+
+            string[] files = Directory.GetFiles(directoryPath);
+            for (int i = 0; i < files.Length; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                File.Delete(files[i]);
+            }
+
+            string[] directories = Directory.GetDirectories(directoryPath);
+            for (int i = 0; i < directories.Length; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                this.DeleteDirectoryCancellable(directories[i], cancellationToken);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            Directory.Delete(directoryPath, false);
         }
 
         #endregion

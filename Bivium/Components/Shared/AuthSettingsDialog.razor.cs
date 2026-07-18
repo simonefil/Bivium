@@ -18,6 +18,12 @@ namespace Bivium.Components.Shared
         [Parameter]
         public EventCallback OnClose { get; set; }
 
+        [Parameter]
+        public string AttachmentId { get; set; } = "";
+
+        [Parameter]
+        public long LeaseGeneration { get; set; }
+
         #endregion
 
         #region Class Variables
@@ -195,7 +201,7 @@ namespace Bivium.Components.Shared
 
             string json = JsonSerializer.Serialize(request);
             await this.EnsureJsModule();
-            JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("putJsonResult", "/api/Settings/authentication", json);
+            JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("putJsonResult", "/api/Settings/authentication", json, this.AttachmentId, this.LeaseGeneration);
 
             if (response.Ok)
             {
@@ -267,7 +273,7 @@ namespace Bivium.Components.Shared
             TwoFactorVerifyRequest request = new TwoFactorVerifyRequest();
             request.CurrentPassword = this._mfaPassword;
             string json = JsonSerializer.Serialize(request);
-            JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("postJsonResult", "/api/Settings/authentication/twofactor/setup", json);
+            JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("postJsonResult", "/api/Settings/authentication/twofactor/setup", json, this.AttachmentId, this.LeaseGeneration);
 
             if (response.Ok && response.Data.ValueKind == JsonValueKind.Object)
             {
@@ -315,7 +321,7 @@ namespace Bivium.Components.Shared
 
             string json = JsonSerializer.Serialize(request);
             await this.EnsureJsModule();
-            JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("postJsonResult", "/api/Settings/authentication/twofactor/enable", json);
+            JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("postJsonResult", "/api/Settings/authentication/twofactor/enable", json, this.AttachmentId, this.LeaseGeneration);
 
             if (response.Ok)
             {
@@ -351,7 +357,7 @@ namespace Bivium.Components.Shared
             TwoFactorVerifyRequest request = new TwoFactorVerifyRequest();
             request.CurrentPassword = this._mfaPassword;
             string json = JsonSerializer.Serialize(request);
-            JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("postJsonResult", "/api/Settings/authentication/twofactor/disable", json);
+            JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("postJsonResult", "/api/Settings/authentication/twofactor/disable", json, this.AttachmentId, this.LeaseGeneration);
 
             if (response.Ok)
             {
@@ -390,7 +396,7 @@ namespace Bivium.Components.Shared
 
             string json = JsonSerializer.Serialize(request);
             await this.EnsureJsModule();
-            JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("postJsonResult", "/api/Settings/authentication/password", json);
+            JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("postJsonResult", "/api/Settings/authentication/password", json, this.AttachmentId, this.LeaseGeneration);
 
             if (response.Ok)
             {

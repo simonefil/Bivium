@@ -51,6 +51,12 @@ namespace Bivium.Components.Shared
         public EventCallback OnExit { get; set; }
 
         /// <summary>
+        /// Callback for the explicit destructive workspace reset
+        /// </summary>
+        [Parameter]
+        public EventCallback OnResetWorkspace { get; set; }
+
+        /// <summary>
         /// Callback for Copy action
         /// </summary>
         [Parameter]
@@ -325,6 +331,14 @@ namespace Bivium.Components.Shared
         private async System.Threading.Tasks.Task HandleExit()
         {
             await this.HandleAction(this.OnExit);
+        }
+
+        /// <summary>
+        /// Handles the explicit workspace reset action
+        /// </summary>
+        private async System.Threading.Tasks.Task HandleResetWorkspace()
+        {
+            await this.HandleAction(this.OnResetWorkspace);
         }
 
         /// <summary>

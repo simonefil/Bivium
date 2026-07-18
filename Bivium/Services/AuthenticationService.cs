@@ -220,8 +220,9 @@ namespace Bivium.Services
         /// Updates main authentication settings and local admin credentials
         /// </summary>
         /// <param name="request">Settings update request</param>
-        public async System.Threading.Tasks.Task UpdateAuthenticationAsync(AuthenticationSettingsRequest request)
+        public async System.Threading.Tasks.Task UpdateAuthenticationAsync(AuthenticationSettingsRequest request, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (request == null)
             {
                 throw new InvalidOperationException("Missing authentication settings");
@@ -338,7 +339,7 @@ namespace Bivium.Services
                 {
                     authNode.Remove("User");
                 }
-            });
+            }, cancellationToken);
 
             lock (this._lock)
             {
@@ -352,8 +353,9 @@ namespace Bivium.Services
         /// Changes the configured administrator password
         /// </summary>
         /// <param name="request">Password change request</param>
-        public async System.Threading.Tasks.Task ChangePasswordAsync(ChangePasswordRequest request)
+        public async System.Threading.Tasks.Task ChangePasswordAsync(ChangePasswordRequest request, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (request == null)
             {
                 throw new InvalidOperationException("Missing password change request");
@@ -389,7 +391,7 @@ namespace Bivium.Services
                 hashUser.Username = auth.User.Username;
                 userNode["PasswordHash"] = this._passwordHasher.HashPassword(hashUser, request.NewPassword ?? "");
                 userNode["SecurityStamp"] = Guid.NewGuid().ToString("N");
-            });
+            }, cancellationToken);
 
             lock (this._lock)
             {
@@ -403,8 +405,9 @@ namespace Bivium.Services
         /// Creates a pending two-factor setup and returns QR code data
         /// </summary>
         /// <returns>Two-factor setup data</returns>
-        public async System.Threading.Tasks.Task<TwoFactorSetupResult> CreateTwoFactorSetupAsync(string currentPassword)
+        public async System.Threading.Tasks.Task<TwoFactorSetupResult> CreateTwoFactorSetupAsync(string currentPassword, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             AuthenticationSettings auth = this.GetAuthenticationSettings();
             if (!this.HasConfiguredUser(auth))
             {
@@ -439,6 +442,7 @@ namespace Bivium.Services
 
             lock (this._lock)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 this._pendingTwoFactorSecret = secret;
             }
 
@@ -453,8 +457,9 @@ namespace Bivium.Services
         /// </summary>
         /// <param name="code">TOTP code</param>
         /// <param name="currentPassword">Current administrator password</param>
-        public async System.Threading.Tasks.Task EnableTwoFactorAsync(string code, string currentPassword)
+        public async System.Threading.Tasks.Task EnableTwoFactorAsync(string code, string currentPassword, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             AuthenticationSettings auth = this.GetAuthenticationSettings();
             if (!this.HasConfiguredUser(auth))
             {
@@ -492,7 +497,7 @@ namespace Bivium.Services
                 twoFactorNode["Enabled"] = true;
                 twoFactorNode["Secret"] = secret;
                 userNode["SecurityStamp"] = Guid.NewGuid().ToString("N");
-            });
+            }, cancellationToken);
 
             lock (this._lock)
             {
@@ -506,8 +511,9 @@ namespace Bivium.Services
         /// Disables two-factor authentication
         /// </summary>
         /// <param name="currentPassword">Current administrator password</param>
-        public async System.Threading.Tasks.Task DisableTwoFactorAsync(string currentPassword)
+        public async System.Threading.Tasks.Task DisableTwoFactorAsync(string currentPassword, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             AuthenticationSettings auth = this.GetAuthenticationSettings();
             if (!this.HasConfiguredUser(auth))
             {
@@ -531,7 +537,7 @@ namespace Bivium.Services
                 JsonObject userNode = this.GetOrCreateObject(authNode, "User");
                 userNode.Remove("TwoFactor");
                 userNode["SecurityStamp"] = Guid.NewGuid().ToString("N");
-            });
+            }, cancellationToken);
 
             lock (this._lock)
             {
@@ -823,10 +829,12 @@ namespace Bivium.Services
         /// Updates the Authentication node in appsettings.json
         /// </summary>
         /// <param name="update">Update action</param>
-        private void UpdateAuthenticationNode(Action<JsonObject> update)
+        private void UpdateAuthenticationNode(Action<JsonObject> update, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             lock (this._lock)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 string settingsPath = Path.Combine(this._environment.ContentRootPath, "appsettings.json");
                 string json = File.ReadAllText(settingsPath);
 
@@ -841,10 +849,12 @@ namespace Bivium.Services
                 JsonObject authNode = this.GetOrCreateObject(commanderSettings, "Authentication");
 
                 update(authNode);
+                cancellationToken.ThrowIfCancellationRequested();
 
                 JsonSerializerOptions writeOptions = new JsonSerializerOptions();
                 writeOptions.WriteIndented = true;
                 string updatedJson = root.ToJsonString(writeOptions);
+                cancellationToken.ThrowIfCancellationRequested();
                 File.WriteAllText(settingsPath, updatedJson);
 
                 IConfigurationRoot configurationRoot = this._configuration as IConfigurationRoot;

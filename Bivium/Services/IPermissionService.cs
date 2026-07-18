@@ -20,8 +20,9 @@ namespace Bivium.Services
         /// <param name="path">File or directory path</param>
         /// <param name="model">Permission model to apply</param>
         /// <param name="recursive">If true, apply recursively to directory contents</param>
+        /// <param name="cancellationToken">Cancellation token for lease revocation</param>
         /// <returns>Operation result</returns>
-        FileOperationResult SetPermissions(string path, PermissionModel model, bool recursive);
+        FileOperationResult SetPermissions(string path, PermissionModel model, bool recursive, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Sets the owner of a file or directory
@@ -30,7 +31,8 @@ namespace Bivium.Services
         /// <param name="owner">New owner name</param>
         /// <param name="group">New group name (Linux only, ignored on Windows)</param>
         /// <param name="recursive">If true, apply recursively to directory contents</param>
+        /// <param name="cancellationToken">Cancellation token for lease revocation</param>
         /// <returns>Operation result</returns>
-        FileOperationResult SetOwner(string path, string owner, string group, bool recursive);
+        FileOperationResult SetOwner(string path, string owner, string group, bool recursive, CancellationToken cancellationToken = default);
     }
 }

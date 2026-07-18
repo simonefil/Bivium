@@ -13,8 +13,9 @@ namespace Bivium.Services
         /// <param name="archivePath">Path to the archive file</param>
         /// <param name="destinationDir">Directory to extract into</param>
         /// <param name="onProgress">Progress callback (current, total, currentFileName)</param>
+        /// <param name="cancellationToken">Cancellation token for lease revocation</param>
         /// <returns>Operation result</returns>
-        FileOperationResult ExtractArchive(string archivePath, string destinationDir, Action<int, int, string> onProgress);
+        FileOperationResult ExtractArchive(string archivePath, string destinationDir, Action<int, int, string> onProgress, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Creates an archive from a list of files and directories
@@ -23,8 +24,9 @@ namespace Bivium.Services
         /// <param name="sourcePaths">List of file/directory paths to compress</param>
         /// <param name="format">Archive format to create</param>
         /// <param name="onProgress">Progress callback (current, total, currentFileName)</param>
+        /// <param name="cancellationToken">Cancellation token for lease revocation</param>
         /// <returns>Operation result</returns>
-        FileOperationResult CreateArchive(string outputPath, List<string> sourcePaths, ArchiveFormat format, Action<int, int, string> onProgress);
+        FileOperationResult CreateArchive(string outputPath, List<string> sourcePaths, ArchiveFormat format, Action<int, int, string> onProgress, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Checks if a file path has a supported archive extension
@@ -37,7 +39,7 @@ namespace Bivium.Services
         /// Gets the default file extension for an archive format
         /// </summary>
         /// <param name="format">Archive format</param>
-        /// <returns>File extension including dot (e.g. ".zip")</returns>
+        /// <returns>File extension including dot (and.g. ".zip")</returns>
         string GetExtension(ArchiveFormat format);
     }
 }

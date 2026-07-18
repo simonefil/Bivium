@@ -29,6 +29,24 @@ namespace Bivium.Components.Pages
         private IFileSystemService _fileSystemService { get; set; }
 
         /// <summary>
+        /// Global runtime workspace
+        /// </summary>
+        [Inject]
+        private BiviumWorkspaceService _workspaceService { get; set; }
+
+        /// <summary>
+        /// Global terminal runtime used only by the explicit workspace reset
+        /// </summary>
+        [Inject]
+        private TerminalRuntimeService _terminalRuntimeService { get; set; }
+
+        /// <summary>
+        /// Filesystem path validation
+        /// </summary>
+        [Inject]
+        private SecurityService _securityService { get; set; }
+
+        /// <summary>
         /// File operation service
         /// </summary>
         [Inject]
@@ -51,6 +69,12 @@ namespace Bivium.Components.Pages
         /// </summary>
         [Inject]
         private AuthenticationStateProvider _authenticationStateProvider { get; set; }
+
+        /// <summary>
+        /// HTTP context used only for server-observed client metadata
+        /// </summary>
+        [Inject]
+        private IHttpContextAccessor _httpContextAccessor { get; set; }
 
         #endregion
 
@@ -300,12 +324,57 @@ namespace Bivium.Components.Pages
         /// </summary>
         private bool _keyboardInitialized = false;
 
+        /// <summary>
+        /// Workspace revision currently rendered by this circuit
+        /// </summary>
+        private long _workspaceRevision = 0;
+
+        /// <summary>
+        /// Unpredictable identifier of the current attachment
+        /// </summary>
+        private string _attachmentId = "";
+
+        /// <summary>
+        /// Lease generation observed by the circuit
+        /// </summary>
+        private long _leaseGeneration = 0;
+
+        /// <summary>
+        /// Whether the circuit is registered in the workspace
+        /// </summary>
+        private bool _clientAttached = false;
+
+        /// <summary>
+        /// Whether the circuit owns mutation control
+        /// </summary>
+        private bool _hasActiveLease = false;
+
+        /// <summary>
+        /// Active lease shown in the challenge
+        /// </summary>
+        private ActiveClientLeaseSnapshot _observedLease;
+
+        /// <summary>
+        /// Subscription to revocations and takeovers
+        /// </summary>
+        private IDisposable _workspaceChangeSubscription;
+
+        /// <summary>
+        /// Client heartbeat cancellation
+        /// </summary>
+        private CancellationTokenRegistration _leaseRevocationRegistration;
+
+        /// <summary>
+        /// Whether the component is detaching
+        /// </summary>
+        private bool _isDisposed = false;
+
         #endregion
 
         #region Overrides
 
         /// <summary>
-        /// Initialize panels with user home directory
+        /// Initializes panels with the user home directory
         /// </summary>
         protected override async System.Threading.Tasks.Task OnInitializedAsync()
         {
@@ -321,7 +390,7 @@ namespace Bivium.Components.Pages
             if (!this._keyboardInitialized && this._canAccess)
             {
                 this._keyboardInitialized = true;
-                _ = this.InitializeKeyboardCapture();
+                _ = this.InitializeKeyboardCaptureAsync();
             }
 
             // Scroll cursor into view after DOM is ready
@@ -333,6 +402,8 @@ namespace Bivium.Components.Pages
                     _ = this._jsModule.InvokeVoidAsync("scrollCursorIntoView", this.GetActivePanel().CursorIndex);
                 }
             }
+
+            this.PersistWorkspacePanels();
         }
 
         #endregion
@@ -350,7 +421,9 @@ namespace Bivium.Components.Pages
             this._authReady = true;
             if (this._canAccess)
             {
-                this.InitializePanels();
+                this.EnsureClientAttachment();
+                if (this._hasActiveLease)
+                    this.InitializePanels();
             }
         }
 
@@ -369,20 +442,375 @@ namespace Bivium.Components.Pages
         #region Panel Navigation
 
         /// <summary>
-        /// Initializes panels once access is allowed
+        /// Registers the circuit and acquires or requests the exclusive lease
+        /// </summary>
+        private void EnsureClientAttachment()
+        {
+            if (this._clientAttached)
+                return;
+
+            HttpContext context = this._httpContextAccessor.HttpContext;
+            string remoteIp = context?.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            string userAgent = context?.Request.Headers.UserAgent.ToString() ?? "Browser";
+            WorkspaceAttachResult result = this._workspaceService.AttachClient(remoteIp, userAgent);
+            this._attachmentId = result.AttachmentId;
+            this._clientAttached = true;
+            BiviumWorkspaceSnapshot workspace;
+            this._workspaceChangeSubscription = this._workspaceService.SubscribeAttachment(this._attachmentId, this.HandleWorkspaceLeaseChanged, out workspace);
+            this.ApplyAttachResult(result);
+            this.HandleWorkspaceLeaseChanged(workspace);
+        }
+
+        /// <summary>
+        /// Applies a result of attach or takeover
+        /// </summary>
+        private void ApplyAttachResult(WorkspaceAttachResult result)
+        {
+            this._hasActiveLease = result != null && result.HasControl;
+            this._observedLease = result?.ActiveLease;
+            this._leaseGeneration = this._hasActiveLease && result.ActiveLease != null ? result.ActiveLease.Generation : 0;
+            if (result != null)
+                this._workspaceRevision = Math.Max(this._workspaceRevision, result.WorkspaceRevision);
+            this.ConfigureLeaseRevocation();
+        }
+
+        /// <summary>
+        /// Connects the circuit to the server-side token revoked atomically by takeover
+        /// </summary>
+        private void ConfigureLeaseRevocation()
+        {
+            this._leaseRevocationRegistration.Dispose();
+            if (!this._hasActiveLease)
+                return;
+            CancellationToken revocationToken = this._workspaceService.GetRevocationToken(this.GetClientToken());
+            this._leaseRevocationRegistration = revocationToken.Register(() =>
+            {
+                if (this._isDisposed)
+                    return;
+                _ = this.InvokeAsync(() =>
+                {
+                    if (this._isDisposed)
+                        return;
+                    this._hasActiveLease = false;
+                    this._leaseGeneration = 0;
+                    this._panelsInitialized = false;
+                    this.StateHasChanged();
+                });
+            });
+        }
+
+        /// <summary>
+        /// Shows confirmation and attempts takeover with generation compare-and-swap
+        /// </summary>
+        private async System.Threading.Tasks.Task RequestWorkspaceTakeover()
+        {
+            if (!this._clientAttached)
+                return;
+
+            string activeIp = this._observedLease?.RemoteIp ?? "unknown";
+            string confirmationMessage = "Hai Bivium già aperto da IP " + activeIp + ". Vuoi rendere attiva questa sessione?";
+            bool confirmed = await this.JSRuntime.InvokeAsync<bool>("confirm", confirmationMessage);
+            if (!confirmed)
+                return;
+
+            long expectedGeneration = this._observedLease?.Generation ?? 0;
+            WorkspaceAttachResult result = this._workspaceService.TryTakeover(this._attachmentId, expectedGeneration);
+            this.ApplyAttachResult(result);
+            if (this._hasActiveLease)
+                this.InitializePanels();
+            this.StateHasChanged();
+        }
+
+        /// <summary>
+        /// Reacts immediately to revocation, detach or takeover
+        /// </summary>
+        private void HandleWorkspaceLeaseChanged(BiviumWorkspaceSnapshot workspace)
+        {
+            if (this._isDisposed || workspace == null)
+                return;
+
+            ActiveClientLeaseSnapshot lease = workspace.ActiveClientLease;
+            bool hasControl = lease != null && lease.AttachmentId == this._attachmentId;
+            bool changed = hasControl != this._hasActiveLease || (hasControl && lease.Generation != this._leaseGeneration);
+            this._observedLease = lease;
+            this._workspaceRevision = Math.Max(this._workspaceRevision, workspace.Revision);
+            if (!changed)
+                return;
+
+            this._hasActiveLease = hasControl;
+            this._leaseGeneration = hasControl ? lease.Generation : 0;
+            this.ConfigureLeaseRevocation();
+            if (!hasControl)
+                this._panelsInitialized = false;
+            _ = this.InvokeAsync(() =>
+            {
+                if (this._hasActiveLease)
+                    this.InitializePanels();
+                this.StateHasChanged();
+            });
+        }
+
+        /// <summary>
+        /// Receives a browser heartbeat and automatically reacquires an available lease
+        /// </summary>
+        [JSInvokable]
+        public void OnWorkspaceHeartbeat()
+        {
+            if (this._isDisposed || !this._clientAttached)
+                return;
+
+            if (this._hasActiveLease && this._workspaceService.Heartbeat(this.GetClientToken()))
+                return;
+
+            WorkspaceAttachResult result = this._workspaceService.TryReconnectClient(this._attachmentId);
+            this.ApplyAttachResult(result);
+            if (this._hasActiveLease)
+                this.InitializePanels();
+            this.StateHasChanged();
+        }
+
+        /// <summary>
+        /// Revokes control when the browser reports leaving the page
+        /// </summary>
+        [JSInvokable]
+        public void OnWorkspaceDisconnected()
+        {
+            if (this._isDisposed || !this._clientAttached || !this._hasActiveLease)
+                return;
+
+            WorkspaceClientToken token = this.GetClientToken();
+            this._workspaceService.MarkClientDisconnected(token);
+            this._hasActiveLease = false;
+            this._leaseGeneration = 0;
+            this._panelsInitialized = false;
+        }
+
+        /// <summary>
+        /// Returns the current mutation token
+        /// </summary>
+        private WorkspaceClientToken GetClientToken()
+        {
+            return new WorkspaceClientToken(this._attachmentId, this._leaseGeneration);
+        }
+
+        /// <summary>
+        /// Revalidates the lease in the server process immediately before a mutation
+        /// </summary>
+        /// <returns>True if the circuit still owns the workspace</returns>
+        private bool CanMutateWorkspace()
+        {
+            bool result = this._hasActiveLease && this._workspaceService.ValidateMutation(this.GetClientToken());
+            if (!result)
+            {
+                this._hasActiveLease = false;
+                this._leaseGeneration = 0;
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Initializes the panels when the lease grants access
         /// </summary>
         private void InitializePanels()
         {
             if (this._panelsInitialized)
+                return;
+
+            string homePath = this.GetHomePath();
+            WorkspacePanelSnapshot defaultPanel = new WorkspacePanelSnapshot(homePath, "", 0, new List<string>(), SortField.Name, SortDirection.Ascending);
+            WorkspacePanelsSnapshot defaultPanels = new WorkspacePanelsSnapshot(defaultPanel, defaultPanel, 0, false);
+            BiviumWorkspaceSnapshot workspace = this._workspaceService.InitializePanels(this.GetClientToken(), defaultPanels);
+            this.ApplyWorkspacePanels(workspace, homePath);
+            this._panelsInitialized = true;
+        }
+
+        /// <summary>
+        /// Applies authoritative panel state to the current circuit
+        /// </summary>
+        /// <param name="workspace">Authoritative workspace snapshot</param>
+        /// <param name="homePath">Fallback directory</param>
+        private void ApplyWorkspacePanels(BiviumWorkspaceSnapshot workspace, string homePath)
+        {
+            if (workspace == null || workspace.Panels == null)
+                return;
+
+            bool leftFallback;
+            bool rightFallback;
+            this._leftPanel = this.RestorePanel(workspace.Panels.LeftPanel, homePath, out leftFallback);
+            this._rightPanel = this.RestorePanel(workspace.Panels.RightPanel, homePath, out rightFallback);
+            this._singlePanelMode = workspace.Panels.SinglePanelMode;
+            this._activePanel = this._singlePanelMode ? 0 : Math.Clamp(workspace.Panels.ActivePanel, 0, 1);
+            this._panelsAreaClass = this._singlePanelMode ? "panels-area single-panel" : "panels-area";
+            this._workspaceRevision = workspace.Revision;
+
+            if (leftFallback || rightFallback)
+                this._progressText = "A saved panel path is unavailable. Opened the home directory instead.";
+        }
+
+        /// <summary>
+        /// Rebuilds a panel while revalidating paths, selection and cursor
+        /// </summary>
+        /// <param name="snapshot">Persistent panel snapshot</param>
+        /// <param name="homePath">Fallback directory</param>
+        /// <param name="usedFallback">Whether the fallback directory was used</param>
+        /// <returns>Reconciled runtime state</returns>
+        private PanelState RestorePanel(WorkspacePanelSnapshot snapshot, string homePath, out bool usedFallback)
+        {
+            // Revalidate the persisted path before rebuilding filesystem-dependent state
+            string path = snapshot == null ? "" : snapshot.CurrentPath;
+            usedFallback = !this.IsRestorableDirectory(path);
+            if (usedFallback)
+                path = homePath;
+
+            PanelState result = new PanelState(path);
+            if (snapshot != null)
+            {
+                result.CurrentSort = new SortColumn(snapshot.SortField, snapshot.SortDirection);
+                result.ScrollAnchorPath = snapshot.ScrollAnchorPath;
+                for (int i = 0; i < snapshot.ExpandedDirectoryPaths.Count; i++)
+                {
+                    if (this.IsRestorableDirectory(snapshot.ExpandedDirectoryPaths[i]))
+                        result.ExpandedDirectoryPaths.Add(snapshot.ExpandedDirectoryPaths[i]);
+                }
+            }
+
+            this.LoadPanelContents(result);
+            if (snapshot == null)
+                return result;
+
+            // Reconcile selection and cursor by path because indices are not stable across listings
+            StringComparer pathComparer = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+            HashSet<string> availablePaths = new HashSet<string>(pathComparer);
+            for (int i = 0; i < result.Entries.Count; i++)
+            {
+                availablePaths.Add(result.Entries[i].FullPath);
+            }
+
+            for (int i = 0; i < snapshot.SelectedPaths.Count; i++)
+            {
+                if (availablePaths.Contains(snapshot.SelectedPaths[i]))
+                    result.SelectedPaths.Add(snapshot.SelectedPaths[i]);
+            }
+
+            int cursorIndex = -1;
+            if (!string.IsNullOrEmpty(snapshot.CursorPath))
+            {
+                for (int i = 0; i < result.Entries.Count; i++)
+                {
+                    if (pathComparer.Equals(result.Entries[i].FullPath, snapshot.CursorPath))
+                    {
+                        cursorIndex = i;
+                        break;
+                    }
+                }
+            }
+
+            if (cursorIndex < 0 && result.Entries.Count > 0)
+                cursorIndex = Math.Clamp(snapshot.CursorIndex, 0, result.Entries.Count - 1);
+
+            result.CursorIndex = cursorIndex < 0 ? 0 : cursorIndex;
+            if (!availablePaths.Contains(result.ScrollAnchorPath))
+                result.ScrollAnchorPath = result.Entries.Count == 0 ? "" : result.Entries[result.CursorIndex].FullPath;
+            return result;
+        }
+
+        /// <summary>
+        /// Saves persistent panel state when it changes
+        /// </summary>
+        private void PersistWorkspacePanels()
+        {
+            if (!this._panelsInitialized)
+                return;
+
+            WorkspacePanelsSnapshot panels = new WorkspacePanelsSnapshot(this.CreatePanelSnapshot(this._leftPanel), this.CreatePanelSnapshot(this._rightPanel), this._activePanel, this._singlePanelMode);
+            BiviumWorkspaceSnapshot workspace;
+            bool updated;
+            try
+            {
+                // The first attempt uses the revision from which the circuit's visible state derives
+                updated = this._workspaceService.TryUpdatePanels(this.GetClientToken(), this._workspaceRevision, panels, out workspace);
+            }
+            catch (Exception ex) when (ex is ObjectDisposedException || ex is UnauthorizedAccessException)
             {
                 return;
             }
 
-            string homePath = Environment.GetEnvironmentVariable("BIVIUM_HOME") ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            this._leftPanel = new PanelState(homePath);
-            this._rightPanel = new PanelState(homePath);
-            this.RefreshVisiblePanels();
-            this._panelsInitialized = true;
+            if (updated)
+            {
+                this._workspaceRevision = workspace.Revision;
+            }
+            else if (workspace.Panels != null)
+            {
+                // One retry preserves the local mutation when only another workspace area changed
+                try
+                {
+                    updated = this._workspaceService.TryUpdatePanels(this.GetClientToken(), workspace.Revision, panels, out workspace);
+                }
+                catch (Exception ex) when (ex is ObjectDisposedException || ex is UnauthorizedAccessException)
+                {
+                    return;
+                }
+
+                if (updated)
+                    this._workspaceRevision = workspace.Revision;
+                else
+                {
+                    // Two consecutive conflicts make the latest singleton snapshot authoritative
+                    this.ApplyWorkspacePanels(workspace, this.GetHomePath());
+                    _ = this.InvokeAsync(this.StateHasChanged);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Creates the persistent snapshot of a runtime panel
+        /// </summary>
+        /// <param name="panel">Runtime panel</param>
+        /// <returns>Persistent snapshot</returns>
+        private WorkspacePanelSnapshot CreatePanelSnapshot(PanelState panel)
+        {
+            string cursorPath = "";
+            if (panel.CursorIndex >= 0 && panel.CursorIndex < panel.Entries.Count)
+                cursorPath = panel.Entries[panel.CursorIndex].FullPath;
+
+            List<string> expandedPaths = new List<string>(panel.ExpandedDirectoryPaths);
+            expandedPaths.Sort(StringComparer.Ordinal);
+            return new WorkspacePanelSnapshot(panel.CurrentPath, cursorPath, panel.CursorIndex, panel.SelectedPaths, panel.CurrentSort.Field, panel.CurrentSort.Direction, panel.ScrollAnchorPath, expandedPaths);
+        }
+
+        /// <summary>
+        /// Returns the configured usable home directory
+        /// </summary>
+        /// <returns>Home directory</returns>
+        private string GetHomePath()
+        {
+            string result = Environment.GetEnvironmentVariable("BIVIUM_HOME") ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (!this.IsRestorableDirectory(result))
+                result = Environment.CurrentDirectory;
+
+            return result;
+        }
+
+        /// <summary>
+        /// Validates whether a saved directory can be restored
+        /// </summary>
+        /// <param name="path">Path to verify</param>
+        /// <returns>True when the path is safe and exists</returns>
+        private bool IsRestorableDirectory(string path)
+        {
+            bool result = false;
+
+            try
+            {
+                result = this._securityService.IsPathSafe(path) && Directory.Exists(path);
+            }
+            catch (Exception)
+            {
+                result = false;
+            }
+
+            return result;
         }
 
         /// <summary>
@@ -435,6 +863,7 @@ namespace Bivium.Components.Pages
         {
             this._leftPanel.CurrentPath = path;
             this._leftPanel.CursorIndex = 0;
+            this._leftPanel.ScrollAnchorPath = "";
             this._leftPanel.SelectedPaths.Clear();
             this.LoadPanelContents(this._leftPanel);
         }
@@ -447,6 +876,7 @@ namespace Bivium.Components.Pages
         {
             this._rightPanel.CurrentPath = path;
             this._rightPanel.CursorIndex = 0;
+            this._rightPanel.ScrollAnchorPath = "";
             this._rightPanel.SelectedPaths.Clear();
             this.LoadPanelContents(this._rightPanel);
         }
@@ -505,6 +935,32 @@ namespace Bivium.Components.Pages
         private void HandleRightCursorChanged(int index)
         {
             this._rightPanel.CursorIndex = index;
+        }
+
+        /// <summary>
+        /// Persists the semantic scroll anchor of the left panel
+        /// </summary>
+        /// <param name="path">First visible entry path</param>
+        private void HandleLeftScrollAnchorChanged(string path)
+        {
+            this._leftPanel.ScrollAnchorPath = path;
+        }
+
+        /// <summary>
+        /// Persists the semantic scroll anchor of the right panel
+        /// </summary>
+        /// <param name="path">First visible entry path</param>
+        private void HandleRightScrollAnchorChanged(string path)
+        {
+            this._rightPanel.ScrollAnchorPath = path;
+        }
+
+        /// <summary>
+        /// Marks a semantic directory-tree expansion change for workspace persistence
+        /// </summary>
+        private void HandlePanelTreeExpansionChanged()
+        {
+            // EventCallback triggers the render that persists the updated expanded-directory snapshot
         }
 
         #endregion
@@ -865,13 +1321,14 @@ namespace Bivium.Components.Pages
         /// <param name="overwritePaths">Source paths approved for overwrite</param>
         private void StartPasteOperation(List<string> paths, string destinationDir, bool isCut, List<string> overwritePaths)
         {
-            if (paths.Count == 0)
+            if (paths.Count == 0 || !this.CanMutateWorkspace())
             {
                 return;
             }
 
             List<string> operationPaths = new List<string>(paths);
             List<string> operationOverwritePaths = new List<string>(overwritePaths);
+            CancellationToken cancellationToken = this._workspaceService.GetRevocationToken(this.GetClientToken());
 
             // Show initial progress
             this._progressText = isCut ? "Moving..." : "Copying...";
@@ -883,18 +1340,30 @@ namespace Bivium.Components.Pages
             {
                 FileOperationResult result;
 
-                if (isCut)
+                try
                 {
-                    result = this._fileOperationService.MoveEntriesWithProgress(operationPaths, destinationDir, onProgress, operationOverwritePaths);
+                    if (isCut)
+                    {
+                        result = this._fileOperationService.MoveEntriesWithProgress(operationPaths, destinationDir, onProgress, operationOverwritePaths, cancellationToken);
+                    }
+                    else
+                    {
+                        result = this._fileOperationService.CopyEntriesWithProgress(operationPaths, destinationDir, onProgress, operationOverwritePaths, cancellationToken);
+                    }
                 }
-                else
+                catch (OperationCanceledException)
                 {
-                    result = this._fileOperationService.CopyEntriesWithProgress(operationPaths, destinationDir, onProgress, operationOverwritePaths);
+                    result = FileOperationResult.Fail("Operation cancelled because browser control was revoked.");
                 }
 
                 // Update UI on the render thread
                 _ = this.InvokeAsync(() =>
                 {
+                    if (this._isDisposed || cancellationToken.IsCancellationRequested)
+                    {
+                        this._progressText = "";
+                        return;
+                    }
                     // Clear clipboard on successful cut
                     if (isCut && result.Success)
                     {
@@ -1063,10 +1532,7 @@ namespace Bivium.Components.Pages
         /// <returns>True if paths are equal</returns>
         private bool AreSamePath(string left, string right)
         {
-            bool result = string.Equals(
-                Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)),
-                Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)),
-                this.GetPathComparison());
+            bool result = string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)), Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)), this.GetPathComparison());
             return result;
         }
 
@@ -1076,9 +1542,7 @@ namespace Bivium.Components.Pages
         /// <returns>String comparison for filesystem paths</returns>
         private StringComparison GetPathComparison()
         {
-            StringComparison result = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
-                ? StringComparison.OrdinalIgnoreCase
-                : StringComparison.Ordinal;
+            StringComparison result = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
             return result;
         }
 
@@ -1100,6 +1564,8 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoNewFile()
         {
+            if (!this.CanMutateWorkspace())
+                return;
             this._pendingOperation = "newfile";
             this._inputDialog.Show("New File", "File name:", "");
         }
@@ -1109,6 +1575,8 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoNewFolder()
         {
+            if (!this.CanMutateWorkspace())
+                return;
             this._pendingOperation = "mkdir";
             this._inputDialog.Show("New Folder", "Folder name:", "");
         }
@@ -1118,6 +1586,8 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoRename()
         {
+            if (!this.CanMutateWorkspace())
+                return;
             PanelState active = this.GetActivePanel();
             FileSystemEntry entry = this.GetSingleTargetEntry(active, "Rename");
             if (entry != null)
@@ -1132,6 +1602,8 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoDelete()
         {
+            if (!this.CanMutateWorkspace())
+                return;
             PanelState active = this.GetActivePanel();
             List<string> paths = this.GetSelectedOrCursorPaths(active);
             if (paths.Count > 0)
@@ -1196,6 +1668,8 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoUpload()
         {
+            if (!this.CanMutateWorkspace())
+                return;
             PanelState active = this.GetActivePanel();
             this._uploadDialog.Show(active.CurrentPath);
         }
@@ -1326,10 +1800,32 @@ namespace Bivium.Components.Pages
         }
 
         /// <summary>
+        /// Terminates every PTY and restores the workspace defaults after explicit confirmation
+        /// </summary>
+        private async System.Threading.Tasks.Task DoResetWorkspace()
+        {
+            const string message = "Reset workspace? This terminates every terminal process and clears saved panel and window state.";
+            bool confirmed = await this.JSRuntime.InvokeAsync<bool>("confirm", message);
+            if (!confirmed)
+                return;
+
+            WorkspaceClientToken token = this.GetClientToken();
+            this._terminalRuntimeService.CloseAllSessions(token);
+            BiviumWorkspaceSnapshot snapshot = this._workspaceService.ResetWorkspace(token);
+            this._workspaceRevision = snapshot.Revision;
+            this._panelsInitialized = false;
+            this.InitializePanels();
+            this._progressText = "Workspace reset completed.";
+            this.StateHasChanged();
+        }
+
+        /// <summary>
         /// Extracts the selected archive file into the current directory
         /// </summary>
         private void DoExtract()
         {
+            if (!this.CanMutateWorkspace())
+                return;
             PanelState active = this.GetActivePanel();
             List<string> archivePaths = this.GetArchivePathsForOperation(active);
 
@@ -1340,6 +1836,7 @@ namespace Bivium.Components.Pages
             }
 
             string destinationDir = active.CurrentPath;
+            CancellationToken cancellationToken = this._workspaceService.GetRevocationToken(this.GetClientToken());
 
             // Show initial progress
             this._progressText = "Extracting...";
@@ -1349,10 +1846,23 @@ namespace Bivium.Components.Pages
             // Run on background thread
             Thread worker = new Thread(() =>
             {
-                FileOperationResult result = this.ExtractArchives(archivePaths, destinationDir, false, onProgress);
+                FileOperationResult result;
+                try
+                {
+                    result = this.ExtractArchives(archivePaths, destinationDir, false, onProgress, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    result = FileOperationResult.Fail("Operation cancelled because browser control was revoked.");
+                }
 
                 _ = this.InvokeAsync(() =>
                 {
+                    if (this._isDisposed || cancellationToken.IsCancellationRequested)
+                    {
+                        this._progressText = "";
+                        return;
+                    }
                     this._progressText = "";
                     this.RefreshVisiblePanels();
 
@@ -1375,6 +1885,8 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoExtractToFolder()
         {
+            if (!this.CanMutateWorkspace())
+                return;
             PanelState active = this.GetActivePanel();
             List<string> archivePaths = this.GetArchivePathsForOperation(active);
 
@@ -1385,21 +1897,33 @@ namespace Bivium.Components.Pages
             }
 
             string destinationDir = active.CurrentPath;
+            CancellationToken cancellationToken = this._workspaceService.GetRevocationToken(this.GetClientToken());
 
             // Show initial progress
-            this._progressText = archivePaths.Count == 1
-                ? "Extracting to " + this.GetArchiveBaseName(Path.GetFileName(archivePaths[0])) + "/..."
-                : "Extracting to */...";
+            this._progressText = archivePaths.Count == 1 ? "Extracting to " + this.GetArchiveBaseName(Path.GetFileName(archivePaths[0])) + "/..." : "Extracting to */...";
 
             Action<int, int, string> onProgress = this.CreateThrottledProgressCallback("Extracting");
 
             // Run on background thread
             Thread worker = new Thread(() =>
             {
-                FileOperationResult result = this.ExtractArchives(archivePaths, destinationDir, true, onProgress);
+                FileOperationResult result;
+                try
+                {
+                    result = this.ExtractArchives(archivePaths, destinationDir, true, onProgress, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    result = FileOperationResult.Fail("Operation cancelled because browser control was revoked.");
+                }
 
                 _ = this.InvokeAsync(() =>
                 {
+                    if (this._isDisposed || cancellationToken.IsCancellationRequested)
+                    {
+                        this._progressText = "";
+                        return;
+                    }
                     this._progressText = "";
                     this.RefreshVisiblePanels();
 
@@ -1607,13 +2131,15 @@ namespace Bivium.Components.Pages
         /// <param name="destinationDir">Destination directory</param>
         /// <param name="extractToOwnFolder">If true, each archive is extracted to its own folder</param>
         /// <param name="onProgress">Progress callback</param>
+        /// <param name="cancellationToken">Cancellation token for lease revocation</param>
         /// <returns>Operation result</returns>
-        private FileOperationResult ExtractArchives(List<string> archivePaths, string destinationDir, bool extractToOwnFolder, Action<int, int, string> onProgress)
+        private FileOperationResult ExtractArchives(List<string> archivePaths, string destinationDir, bool extractToOwnFolder, Action<int, int, string> onProgress, CancellationToken cancellationToken)
         {
             int processed = 0;
 
             for (int i = 0; i < archivePaths.Count; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 string archivePath = archivePaths[i];
                 string currentDestination = destinationDir;
 
@@ -1636,7 +2162,7 @@ namespace Bivium.Components.Pages
                     }
                 }
 
-                FileOperationResult result = this._archiveService.ExtractArchive(archivePath, currentDestination, onProgress);
+                FileOperationResult result = this._archiveService.ExtractArchive(archivePath, currentDestination, onProgress, cancellationToken);
                 if (!result.Success)
                 {
                     return result;
@@ -1677,6 +2203,8 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoCompress()
         {
+            if (!this.CanMutateWorkspace())
+                return;
             PanelState active = this.GetActivePanel();
             List<string> paths = this.GetSelectedOrCursorPaths(active);
 
@@ -1709,6 +2237,8 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoAdvancedRename()
         {
+            if (!this.CanMutateWorkspace())
+                return;
             PanelState active = this.GetActivePanel();
             List<string> paths = this.GetSelectedOrCursorPaths(active);
 
@@ -1808,10 +2338,20 @@ namespace Bivium.Components.Pages
         /// <param name="confirmed">True if confirmed</param>
         private void HandleConfirmDialogClose(bool confirmed)
         {
-            if (confirmed && this._pendingOperation == "delete")
+            if (confirmed && this._pendingOperation == "delete" && this.CanMutateWorkspace())
             {
                 PanelState active = this.GetActivePanel();
-                FileOperationResult result = this._fileOperationService.DeleteEntries(active.SelectedPaths);
+                CancellationToken cancellationToken = this._workspaceService.GetRevocationToken(this.GetClientToken());
+                FileOperationResult result;
+                try
+                {
+                    result = this._fileOperationService.DeleteEntries(active.SelectedPaths, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    this._pendingOperation = "";
+                    return;
+                }
 
                 active.SelectedPaths.Clear();
                 this.LoadPanelContents(active);
@@ -1881,7 +2421,7 @@ namespace Bivium.Components.Pages
         /// <param name="value">Input value (empty if cancelled)</param>
         private void HandleInputDialogClose(string value)
         {
-            if (!string.IsNullOrEmpty(value))
+            if (!string.IsNullOrEmpty(value) && this.CanMutateWorkspace())
             {
                 PanelState active = this.GetActivePanel();
                 FileOperationResult result = new FileOperationResult();
@@ -1999,6 +2539,8 @@ namespace Bivium.Components.Pages
             {
                 return;
             }
+            if (!this.CanMutateWorkspace())
+                return;
 
             PanelState active = this.GetActivePanel();
             List<string> paths = new List<string>(active.SelectedPaths);
@@ -2012,6 +2554,7 @@ namespace Bivium.Components.Pages
 
             string outputPath = Path.Combine(active.CurrentPath, outputName);
             ArchiveFormat format = result.Format;
+            CancellationToken cancellationToken = this._workspaceService.GetRevocationToken(this.GetClientToken());
 
             // Show initial progress
             this._progressText = "Compressing...";
@@ -2021,10 +2564,23 @@ namespace Bivium.Components.Pages
             // Run on background thread
             Thread worker = new Thread(() =>
             {
-                FileOperationResult opResult = this._archiveService.CreateArchive(outputPath, paths, format, onProgress);
+                FileOperationResult opResult;
+                try
+                {
+                    opResult = this._archiveService.CreateArchive(outputPath, paths, format, onProgress, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    opResult = FileOperationResult.Fail("Operation cancelled because browser control was revoked.");
+                }
 
                 _ = this.InvokeAsync(() =>
                 {
+                    if (this._isDisposed || cancellationToken.IsCancellationRequested)
+                    {
+                        this._progressText = "";
+                        return;
+                    }
                     this._progressText = "";
                     this.RefreshVisiblePanels();
 
@@ -2108,12 +2664,13 @@ namespace Bivium.Components.Pages
         /// <summary>
         /// Initializes the JS keyboard capture
         /// </summary>
-        private async System.Threading.Tasks.Task InitializeKeyboardCapture()
+        private async System.Threading.Tasks.Task InitializeKeyboardCaptureAsync()
         {
             this._dotNetRef = DotNetObjectReference.Create(this);
-            this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260612-f12-reset");
+            this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260718-workspace-presence-v2");
             await this._jsModule.InvokeVoidAsync("captureKeyboard", this._dotNetRef);
             await this._jsModule.InvokeVoidAsync("initLongPress");
+            await this._jsModule.InvokeVoidAsync("startWorkspacePresence", this._dotNetRef);
         }
 
         /// <summary>
@@ -2126,6 +2683,9 @@ namespace Bivium.Components.Pages
         [JSInvokable]
         public void OnKeyDown(string key, bool ctrl, bool shift, bool alt)
         {
+            if (!this._hasActiveLease || !this._workspaceService.ValidateMutation(this.GetClientToken()))
+                return;
+
             // Ctrl+?: about dialog
             if (key == "?" && ctrl && !alt)
             {
@@ -2485,8 +3045,22 @@ namespace Bivium.Components.Pages
         /// </summary>
         public void Dispose()
         {
+            if (this._isDisposed)
+                return;
+            this._isDisposed = true;
+            this.PersistWorkspacePanels();
+            this._leaseRevocationRegistration.Dispose();
+            this._workspaceChangeSubscription?.Dispose();
+            this._workspaceChangeSubscription = null;
+            if (this._clientAttached)
+            {
+                this._workspaceService.DetachClient(this._attachmentId);
+                this._clientAttached = false;
+            }
             if (this._dotNetRef != null)
             {
+                if (this._jsModule != null)
+                    _ = this._jsModule.InvokeVoidAsync("stopWorkspacePresence");
                 this._dotNetRef.Dispose();
             }
             if (this._settingsChangeSubscription != null)

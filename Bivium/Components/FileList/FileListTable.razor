@@ -47,6 +47,7 @@
             }
 
             <tr class="@(isSelected ? "selected" : "") @(isCursor ? "cursor" : "") @(entry.IsDirectory ? "entry-dir" : "entry-file")"
+                data-entry-path="@entry.FullPath"
                 @onclick="(e) => this.HandleRowClick(localIdx, e)"
                 @ondblclick="() => this.HandleRowDoubleClick(localIdx)"
                 @oncontextmenu="(e) => this.HandleRowContextMenu(localIdx, e)"

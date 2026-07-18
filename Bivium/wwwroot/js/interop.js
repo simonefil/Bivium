@@ -2,7 +2,14 @@
 // Handles: resize drag, floating window stacking, keyboard capture, theme switching
 
 const FLOATING_WINDOW_BASE_Z_INDEX = 2000;
-const FLOATING_WINDOW_FOCUS_SELECTOR = '.xterm-helper-textarea, .monaco-editor textarea, .renamer-body input:not([disabled]), .renamer-body select:not([disabled]), .renamer-body button:not([disabled])';
+const FLOATING_WINDOW_FOCUS_SELECTOR = [
+    '.terminal-ime-input',
+    '.terminal-virtual-viewport',
+    '.monaco-editor textarea',
+    '.renamer-body input:not([disabled])',
+    '.renamer-body select:not([disabled])',
+    '.renamer-body button:not([disabled])'
+].join(', ');
 const FLOATING_WINDOW_MANAGER_KEY = Symbol.for('bivium.floatingWindowManager');
 
 let floatingWindowManager = globalThis[FLOATING_WINDOW_MANAGER_KEY];
@@ -10,12 +17,72 @@ if (!floatingWindowManager) {
     floatingWindowManager = {
         windows: [],
         initializedDragElements: new WeakSet(),
-        lastFocusedElements: new WeakMap()
+        lastFocusedElements: new WeakMap(),
+        nextMruOrder: 1
     };
     globalThis[FLOATING_WINDOW_MANAGER_KEY] = floatingWindowManager;
 }
 
 const initializedWindowDragElements = floatingWindowManager.initializedDragElements;
+const windowDragRegistrations = new Map();
+let workspacePresenceRegistration = null;
+
+/**
+ * Starts browser-originated workspace presence heartbeats.
+ * @param {object} dotNetReference - Current Commander callback owner.
+ */
+export function startWorkspacePresence(dotNetReference) {
+    stopWorkspacePresence();
+    if (!dotNetReference) return;
+
+    const eventController = new AbortController();
+    const eventSignal = eventController.signal;
+    let disconnected = false;
+    let pageActive = true;
+
+    function heartbeat() {
+        if (!pageActive) return;
+        disconnected = false;
+        dotNetReference.invokeMethodAsync('OnWorkspaceHeartbeat').catch(function () { });
+    }
+
+    function disconnect() {
+        if (disconnected) return;
+        pageActive = false;
+        disconnected = true;
+        dotNetReference.invokeMethodAsync('OnWorkspaceDisconnected').catch(function () { });
+    }
+
+    function reconnect() {
+        pageActive = true;
+        heartbeat();
+    }
+
+    const interval = window.setInterval(heartbeat, 20000);
+    window.addEventListener('pagehide', disconnect, { signal: eventSignal });
+    window.addEventListener('pageshow', reconnect, { signal: eventSignal });
+    window.addEventListener('online', heartbeat, { signal: eventSignal });
+    document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') heartbeat();
+    }, { signal: eventSignal });
+
+    workspacePresenceRegistration = {
+        dispose: function () {
+            window.clearInterval(interval);
+            eventController.abort();
+        }
+    };
+    heartbeat();
+}
+
+/**
+ * Stops browser-originated workspace presence callbacks.
+ */
+export function stopWorkspacePresence() {
+    if (!workspacePresenceRegistration) return;
+    workspacePresenceRegistration.dispose();
+    workspacePresenceRegistration = null;
+}
 
 function isFloatingWindowVisible(win) {
     return win && win.isConnected && win.classList.contains('visible');
@@ -43,7 +110,10 @@ function getTopVisibleFloatingWindow() {
 function restoreFloatingWindowFocus(win) {
     let focusTarget = floatingWindowManager.lastFocusedElements.get(win);
     if (!focusTarget || !focusTarget.isConnected || !win.contains(focusTarget)) {
-        focusTarget = win.querySelector(FLOATING_WINDOW_FOCUS_SELECTOR);
+        const semanticTarget = win.dataset.focusTarget || '';
+        if (semanticTarget === 'terminal-tab-rename') focusTarget = win.querySelector('.terminal-tab-rename');
+        else if (semanticTarget === 'terminal-input') focusTarget = win.querySelector('.terminal-ime-input, .terminal-virtual-viewport');
+        if (!focusTarget) focusTarget = win.querySelector(FLOATING_WINDOW_FOCUS_SELECTOR);
     }
     if (!focusTarget || !focusTarget.isConnected || !win.contains(focusTarget)) return;
 
@@ -63,6 +133,7 @@ function bringFloatingWindowToFront(win, restoreFocus) {
         return item !== win && item && item.isConnected;
     });
     floatingWindowManager.windows.push(win);
+    win.dataset.mruOrder = String(floatingWindowManager.nextMruOrder++);
     normalizeFloatingWindowStack();
 
     if (restoreFocus) restoreFloatingWindowFocus(win);
@@ -75,9 +146,15 @@ function activateTopVisibleFloatingWindow() {
 }
 
 function registerFloatingWindow(win) {
+    const savedMruOrder = Number(win.dataset.mruOrder || 0);
     if (!floatingWindowManager.windows.includes(win)) {
         floatingWindowManager.windows.push(win);
     }
+
+    floatingWindowManager.windows.sort(function (left, right) {
+        return Number(left.dataset.mruOrder || 0) - Number(right.dataset.mruOrder || 0);
+    });
+    floatingWindowManager.nextMruOrder = Math.max(floatingWindowManager.nextMruOrder, savedMruOrder + 1);
 
     const activeElement = document.activeElement;
     if (activeElement && win.contains(activeElement)) {
@@ -85,7 +162,13 @@ function registerFloatingWindow(win) {
     }
 
     normalizeFloatingWindowStack();
-    if (isFloatingWindowVisible(win)) bringFloatingWindowToFront(win, true);
+    if (isFloatingWindowVisible(win)) {
+        if (savedMruOrder > 0) {
+            if (getTopVisibleFloatingWindow() === win) restoreFloatingWindowFocus(win);
+        } else {
+            bringFloatingWindowToFront(win, true);
+        }
+    }
 }
 
 /**
@@ -141,14 +224,18 @@ export function captureKeyboard(dotNetRef) {
         const shift = e.shiftKey;
         const alt = e.altKey;
 
-        // Check if focus is inside the terminal - let xterm.js handle input
+        // Check if focus is inside the terminal renderer
         const terminalWindow = document.getElementById('terminal-window');
         const activeEl = document.activeElement;
-        const inTerminal = terminalWindow && terminalWindow.classList.contains('visible') && (terminalWindow.contains(activeEl) || (activeEl && activeEl.closest && activeEl.closest('.terminal-body')));
+        const inTerminal = terminalWindow &&
+            terminalWindow.classList.contains('visible') &&
+            (terminalWindow.contains(activeEl) || (activeEl && activeEl.closest && activeEl.closest('.terminal-body')));
 
         // Check if focus is inside the Monaco editor - let Monaco handle input
         const editorWindow = document.getElementById('editor-window');
-        const inEditor = editorWindow && editorWindow.classList.contains('visible') && (editorWindow.contains(activeEl) || (activeEl && activeEl.closest && activeEl.closest('#monaco-container')));
+        const inEditor = editorWindow &&
+            editorWindow.classList.contains('visible') &&
+            (editorWindow.contains(activeEl) || (activeEl && activeEl.closest && activeEl.closest('#monaco-container')));
 
         // F12 always goes to .NET (toggle terminal)
         if (key === 'F12') {
@@ -341,11 +428,12 @@ export function focusElement(elementId) {
  * @param {string} jsonBody - JSON string to send as body
  * @returns {Promise<boolean>} True if response is OK
  */
-export async function putJson(url, jsonBody) {
+export async function putJson(url, jsonBody, attachmentId = '', leaseGeneration = 0) {
     try {
+        const headers = createMutationHeaders(attachmentId, leaseGeneration);
         const response = await fetch(url, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: headers,
             body: jsonBody
         });
         return response.ok;
@@ -379,8 +467,8 @@ export async function postJson(url, jsonBody) {
  * @param {string} jsonBody - JSON string to send as a body
  * @returns {Promise<object>} Response envelope
  */
-export async function postJsonResult(url, jsonBody) {
-    return await sendJsonResult(url, 'POST', jsonBody || '{}');
+export async function postJsonResult(url, jsonBody, attachmentId = '', leaseGeneration = 0) {
+    return await sendJsonResult(url, 'POST', jsonBody || '{}', attachmentId, leaseGeneration);
 }
 
 /**
@@ -389,8 +477,8 @@ export async function postJsonResult(url, jsonBody) {
  * @param {string} jsonBody - JSON string to send as a body
  * @returns {Promise<object>} Response envelope
  */
-export async function putJsonResult(url, jsonBody) {
-    return await sendJsonResult(url, 'PUT', jsonBody || '{}');
+export async function putJsonResult(url, jsonBody, attachmentId = '', leaseGeneration = 0) {
+    return await sendJsonResult(url, 'PUT', jsonBody || '{}', attachmentId, leaseGeneration);
 }
 
 /**
@@ -449,11 +537,20 @@ export async function copyText(text) {
     }
 }
 
-async function sendJsonResult(url, method, jsonBody) {
+function createMutationHeaders(attachmentId, leaseGeneration) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (attachmentId) {
+        headers['X-Bivium-Attachment'] = attachmentId;
+        headers['X-Bivium-Lease-Generation'] = String(leaseGeneration);
+    }
+    return headers;
+}
+
+async function sendJsonResult(url, method, jsonBody, attachmentId, leaseGeneration) {
     try {
         const response = await fetch(url, {
             method: method,
-            headers: { 'Content-Type': 'application/json' },
+            headers: createMutationHeaders(attachmentId, leaseGeneration),
             body: jsonBody
         });
         const text = await response.text();
@@ -517,36 +614,194 @@ export function scrollCursorIntoView(cursorIndex = -1) {
     }
 }
 
+const filePanelScrollTrackers = new Map();
+
+/**
+ * Tracks the first visible semantic file row for workspace persistence.
+ * @param {string} panelId - Stable panel identifier.
+ * @param {object} dotNetReference - FilePanel callback owner.
+ */
+export function registerFilePanelScroll(panelId, dotNetReference) {
+    unregisterFilePanelScroll(panelId);
+    const scroller = document.getElementById(panelId + '-filelist');
+    if (!scroller) return;
+
+    const tracker = { scroller, dotNetReference, timer: 0, restoring: false };
+    tracker.listener = function () {
+        if (tracker.restoring) return;
+        window.clearTimeout(tracker.timer);
+        tracker.timer = window.setTimeout(function () {
+            const top = scroller.getBoundingClientRect().top;
+            const rows = scroller.querySelectorAll('tr[data-entry-path]');
+            for (const row of rows) {
+                if (row.getBoundingClientRect().bottom > top + 1) {
+                    dotNetReference.invokeMethodAsync('OnFileListScrollAnchorChanged', row.dataset.entryPath || '');
+                    break;
+                }
+            }
+        }, 120);
+    };
+    scroller.addEventListener('scroll', tracker.listener, { passive: true });
+    filePanelScrollTrackers.set(panelId, tracker);
+}
+
+/**
+ * Stops semantic scroll tracking for a file panel.
+ * @param {string} panelId - Stable panel identifier.
+ */
+export function unregisterFilePanelScroll(panelId) {
+    const tracker = filePanelScrollTrackers.get(panelId);
+    if (!tracker) return;
+    window.clearTimeout(tracker.timer);
+    tracker.scroller.removeEventListener('scroll', tracker.listener);
+    filePanelScrollTrackers.delete(panelId);
+}
+
+/**
+ * Restores a file list by semantic path, using its index only to materialize a virtual row.
+ * @param {string} panelId - Stable panel identifier.
+ * @param {string} anchorPath - Full path of the saved first visible row.
+ * @param {number} anchorIndex - Current index of that path after sorting and validation.
+ */
+export function restoreFilePanelScrollAnchor(panelId, anchorPath, anchorIndex) {
+    const tracker = filePanelScrollTrackers.get(panelId);
+    const scroller = tracker?.scroller || document.getElementById(panelId + '-filelist');
+    if (!scroller || anchorIndex < 0) return;
+
+    if (tracker) tracker.restoring = true;
+    scroller.scrollTop = Math.max(0, anchorIndex * 20);
+    window.requestAnimationFrame(function () {
+        const rows = scroller.querySelectorAll('tr[data-entry-path]');
+        for (const row of rows) {
+            if (row.dataset.entryPath === anchorPath) {
+                row.scrollIntoView({ block: 'start' });
+                break;
+            }
+        }
+        window.setTimeout(function () {
+            if (tracker) tracker.restoring = false;
+        }, 150);
+    });
+}
+
+/**
+ * Scales and clamps persisted floating-window geometry to a viewport.
+ * @param {object} geometry - Persisted geometry and its source viewport.
+ * @param {number} viewportWidth - Current viewport width.
+ * @param {number} viewportHeight - Current viewport height.
+ * @param {boolean} scaleFromSavedViewport - Whether coordinates should be scaled proportionally.
+ * @returns {object} Reachable geometry.
+ */
+export function computeWindowGeometry(geometry, viewportWidth, viewportHeight, scaleFromSavedViewport) {
+    let left = Number(geometry.left) || 0;
+    let top = Number(geometry.top) || 0;
+    let width = Number(geometry.width) || 800;
+    let height = Number(geometry.height) || 400;
+    const savedWidth = Number(geometry.viewportWidth) || viewportWidth;
+    const savedHeight = Number(geometry.viewportHeight) || viewportHeight;
+    if (scaleFromSavedViewport && savedWidth > 0 && savedHeight > 0) {
+        left *= viewportWidth / savedWidth;
+        top *= viewportHeight / savedHeight;
+    }
+    const maxWidth = Math.max(1, viewportWidth - 16);
+    const maxHeight = Math.max(1, viewportHeight - 16);
+    const minWidth = Math.min(300, maxWidth);
+    const minHeight = Math.min(150, maxHeight);
+    width = Math.max(minWidth, Math.min(width, maxWidth));
+    height = Math.max(minHeight, Math.min(height, maxHeight));
+    left = Math.max(0, Math.min(left, Math.max(0, viewportWidth - width)));
+    top = Math.max(0, Math.min(top, Math.max(0, viewportHeight - height)));
+    return { left, top, width, height };
+}
+
 /**
  * Initialize drag and resize for a floating window element
  * @param {string} windowId - DOM id of the window container
  * @param {string} titlebarId - DOM id of the draggable titlebar
  * @param {string} resizeHandleId - DOM id of the resize handle
+ * @param {object} dotNetReference - Optional callback owner for persisted geometry
  */
-export function initWindowDrag(windowId, titlebarId, resizeHandleId) {
+export function initWindowDrag(windowId, titlebarId, resizeHandleId, dotNetReference = null) {
     const win = document.getElementById(windowId);
     const titlebar = document.getElementById(titlebarId);
     const resizeHandle = document.getElementById(resizeHandleId);
     if (!win || !titlebar) return;
     registerFloatingWindow(win);
-    if (initializedWindowDragElements.has(win)) return;
+    const previousRegistration = windowDragRegistrations.get(windowId);
+    if (previousRegistration?.element === win) return;
+    if (previousRegistration) previousRegistration.dispose();
     initializedWindowDragElements.add(win);
+    const eventController = new AbortController();
+    const eventSignal = eventController.signal;
 
     let isDragging = false;
     let isResizing = false;
     let dragOffsetX = 0;
     let dragOffsetY = 0;
+    let geometryTimer = 0;
+
+    function getFocusTarget() {
+        const active = document.activeElement;
+        if (active && win.contains(active)) {
+            if (active.classList.contains('terminal-virtual-viewport')) return 'terminal-input';
+            if (active.classList.contains('terminal-tab-rename')) return 'terminal-tab-rename';
+        }
+        return win.dataset.focusTarget || 'terminal-input';
+    }
+
+    function clampToViewport(scaleFromSavedViewport) {
+        const geometry = computeWindowGeometry({
+            left: parseFloat(win.style.left) || win.offsetLeft || 0,
+            top: parseFloat(win.style.top) || win.offsetTop || 0,
+            width: parseFloat(win.style.width) || win.offsetWidth || 800,
+            height: parseFloat(win.style.height) || win.offsetHeight || 400,
+            viewportWidth: parseFloat(win.dataset.viewportWidth) || window.innerWidth,
+            viewportHeight: parseFloat(win.dataset.viewportHeight) || window.innerHeight
+        }, window.innerWidth, window.innerHeight, scaleFromSavedViewport);
+        win.style.left = geometry.left + 'px';
+        win.style.top = geometry.top + 'px';
+        win.style.width = geometry.width + 'px';
+        win.style.height = geometry.height + 'px';
+    }
+
+    function notifyGeometry() {
+        if (!dotNetReference) return;
+        const rect = win.getBoundingClientRect();
+        const update = {
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
+            mruOrder: Number(win.dataset.mruOrder || 0),
+            focusTarget: getFocusTarget()
+        };
+        dotNetReference.invokeMethodAsync('OnWindowGeometryChanged', update).catch(function () { });
+    }
+
+    function scheduleGeometryNotification() {
+        window.clearTimeout(geometryTimer);
+        geometryTimer = window.setTimeout(function () {
+            geometryTimer = 0;
+            notifyGeometry();
+        }, 150);
+    }
+
+    clampToViewport(true);
 
     win.addEventListener('pointerdown', function () {
         bringFloatingWindowToFront(win, false);
-    }, true);
+        scheduleGeometryNotification();
+    }, { capture: true, signal: eventSignal });
 
     win.addEventListener('focusin', function (e) {
         if (e.target && typeof e.target.focus === 'function') {
             floatingWindowManager.lastFocusedElements.set(win, e.target);
         }
         bringFloatingWindowToFront(win, false);
-    });
+        scheduleGeometryNotification();
+    }, { signal: eventSignal });
 
     let wasVisible = isFloatingWindowVisible(win);
     const visibilityObserver = new MutationObserver(function () {
@@ -567,7 +822,7 @@ export function initWindowDrag(windowId, titlebarId, resizeHandleId) {
         dragOffsetX = e.clientX - win.offsetLeft;
         dragOffsetY = e.clientY - win.offsetTop;
         e.preventDefault();
-    });
+    }, { signal: eventSignal });
 
     // Resize via handle
     if (resizeHandle) {
@@ -575,7 +830,7 @@ export function initWindowDrag(windowId, titlebarId, resizeHandleId) {
             isResizing = true;
             e.preventDefault();
             e.stopPropagation();
-        });
+        }, { signal: eventSignal });
     }
 
     document.addEventListener('mousemove', function (e) {
@@ -602,13 +857,50 @@ export function initWindowDrag(windowId, titlebarId, resizeHandleId) {
             win.style.width = newWidth + 'px';
             win.style.height = newHeight + 'px';
 
-            // Trigger xterm fit after resize
+            // Recalculate terminal dimensions after resize
             window.dispatchEvent(new Event('resize'));
         }
-    });
+    }, { signal: eventSignal });
 
     document.addEventListener('mouseup', function () {
+        const changed = isDragging || isResizing;
         isDragging = false;
         isResizing = false;
-    });
+        if (changed) {
+            clampToViewport(false);
+            notifyGeometry();
+        }
+    }, { signal: eventSignal });
+
+    window.addEventListener('resize', function () {
+        clampToViewport(false);
+        scheduleGeometryNotification();
+    }, { signal: eventSignal });
+
+    window.addEventListener('pagehide', notifyGeometry, { signal: eventSignal });
+    document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'hidden') notifyGeometry();
+    }, { signal: eventSignal });
+
+    const registration = {
+        element: win,
+        dispose: function () {
+            window.clearTimeout(geometryTimer);
+            eventController.abort();
+            visibilityObserver.disconnect();
+            initializedWindowDragElements.delete(win);
+            floatingWindowManager.windows = floatingWindowManager.windows.filter(function (item) { return item !== win; });
+            if (windowDragRegistrations.get(windowId) === registration) windowDragRegistrations.delete(windowId);
+        }
+    };
+    windowDragRegistrations.set(windowId, registration);
+}
+
+/**
+ * Removes every global listener and callback owned by one floating window.
+ * @param {string} windowId - DOM id used during initialization.
+ */
+export function disposeWindowDrag(windowId) {
+    const registration = windowDragRegistrations.get(windowId);
+    if (registration) registration.dispose();
 }

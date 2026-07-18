@@ -35,6 +35,18 @@ namespace Bivium.Components.Tree
         [Parameter]
         public int Depth { get; set; } = 0;
 
+        /// <summary>
+        /// Semantic paths of expanded nodes
+        /// </summary>
+        [Parameter]
+        public HashSet<string> ExpandedDirectoryPaths { get; set; } = new HashSet<string>();
+
+        /// <summary>
+        /// Callback when the expansion state changes
+        /// </summary>
+        [Parameter]
+        public EventCallback<DirectoryTreeExpansionChange> OnExpansionChanged { get; set; }
+
         #endregion
 
         #region Class Variables
@@ -63,6 +75,14 @@ namespace Bivium.Components.Tree
         /// </summary>
         protected override void OnParametersSet()
         {
+            bool savedExpanded = this.Entry != null && this.ExpandedDirectoryPaths.Contains(this.Entry.FullPath);
+            if (savedExpanded != this._isExpanded)
+            {
+                this._isExpanded = savedExpanded;
+                if (this._isExpanded)
+                    this.LoadChildren();
+            }
+
             // Only process when CurrentPath actually changed
             if (string.Equals(this.CurrentPath, this._previousCurrentPath, this.GetPathComparison()))
             {
@@ -80,6 +100,7 @@ namespace Bivium.Components.Tree
                 if ((isAncestor || isExactMatch) && !this._isExpanded)
                 {
                     this._isExpanded = true;
+                    this.ExpandedDirectoryPaths.Add(this.Entry.FullPath);
                     this.LoadChildren();
                 }
                 else if (isAncestor && this._isExpanded)
@@ -97,15 +118,29 @@ namespace Bivium.Components.Tree
         /// <summary>
         /// Handles click on the expand/collapse toggle
         /// </summary>
-        private void OnToggleClick()
+        private async System.Threading.Tasks.Task OnToggleClick()
         {
             this._isExpanded = !this._isExpanded;
+
+            if (this._isExpanded)
+            {
+                this.ExpandedDirectoryPaths.Add(this.Entry.FullPath);
+            }
+            else
+            {
+                this.ExpandedDirectoryPaths.Remove(this.Entry.FullPath);
+            }
 
             // Lazy load children on first expand
             if (this._isExpanded && this._children == null)
             {
                 this.LoadChildren();
             }
+
+            DirectoryTreeExpansionChange change = new DirectoryTreeExpansionChange();
+            change.Path = this.Entry.FullPath;
+            change.Expanded = this._isExpanded;
+            await this.OnExpansionChanged.InvokeAsync(change);
         }
 
         /// <summary>
@@ -189,9 +224,7 @@ namespace Bivium.Components.Tree
         /// <returns>String comparison for filesystem paths</returns>
         private StringComparison GetPathComparison()
         {
-            StringComparison result = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
-                ? StringComparison.OrdinalIgnoreCase
-                : StringComparison.Ordinal;
+            StringComparison result = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
             return result;
         }
 

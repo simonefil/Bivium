@@ -10,6 +10,13 @@ namespace Bivium.Components.Shared
     /// </summary>
     public partial class RenamerDialog : ComponentBase
     {
+        #region Injected Services
+
+        [Inject]
+        private BiviumWorkspaceService _workspaceService { get; set; }
+
+        #endregion
+
         #region Parameters
 
         /// <summary>
@@ -23,6 +30,12 @@ namespace Bivium.Components.Shared
         /// </summary>
         [Parameter]
         public IFileOperationService FileOperationService { get; set; }
+
+        [Parameter]
+        public string AttachmentId { get; set; } = "";
+
+        [Parameter]
+        public long LeaseGeneration { get; set; }
 
         #endregion
 
@@ -401,10 +414,16 @@ namespace Bivium.Components.Shared
         /// </summary>
         private async System.Threading.Tasks.Task HandleRename()
         {
+            if (!this._workspaceService.ValidateMutation(new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration)))
+            {
+                this._statusText = "Rename rejected: this browser no longer controls the workspace.";
+                return;
+            }
             if (!this.CanRename())
             {
                 return;
             }
+            CancellationToken cancellationToken = this._workspaceService.GetRevocationToken(new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration));
 
             // Regenerate preview with stack only (not editing method)
             this._previewItems = RenameEngine.GeneratePreview(this._entries, this._methodStack);
@@ -433,6 +452,11 @@ namespace Bivium.Components.Shared
             // Pass 1: rename all to temporary names
             for (int i = 0; i < toRename.Count; i++)
             {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    this._statusText = "Rename cancelled because browser control was revoked. Temporary names already created were left unchanged.";
+                    return;
+                }
                 string originalPath = toRename[i].OriginalFullPath;
                 string tempName = toRename[i].NewName + tempSuffix;
                 FileOperationResult result = this.FileOperationService.RenameEntry(originalPath, tempName);
@@ -452,6 +476,8 @@ namespace Bivium.Components.Shared
                     // Rollback: rename temp files back to original names
                     for (int r = 0; r < tempPaths.Count; r++)
                     {
+                        if (cancellationToken.IsCancellationRequested)
+                            break;
                         string rollbackName = toRename[r].OriginalName;
                         this.FileOperationService.RenameEntry(tempPaths[r], rollbackName);
                     }
@@ -467,6 +493,11 @@ namespace Bivium.Components.Shared
 
                 for (int i = 0; i < tempPaths.Count; i++)
                 {
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        this._statusText = "Rename cancelled because browser control was revoked. Temporary names already created were left unchanged.";
+                        return;
+                    }
                     FileOperationResult result = this.FileOperationService.RenameEntry(tempPaths[i], toRename[i].NewName);
 
                     if (result.Success)
@@ -479,7 +510,8 @@ namespace Bivium.Components.Shared
                         errorMessage = errorMessage + "Failed to finalize '" + toRename[i].NewName + "': " + result.ErrorMessage + "\n";
 
                         // Rollback this file to its original name
-                        this.FileOperationService.RenameEntry(tempPaths[i], toRename[i].OriginalName);
+                        if (!cancellationToken.IsCancellationRequested)
+                            this.FileOperationService.RenameEntry(tempPaths[i], toRename[i].OriginalName);
                     }
                 }
 

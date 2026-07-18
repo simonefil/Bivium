@@ -75,9 +75,10 @@ namespace Bivium.Services
         /// <param name="model">Permission model to apply</param>
         /// <param name="recursive">If true, apply recursively to directory contents</param>
         /// <returns>Operation result</returns>
-        public FileOperationResult SetPermissions(string path, PermissionModel model, bool recursive)
+        public FileOperationResult SetPermissions(string path, PermissionModel model, bool recursive, CancellationToken cancellationToken = default)
         {
             FileOperationResult result = new FileOperationResult();
+            cancellationToken.ThrowIfCancellationRequested();
 
             if (!this._securityService.IsPathSafe(path))
             {
@@ -89,11 +90,11 @@ namespace Bivium.Services
                 {
                     if (this._isUnix)
                     {
-                        result = this.SetUnixPermissions(path, model, recursive);
+                        result = this.SetUnixPermissions(path, model, recursive, cancellationToken);
                     }
                     else
                     {
-                        result = this.SetWindowsPermissions(path, model, recursive);
+                        result = this.SetWindowsPermissions(path, model, recursive, cancellationToken);
                     }
                 }
                 catch (UnauthorizedAccessException ex)
@@ -117,9 +118,10 @@ namespace Bivium.Services
         /// <param name="group">New group name (Linux only, ignored on Windows)</param>
         /// <param name="recursive">If true, apply recursively to directory contents</param>
         /// <returns>Operation result</returns>
-        public FileOperationResult SetOwner(string path, string owner, string group, bool recursive)
+        public FileOperationResult SetOwner(string path, string owner, string group, bool recursive, CancellationToken cancellationToken = default)
         {
             FileOperationResult result = new FileOperationResult();
+            cancellationToken.ThrowIfCancellationRequested();
 
             if (!this._securityService.IsPathSafe(path))
             {
@@ -131,10 +133,11 @@ namespace Bivium.Services
                 {
                     if (this._isUnix)
                     {
-                        result = this.SetUnixOwner(path, owner, group, recursive);
+                        result = this.SetUnixOwner(path, owner, group, recursive, cancellationToken);
                     }
                     else
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
                         result = this.SetWindowsOwner(path, owner);
                     }
                 }
@@ -190,7 +193,7 @@ namespace Bivium.Services
 
                 if (parts.Length >= 3)
                 {
-                    // Parse octal permission (e.g. 755)
+                    // Parse octal permission (and.g. 755)
                     string octal = parts[0];
                     if (octal.Length >= 3)
                     {
@@ -228,14 +231,14 @@ namespace Bivium.Services
         /// <param name="model">Permission model to apply</param>
         /// <param name="recursive">If true, apply recursively</param>
         /// <returns>Operation result</returns>
-        private FileOperationResult SetUnixPermissions(string path, PermissionModel model, bool recursive)
+        private FileOperationResult SetUnixPermissions(string path, PermissionModel model, bool recursive, CancellationToken cancellationToken)
         {
             UnixFileMode mode = this.BuildUnixFileMode(model);
             int processed = 0;
             int failed = 0;
             string lastError = "";
 
-            this.ApplyUnixFileMode(path, mode, recursive, ref processed, ref failed, ref lastError);
+            this.ApplyUnixFileMode(path, mode, recursive, ref processed, ref failed, ref lastError, cancellationToken);
 
             FileOperationResult result = new FileOperationResult();
             result.Success = failed == 0;
@@ -276,8 +279,9 @@ namespace Bivium.Services
         /// <param name="processed">Number of successfully processed entries</param>
         /// <param name="failed">Number of failed entries</param>
         /// <param name="lastError">Last error message</param>
-        private void ApplyUnixFileMode(string path, UnixFileMode mode, bool recursive, ref int processed, ref int failed, ref string lastError)
+        private void ApplyUnixFileMode(string path, UnixFileMode mode, bool recursive, ref int processed, ref int failed, ref string lastError, CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 File.SetUnixFileMode(path, mode);
@@ -306,7 +310,8 @@ namespace Bivium.Services
                 string[] entries = Directory.GetFileSystemEntries(path);
                 for (int i = 0; i < entries.Length; i++)
                 {
-                    this.ApplyUnixFileMode(entries[i], mode, true, ref processed, ref failed, ref lastError);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    this.ApplyUnixFileMode(entries[i], mode, true, ref processed, ref failed, ref lastError, cancellationToken);
                 }
             }
             catch (UnauthorizedAccessException ex)
@@ -341,7 +346,7 @@ namespace Bivium.Services
         /// <param name="group">Group name</param>
         /// <param name="recursive">If true, apply recursively</param>
         /// <returns>Operation result</returns>
-        private FileOperationResult SetUnixOwner(string path, string owner, string group, bool recursive)
+        private FileOperationResult SetUnixOwner(string path, string owner, string group, bool recursive, CancellationToken cancellationToken)
         {
             string ownerGroup = owner;
             if (!string.IsNullOrEmpty(group))
@@ -357,7 +362,7 @@ namespace Bivium.Services
             arguments.Add(ownerGroup);
             arguments.Add(path);
 
-            CommandResult commandResult = this.RunCommand("chown", arguments);
+            CommandResult commandResult = this.RunCommand("chown", arguments, cancellationToken);
             if (!commandResult.Success)
             {
                 return FileOperationResult.Fail(commandResult.ErrorMessage);
@@ -416,13 +421,14 @@ namespace Bivium.Services
         /// <param name="model">Permission model to apply</param>
         /// <param name="recursive">If true, apply recursively</param>
         /// <returns>Operation result</returns>
-        private FileOperationResult SetWindowsPermissions(string path, PermissionModel model, bool recursive)
+        private FileOperationResult SetWindowsPermissions(string path, PermissionModel model, bool recursive, CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             this.ApplyWindowsAttributes(path, model);
 
             if (recursive && Directory.Exists(path))
             {
-                this.SetWindowsPermissionsRecursive(path, model);
+                this.SetWindowsPermissionsRecursive(path, model, cancellationToken);
             }
 
             FileOperationResult result = FileOperationResult.Ok(1);
@@ -489,14 +495,16 @@ namespace Bivium.Services
         /// </summary>
         /// <param name="dirPath">Directory path</param>
         /// <param name="model">Permission model</param>
-        private void SetWindowsPermissionsRecursive(string dirPath, PermissionModel model)
+        private void SetWindowsPermissionsRecursive(string dirPath, PermissionModel model, CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             DirectoryInfo dirInfo = new DirectoryInfo(dirPath);
 
             // Apply to files
             FileInfo[] files = dirInfo.GetFiles();
             for (int i = 0; i < files.Length; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 this.ApplyWindowsAttributes(files[i].FullName, model);
             }
 
@@ -504,8 +512,9 @@ namespace Bivium.Services
             DirectoryInfo[] subDirs = dirInfo.GetDirectories();
             for (int i = 0; i < subDirs.Length; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 this.ApplyWindowsAttributes(subDirs[i].FullName, model);
-                this.SetWindowsPermissionsRecursive(subDirs[i].FullName, model);
+                this.SetWindowsPermissionsRecursive(subDirs[i].FullName, model, cancellationToken);
             }
         }
 
@@ -562,8 +571,9 @@ namespace Bivium.Services
         /// <param name="command">Command to run</param>
         /// <param name="arguments">Command arguments</param>
         /// <returns>Command result</returns>
-        private CommandResult RunCommand(string command, List<string> arguments)
+        private CommandResult RunCommand(string command, List<string> arguments, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             CommandResult result = new CommandResult();
 
             ProcessStartInfo startInfo = new ProcessStartInfo();
@@ -582,9 +592,20 @@ namespace Bivium.Services
             process.StartInfo = startInfo;
             process.Start();
 
-            result.Output = process.StandardOutput.ReadToEnd().Trim();
-            result.ErrorMessage = process.StandardError.ReadToEnd().Trim();
-            process.WaitForExit();
+            System.Threading.Tasks.Task<string> outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            System.Threading.Tasks.Task<string> errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+            try
+            {
+                process.WaitForExitAsync(cancellationToken).GetAwaiter().GetResult();
+                result.Output = outputTask.GetAwaiter().GetResult().Trim();
+                result.ErrorMessage = errorTask.GetAwaiter().GetResult().Trim();
+            }
+            catch (OperationCanceledException)
+            {
+                if (!process.HasExited)
+                    process.Kill(true);
+                throw;
+            }
             result.ExitCode = process.ExitCode;
 
             if (!result.Success && string.IsNullOrEmpty(result.ErrorMessage))

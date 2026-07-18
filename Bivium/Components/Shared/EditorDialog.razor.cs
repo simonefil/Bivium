@@ -18,6 +18,12 @@ namespace Bivium.Components.Shared
         [Inject]
         private IFileOperationService _fileOperationService { get; set; }
 
+        /// <summary>
+        /// Workspace lease authority
+        /// </summary>
+        [Inject]
+        private BiviumWorkspaceService _workspaceService { get; set; }
+
         #endregion
 
         #region Parameters
@@ -27,6 +33,12 @@ namespace Bivium.Components.Shared
         /// </summary>
         [Parameter]
         public EventCallback<bool> OnClose { get; set; }
+
+        [Parameter]
+        public string AttachmentId { get; set; } = "";
+
+        [Parameter]
+        public long LeaseGeneration { get; set; }
 
         #endregion
 
@@ -169,12 +181,12 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Called from JS when Ctrl+S is pressed in the editor
+        /// Receives the Ctrl+S save request from JavaScript
         /// </summary>
-        [JSInvokable]
-        public async System.Threading.Tasks.Task OnEditorSave()
+        [JSInvokable("OnEditorSave")]
+        public async System.Threading.Tasks.Task OnEditorSaveAsync()
         {
-            await this.HandleSave();
+            await this.HandleSaveAsync();
         }
 
         /// <summary>
@@ -192,20 +204,27 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Handles the save button click - retrieves content from Monaco and invokes callback
+        /// Retrieves Monaco content and saves it with lease-authorized commit
         /// </summary>
-        private async System.Threading.Tasks.Task HandleSave()
+        private async System.Threading.Tasks.Task HandleSaveAsync()
         {
             if (this._jsModule == null || !this._jsInitialized)
+                return;
+
+            WorkspaceClientToken token = new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration);
+            if (!this._workspaceService.ValidateMutation(token))
             {
+                this._statusText = "Save rejected: this browser no longer controls the workspace.";
                 return;
             }
 
-            // Get current editor content from Monaco
+            // Read content before acquiring the revocation token used by the save
             string content = await this._jsModule.InvokeAsync<string>("getEditorContent");
 
-            // Save content to disk and keep dirty state if it fails
-            FileOperationResult result = this._fileOperationService.WriteFileText(this._filePath, content);
+            CancellationToken revocationToken = this._workspaceService.GetRevocationToken(token);
+
+            // Keep the editor dirty when the write or final commit fails
+            FileOperationResult result = await this._fileOperationService.WriteFileTextAsync(this._filePath, content, mutation => this._workspaceService.TryExecuteMutation(token, mutation), revocationToken);
             if (!result.Success)
             {
                 this._statusText = "Save failed: " + result.ErrorMessage;
@@ -214,7 +233,7 @@ namespace Bivium.Components.Shared
                 return;
             }
 
-            // Update status
+            // Update state only after the final file commit
             this._isDirty = false;
             this._statusText = FormatFileSize(content.Length) + " - Saved";
             this.StateHasChanged();

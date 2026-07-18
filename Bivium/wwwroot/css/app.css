@@ -8,9 +8,6 @@
 @import '../lib/webtui-theme-nord/dist/index.css';
 @import '../lib/webtui-theme-catppuccin/dist/index.css';
 
-/* xterm.js styles */
-@import '../lib/xterm/css/xterm.css';
-
 /* Custom themes */
 @import 'themes.css';
 
@@ -32,4 +29,33 @@ html, body {
     margin: 0;
     padding: 0;
     overflow: hidden;
+}
+/* Exclusive browser lease challenge */
+.workspace-takeover-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    display: grid;
+    place-items: center;
+    background: color-mix(in srgb, var(--background0) 92%, transparent);
+}
+
+.workspace-takeover-card {
+    max-width: 70ch;
+    padding: 2lh 3ch;
+    border: 1px solid var(--foreground0);
+    background: var(--background0);
+    color: var(--foreground0);
+    box-shadow: 2px 2px 0 var(--background3);
+}
+
+.workspace-takeover-card button {
+    margin-top: 1lh;
+    font: inherit;
+}
+
+.workspace-takeover-client {
+    margin-top: 0.5lh;
+    color: var(--foreground2);
+    overflow-wrap: anywhere;
 }

@@ -16,6 +16,18 @@ namespace Bivium.Components.Shared
         [Parameter]
         public EventCallback<bool> OnClose { get; set; }
 
+        /// <summary>
+        /// Attachment authorized for the mutating upload
+        /// </summary>
+        [Parameter]
+        public string AttachmentId { get; set; } = "";
+
+        /// <summary>
+        /// Generation authorized for the mutating upload
+        /// </summary>
+        [Parameter]
+        public long LeaseGeneration { get; set; }
+
         #endregion
 
         #region Class Variables
@@ -205,7 +217,7 @@ namespace Bivium.Components.Shared
             this._statusText = "Uploading...";
             this.StateHasChanged();
 
-            await this._jsModule.InvokeVoidAsync("uploadFile", this._destinationDir, this._fileName);
+            await this._jsModule.InvokeVoidAsync("uploadFile", this._destinationDir, this._fileName, this.AttachmentId, this.LeaseGeneration);
         }
 
         /// <summary>

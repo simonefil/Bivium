@@ -173,9 +173,7 @@ namespace Bivium.Components.FileList
             if (this.CurrentSort.Field == field)
             {
                 // Same column - toggle direction
-                SortDirection newDirection = this.CurrentSort.Direction == SortDirection.Ascending
-                    ? SortDirection.Descending
-                    : SortDirection.Ascending;
+                SortDirection newDirection = this.CurrentSort.Direction == SortDirection.Ascending ? SortDirection.Descending : SortDirection.Ascending;
                 newSort.Field = field;
                 newSort.Direction = newDirection;
             }

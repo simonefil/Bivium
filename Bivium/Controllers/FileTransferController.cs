@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using Microsoft.AspNetCore.Mvc;
+using Bivium.Models;
 using Bivium.Services;
 
 namespace Bivium.Controllers
@@ -27,6 +28,11 @@ namespace Bivium.Controllers
         /// </summary>
         private readonly SecurityService _securityService;
 
+        /// <summary>
+        /// Workspace that validates the mutation lease
+        /// </summary>
+        private readonly BiviumWorkspaceService _workspaceService;
+
         #endregion
 
         #region Constructor
@@ -35,9 +41,11 @@ namespace Bivium.Controllers
         /// Creates a new FileTransferController
         /// </summary>
         /// <param name="securityService">Security service instance</param>
-        public FileTransferController(SecurityService securityService)
+        /// <param name="workspaceService">Global workspace</param>
+        public FileTransferController(SecurityService securityService, BiviumWorkspaceService workspaceService)
         {
             this._securityService = securityService;
+            this._workspaceService = workspaceService;
         }
 
         #endregion
@@ -158,9 +166,22 @@ namespace Bivium.Controllers
         /// <returns>Upload result</returns>
         [HttpPost("upload")]
         [RequestSizeLimit(MAX_CHUNK_SIZE + 4096)]
-        public IActionResult Upload()
+        public async System.Threading.Tasks.Task<IActionResult> UploadAsync()
         {
             IActionResult result;
+            string tempPath = "";
+
+            string attachmentId = this.Request.Headers["X-Bivium-Attachment"].ToString();
+            string generationValue = this.Request.Headers["X-Bivium-Lease-Generation"].ToString();
+            long generation;
+            if (!long.TryParse(generationValue, out generation))
+                return this.StatusCode(409, "Workspace lease revoked");
+            WorkspaceClientToken workspaceToken = new WorkspaceClientToken(attachmentId, generation);
+            if (!this._workspaceService.ValidateMutation(workspaceToken))
+                return this.StatusCode(409, "Workspace lease revoked");
+            CancellationToken revocationToken = this._workspaceService.GetRevocationToken(workspaceToken);
+            using CancellationTokenSource uploadCancellation = CancellationTokenSource.CreateLinkedTokenSource(this.HttpContext.RequestAborted, revocationToken);
+            CancellationToken cancellationToken = uploadCancellation.Token;
 
             string destinationDir = Uri.UnescapeDataString(this.Request.Headers["X-Destination-Dir"].ToString());
             string fileName = Uri.UnescapeDataString(this.Request.Headers["X-File-Name"].ToString());
@@ -190,8 +211,8 @@ namespace Bivium.Controllers
             }
             else
             {
-                int chunkIndex = 0;
-                int totalChunks = 1;
+                int chunkIndex;
+                int totalChunks;
                 bool chunkIndexValid = int.TryParse(chunkIndexStr, out chunkIndex);
                 bool totalChunksValid = int.TryParse(totalChunksStr, out totalChunks);
 
@@ -204,7 +225,8 @@ namespace Bivium.Controllers
                     try
                     {
                         string destPath = Path.Combine(destinationDir, fileName);
-                        string tempPath = Path.Combine(destinationDir, "." + fileName + "." + uploadId.ToString("N") + ".uploading");
+                        tempPath = Path.Combine(destinationDir, "." + fileName + "." + uploadId.ToString("N") + ".uploading");
+                        cancellationToken.ThrowIfCancellationRequested();
 
                         if (chunkIndex > 0)
                         {
@@ -218,6 +240,7 @@ namespace Bivium.Controllers
                             FileInfo tempInfo = new FileInfo(tempPath);
                             if (tempInfo.Length != expectedLength)
                             {
+                                this.DeleteUploadTempFile(tempPath);
                                 result = this.BadRequest("Upload chunk sequence is inconsistent");
                                 return result;
                             }
@@ -225,32 +248,72 @@ namespace Bivium.Controllers
 
                         // Write chunk data to temp file
                         FileMode fileMode = chunkIndex == 0 ? FileMode.Create : FileMode.Append;
-                        FileStream fs = new FileStream(tempPath, fileMode, FileAccess.Write);
-                        this.Request.Body.CopyTo(fs);
-                        fs.Flush();
-                        fs.Close();
-                        fs.Dispose();
+                        await using (FileStream fs = new FileStream(tempPath, fileMode, FileAccess.Write, FileShare.None, 81920, true))
+                        {
+                            await this.Request.Body.CopyToAsync(fs, cancellationToken);
+                            await fs.FlushAsync(cancellationToken);
+                        }
 
                         // Last chunk: rename temp file to final name
                         if (chunkIndex >= totalChunks - 1)
                         {
-                            System.IO.File.Move(tempPath, destPath, true);
+                            bool committed = this._workspaceService.TryExecuteMutation(workspaceToken, () => System.IO.File.Move(tempPath, destPath, true));
+                            if (!committed)
+                            {
+                                this.DeleteUploadTempFile(tempPath);
+                                return this.StatusCode(409, "Workspace lease revoked");
+                            }
                         }
 
                         result = this.Ok(new { success = true, chunk = chunkIndex, total = totalChunks });
                     }
                     catch (UnauthorizedAccessException ex)
                     {
+                        this.DeleteUploadTempFile(tempPath);
                         result = this.StatusCode(403, "Access denied: " + ex.Message);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        this.DeleteUploadTempFile(tempPath);
+                        result = this.StatusCode(409, "Workspace lease revoked");
                     }
                     catch (IOException ex)
                     {
+                        this.DeleteUploadTempFile(tempPath);
                         result = this.StatusCode(500, "I/O error: " + ex.Message);
                     }
                 }
             }
 
             return result;
+        }
+
+        #endregion
+
+        #region Private Methods
+
+        /// <summary>
+        /// Removes the temporary file of a cancelled upload without hiding the primary result
+        /// </summary>
+        /// <param name="tempPath">Temporary path already validated and built by the controller</param>
+        private void DeleteUploadTempFile(string tempPath)
+        {
+            if (string.IsNullOrEmpty(tempPath))
+                return;
+
+            try
+            {
+                if (System.IO.File.Exists(tempPath))
+                    System.IO.File.Delete(tempPath);
+            }
+            catch (IOException)
+            {
+                // Best-effort cleanup must not hide the primary HTTP result
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Best-effort cleanup must not hide the primary HTTP result
+            }
         }
 
         #endregion

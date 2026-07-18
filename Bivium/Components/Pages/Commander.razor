@@ -12,6 +12,19 @@ else if (!this._canAccess)
 {
     <Bivium.Components.Shared.LoginDialog RequiresTwoFactor="@this._authStatus.TwoFactorEnabled" OnLogin="this.HandleLoginComplete" />
 }
+else if (!this._clientAttached || !this._hasActiveLease)
+{
+    <div class="workspace-takeover-overlay">
+        <div class="workspace-takeover-card">
+            <div>Hai Bivium già aperto da IP @(this._observedLease?.RemoteIp ?? "unknown"). Vuoi rendere attiva questa sessione?</div>
+            @if (this._observedLease != null && !string.IsNullOrEmpty(this._observedLease.ClientLabel))
+            {
+                <div class="workspace-takeover-client">@this._observedLease.ClientLabel</div>
+            }
+            <button type="button" @onclick="this.RequestWorkspaceTakeover">Rendi attiva questa sessione</button>
+        </div>
+    </div>
+}
 else
 {
 <div class="commander-layout">
@@ -22,6 +35,7 @@ else
         OnDownload="this.DoDownload"
         OnUpload="this.DoUpload"
         OnExit="this.DoExit"
+        OnResetWorkspace="this.DoResetWorkspace"
         OnCopy="this.DoCopy"
         OnCut="this.DoCut"
         OnPaste="this.DoPaste"
@@ -56,6 +70,8 @@ else
             OnSelectionChanged="this.HandleLeftSelectionChanged"
             OnSortChanged="this.HandleLeftSortChanged"
             OnCursorChanged="this.HandleLeftCursorChanged"
+            OnScrollAnchorChanged="this.HandleLeftScrollAnchorChanged"
+            OnTreeExpansionChanged="this.HandlePanelTreeExpansionChanged"
             OnActivated="() => this.SetActivePanel(0)"
             OnContextMenu="args => this.HandleContextMenuRequest(args, 0)" />
 
@@ -76,6 +92,8 @@ else
                 OnSelectionChanged="this.HandleRightSelectionChanged"
                 OnSortChanged="this.HandleRightSortChanged"
                 OnCursorChanged="this.HandleRightCursorChanged"
+                OnScrollAnchorChanged="this.HandleRightScrollAnchorChanged"
+                OnTreeExpansionChanged="this.HandlePanelTreeExpansionChanged"
                 OnActivated="() => this.SetActivePanel(1)"
                 OnContextMenu="args => this.HandleContextMenuRequest(args, 1)" />
         }
@@ -150,33 +168,47 @@ else
     OnClose="this.HandlePropertiesDialogClose" />
 
 <Bivium.Components.Shared.PermissionsDialog @ref="this._permissionsDialog"
+    AttachmentId="@this._attachmentId"
+    LeaseGeneration="@this._leaseGeneration"
     OnClose="this.HandlePermissionsDialogClose" />
 
 <Bivium.Components.Shared.AboutDialog @ref="this._aboutDialog"
     OnClose="this.HandleAboutDialogClose" />
 
 <Bivium.Components.Shared.UploadDialog @ref="this._uploadDialog"
+    AttachmentId="@this._attachmentId"
+    LeaseGeneration="@this._leaseGeneration"
     OnClose="this.HandleUploadDialogClose" />
 
 <Bivium.Components.Shared.CompressDialog @ref="this._compressDialog"
     OnClose="this.HandleCompressDialogClose" />
 
 <Bivium.Components.Shared.SettingsDialog @ref="this._settingsDialog"
+    AttachmentId="@this._attachmentId"
+    LeaseGeneration="@this._leaseGeneration"
     OnClose="this.HandleSettingsDialogClose" />
 
 <Bivium.Components.Shared.AuthSettingsDialog @ref="this._authSettingsDialog"
+    AttachmentId="@this._attachmentId"
+    LeaseGeneration="@this._leaseGeneration"
     OnClose="this.HandleSettingsDialogClose" />
 
 <!-- Floating windows -->
 <Bivium.Components.Shared.EditorDialog @ref="this._editorDialog"
+    AttachmentId="@this._attachmentId"
+    LeaseGeneration="@this._leaseGeneration"
     OnClose="this.HandleEditorDialogClose" />
 
 <Bivium.Components.Shared.RenamerDialog @ref="this._renamerDialog"
     FileOperationService="@this._fileOperationService"
+    AttachmentId="@this._attachmentId"
+    LeaseGeneration="@this._leaseGeneration"
     OnClose="this.HandleRenamerDialogClose" />
 
 <Bivium.Components.Shared.TerminalPanel @ref="this._terminalPanel"
     WorkingDirectory="@this.GetActivePanel().CurrentPath"
+    AttachmentId="@this._attachmentId"
+    LeaseGeneration="@this._leaseGeneration"
     OnClose="this.HandleTerminalClose"
     OnStateChanged="this.HandleTerminalStateChanged" />
 }

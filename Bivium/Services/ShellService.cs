@@ -427,7 +427,7 @@ namespace Bivium.Services
         /// Handles process exit events raised by the PTY connection
         /// </summary>
         /// <param name="sender">Event sender</param>
-        /// <param name="e">Exit event arguments</param>
+        /// <param name="and">Exit event arguments</param>
         private void OnProcessExited(object sender, PtyExitedEventArgs e)
         {
             this.CompleteProcessExit();

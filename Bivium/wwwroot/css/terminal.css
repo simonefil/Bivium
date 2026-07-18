@@ -7,8 +7,8 @@
     background-color: var(--background0);
     box-shadow: 2px 2px 0 var(--background3);
     flex-direction: column;
-    min-width: 40ch;
-    min-height: 10lh;
+    min-width: min(40ch, calc(100vw - 2ch));
+    min-height: min(10lh, calc(100vh - 2lh));
     max-width: calc(100vw - 2ch);
     max-height: calc(100vh - 2lh);
     box-sizing: border-box;
@@ -165,7 +165,7 @@
     flex: 1;
 }
 
-/* xterm container */
+/* Virtualized remote terminal container */
 .terminal-body {
     flex: 1;
     min-height: 0;
@@ -183,8 +183,125 @@
     display: block;
 }
 
-.terminal-session .xterm {
+.terminal-virtual-viewport {
+    position: relative;
+    width: 100%;
     height: 100%;
+    overflow: auto;
+    background: #000;
+    color: #fff;
+    font-family: monospace;
+    font-size: 14px;
+    line-height: 18px;
+    white-space: pre;
+    outline: none;
+    user-select: text;
+    font-variant-ligatures: none;
+}
+
+.terminal-virtual-spacer {
+    width: 1px;
+    pointer-events: none;
+}
+
+.terminal-virtual-rows {
+    position: absolute;
+    inset: 0 0 auto 0;
+}
+
+.terminal-ime-input {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    border: 0;
+    opacity: 0;
+    resize: none;
+    pointer-events: none;
+}
+
+.terminal-virtual-row {
+    position: absolute;
+    left: 0;
+    right: 0;
+    overflow: hidden;
+    padding: 0 0.5ch;
+    box-sizing: border-box;
+}
+
+.terminal-virtual-row.loading {
+    color: #777;
+}
+
+.terminal-virtual-row.selected {
+    background-color: #264f78;
+}
+
+.terminal-truncation-marker {
+    color: #ffcc66;
+    font-style: italic;
+}
+
+.terminal-cell {
+    display: inline-block;
+    min-width: 1ch;
+    white-space: pre;
+}
+
+.terminal-cell.cursor {
+    color: #000 !important;
+    background-color: #fff !important;
+}
+
+.terminal-cell.selected {
+    color: var(--background) !important;
+    background: var(--foreground) !important;
+}
+
+.terminal-hyperlink {
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.terminal-cell.continuation {
+    display: none;
+}
+
+.terminal-cell.blink {
+    animation: terminal-cell-blink 1s steps(1, end) infinite;
+}
+
+.terminal-line-double-width {
+    transform: scaleX(2);
+    transform-origin: left center;
+    width: 50%;
+}
+
+.terminal-line-double-height-top {
+    transform: scale(2);
+    transform-origin: left top;
+    width: 50%;
+}
+
+.terminal-line-double-height-bottom {
+    transform: scale(2);
+    transform-origin: left bottom;
+    width: 50%;
+}
+
+@keyframes terminal-cell-blink {
+    50% {
+        visibility: hidden;
+    }
+}
+
+.terminal-persistence-indicator {
+    margin-left: 1ch;
+    color: var(--foreground2);
+    font-size: 0.82em;
+    font-weight: normal;
 }
 
 /* Resize handle (bottom-right corner) */
@@ -202,9 +319,4 @@
     color: var(--foreground2);
     user-select: none;
     line-height: 1lh;
-}
-
-/* Override xterm.js viewport to remove scrollbar gap */
-.terminal-session .xterm-viewport {
-    overflow-y: auto;
 }

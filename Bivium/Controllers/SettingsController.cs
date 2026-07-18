@@ -30,6 +30,11 @@ namespace Bivium.Controllers
         /// </summary>
         private readonly AuthenticationService _authenticationService;
 
+        /// <summary>
+        /// Workspace authority for mutating settings requests
+        /// </summary>
+        private readonly BiviumWorkspaceService _workspaceService;
+
         #endregion
 
         #region Constructor
@@ -40,11 +45,13 @@ namespace Bivium.Controllers
         /// <param name="settingsMonitor">Settings monitor for hot-reload</param>
         /// <param name="environment">Hosting environment</param>
         /// <param name="authenticationService">Authentication service</param>
-        public SettingsController(IOptionsMonitor<CommanderSettings> settingsMonitor, IWebHostEnvironment environment, AuthenticationService authenticationService)
+        /// <param name="workspaceService">Workspace lease authority</param>
+        public SettingsController(IOptionsMonitor<CommanderSettings> settingsMonitor, IWebHostEnvironment environment, AuthenticationService authenticationService, BiviumWorkspaceService workspaceService)
         {
             this._settingsMonitor = settingsMonitor;
             this._environment = environment;
             this._authenticationService = authenticationService;
+            this._workspaceService = workspaceService;
         }
 
         #endregion
@@ -71,6 +78,9 @@ namespace Bivium.Controllers
         [HttpPut("extensions")]
         public IActionResult UpdateExtensions([FromBody] List<string> extensions)
         {
+            if (!this.HasValidWorkspaceLease())
+                return this.Conflict("This browser no longer controls the workspace");
+            CancellationToken cancellationToken = this.GetWorkspaceRevocationToken();
             IActionResult result;
 
             try
@@ -101,6 +111,7 @@ namespace Bivium.Controllers
                 JsonSerializerOptions writeOptions = new JsonSerializerOptions();
                 writeOptions.WriteIndented = true;
                 string updatedJson = JsonSerializer.Serialize(root, writeOptions);
+                cancellationToken.ThrowIfCancellationRequested();
                 System.IO.File.WriteAllText(settingsPath, updatedJson);
 
                 result = this.Ok(new { success = true });
@@ -108,6 +119,10 @@ namespace Bivium.Controllers
             catch (IOException ex)
             {
                 result = this.StatusCode(500, "Failed to write settings: " + ex.Message);
+            }
+            catch (OperationCanceledException)
+            {
+                result = this.Conflict("This browser no longer controls the workspace");
             }
 
             return result;
@@ -133,6 +148,9 @@ namespace Bivium.Controllers
         [HttpPut("authentication")]
         public async System.Threading.Tasks.Task<IActionResult> UpdateAuthentication([FromBody] AuthenticationSettingsRequest request)
         {
+            if (!this.HasValidWorkspaceLease())
+                return this.Conflict("This browser no longer controls the workspace");
+            CancellationToken cancellationToken = this.GetWorkspaceRevocationToken();
             IActionResult result;
 
             try
@@ -143,9 +161,13 @@ namespace Bivium.Controllers
                 }
                 else
                 {
-                    await this._authenticationService.UpdateAuthenticationAsync(request);
+                    await this._authenticationService.UpdateAuthenticationAsync(request, cancellationToken);
                     result = this.Ok(new { success = true });
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                result = this.Conflict("This browser no longer controls the workspace");
             }
             catch (InvalidOperationException ex)
             {
@@ -167,6 +189,9 @@ namespace Bivium.Controllers
         [HttpPost("authentication/password")]
         public async System.Threading.Tasks.Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request)
         {
+            if (!this.HasValidWorkspaceLease())
+                return this.Conflict("This browser no longer controls the workspace");
+            CancellationToken cancellationToken = this.GetWorkspaceRevocationToken();
             IActionResult result;
 
             try
@@ -177,9 +202,13 @@ namespace Bivium.Controllers
                 }
                 else
                 {
-                    await this._authenticationService.ChangePasswordAsync(request);
+                    await this._authenticationService.ChangePasswordAsync(request, cancellationToken);
                     result = this.Ok(new { success = true });
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                result = this.Conflict("This browser no longer controls the workspace");
             }
             catch (InvalidOperationException ex)
             {
@@ -200,6 +229,9 @@ namespace Bivium.Controllers
         [HttpPost("authentication/twofactor/setup")]
         public async System.Threading.Tasks.Task<IActionResult> SetupTwoFactor([FromBody] TwoFactorVerifyRequest request)
         {
+            if (!this.HasValidWorkspaceLease())
+                return this.Conflict("This browser no longer controls the workspace");
+            CancellationToken cancellationToken = this.GetWorkspaceRevocationToken();
             IActionResult result;
 
             try
@@ -216,9 +248,13 @@ namespace Bivium.Controllers
                         currentPassword = request.CurrentPassword;
                     }
 
-                    TwoFactorSetupResult setup = await this._authenticationService.CreateTwoFactorSetupAsync(currentPassword);
+                    TwoFactorSetupResult setup = await this._authenticationService.CreateTwoFactorSetupAsync(currentPassword, cancellationToken);
                     result = this.Ok(setup);
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                result = this.Conflict("This browser no longer controls the workspace");
             }
             catch (InvalidOperationException ex)
             {
@@ -235,11 +271,14 @@ namespace Bivium.Controllers
         /// <summary>
         /// Enables TOTP after verifying a setup code
         /// </summary>
-        /// <param name="request">Verification request</param>
+        /// <param name="request">Validation request</param>
         /// <returns>Result</returns>
         [HttpPost("authentication/twofactor/enable")]
         public async System.Threading.Tasks.Task<IActionResult> EnableTwoFactor([FromBody] TwoFactorVerifyRequest request)
         {
+            if (!this.HasValidWorkspaceLease())
+                return this.Conflict("This browser no longer controls the workspace");
+            CancellationToken cancellationToken = this.GetWorkspaceRevocationToken();
             IActionResult result;
 
             try
@@ -258,9 +297,13 @@ namespace Bivium.Controllers
                         currentPassword = request.CurrentPassword;
                     }
 
-                    await this._authenticationService.EnableTwoFactorAsync(code, currentPassword);
+                    await this._authenticationService.EnableTwoFactorAsync(code, currentPassword, cancellationToken);
                     result = this.Ok(new { success = true });
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                result = this.Conflict("This browser no longer controls the workspace");
             }
             catch (InvalidOperationException ex)
             {
@@ -281,6 +324,9 @@ namespace Bivium.Controllers
         [HttpPost("authentication/twofactor/disable")]
         public async System.Threading.Tasks.Task<IActionResult> DisableTwoFactor([FromBody] TwoFactorVerifyRequest request)
         {
+            if (!this.HasValidWorkspaceLease())
+                return this.Conflict("This browser no longer controls the workspace");
+            CancellationToken cancellationToken = this.GetWorkspaceRevocationToken();
             IActionResult result;
 
             try
@@ -297,9 +343,13 @@ namespace Bivium.Controllers
                         currentPassword = request.CurrentPassword;
                     }
 
-                    await this._authenticationService.DisableTwoFactorAsync(currentPassword);
+                    await this._authenticationService.DisableTwoFactorAsync(currentPassword, cancellationToken);
                     result = this.Ok(new { success = true });
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                result = this.Conflict("This browser no longer controls the workspace");
             }
             catch (InvalidOperationException ex)
             {
@@ -316,6 +366,32 @@ namespace Bivium.Controllers
         #endregion
 
         #region Private Methods
+
+        /// <summary>
+        /// Validates attachment and generation received through server-side headers
+        /// </summary>
+        /// <returns>True if the request owns the current lease</returns>
+        private bool HasValidWorkspaceLease()
+        {
+            string attachmentId = this.Request.Headers["X-Bivium-Attachment"].ToString();
+            string generationText = this.Request.Headers["X-Bivium-Lease-Generation"].ToString();
+            long generation;
+            return !string.IsNullOrEmpty(attachmentId) && long.TryParse(generationText, out generation) && this._workspaceService.ValidateMutation(new WorkspaceClientToken(attachmentId, generation));
+        }
+
+        /// <summary>
+        /// Returns the server-side token revoked atomically during a takeover
+        /// </summary>
+        /// <returns>Request revocation token</returns>
+        private CancellationToken GetWorkspaceRevocationToken()
+        {
+            string attachmentId = this.Request.Headers["X-Bivium-Attachment"].ToString();
+            string generationText = this.Request.Headers["X-Bivium-Lease-Generation"].ToString();
+            long generation;
+            if (!long.TryParse(generationText, out generation))
+                return new CancellationToken(true);
+            return this._workspaceService.GetRevocationToken(new WorkspaceClientToken(attachmentId, generation));
+        }
 
         /// <summary>
         /// Converts a JsonElement tree into a Dictionary for re-serialization

@@ -23,8 +23,9 @@ namespace Bivium.Services
         /// <param name="destinationDir">Destination directory path</param>
         /// <param name="onProgress">Callback invoked after each file (currentFile, totalFiles, currentFileName)</param>
         /// <param name="overwritePaths">Source paths approved for overwrite</param>
+        /// <param name="cancellationToken">Cancellation token for lease revocation</param>
         /// <returns>Operation result</returns>
-        FileOperationResult CopyEntriesWithProgress(List<string> sourcePaths, string destinationDir, Action<int, int, string> onProgress, List<string> overwritePaths = null);
+        FileOperationResult CopyEntriesWithProgress(List<string> sourcePaths, string destinationDir, Action<int, int, string> onProgress, List<string> overwritePaths = null, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Moves files and directories to a destination
@@ -42,15 +43,17 @@ namespace Bivium.Services
         /// <param name="destinationDir">Destination directory path</param>
         /// <param name="onProgress">Callback invoked after each entry (currentEntry, totalEntries, currentEntryName)</param>
         /// <param name="overwritePaths">Source paths approved for overwrite</param>
+        /// <param name="cancellationToken">Cancellation token for lease revocation</param>
         /// <returns>Operation result</returns>
-        FileOperationResult MoveEntriesWithProgress(List<string> sourcePaths, string destinationDir, Action<int, int, string> onProgress, List<string> overwritePaths = null);
+        FileOperationResult MoveEntriesWithProgress(List<string> sourcePaths, string destinationDir, Action<int, int, string> onProgress, List<string> overwritePaths = null, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Deletes files and directories
         /// </summary>
         /// <param name="paths">List of paths to delete</param>
+        /// <param name="cancellationToken">Cancellation token for lease revocation</param>
         /// <returns>Operation result</returns>
-        FileOperationResult DeleteEntries(List<string> paths);
+        FileOperationResult DeleteEntries(List<string> paths, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Renames a file or directory
@@ -85,11 +88,13 @@ namespace Bivium.Services
         FileTextResult ReadFileText(string path, long maxSizeBytes);
 
         /// <summary>
-        /// Writes text content to a file
+        /// Writes text content to a temporary file and commits it after authorization
         /// </summary>
         /// <param name="path">File path</param>
         /// <param name="content">Text content to write</param>
+        /// <param name="tryCommit">Callback that atomically authorizes and executes the final move</param>
+        /// <param name="cancellationToken">Cancellation token for lease revocation</param>
         /// <returns>Operation result</returns>
-        FileOperationResult WriteFileText(string path, string content);
+        System.Threading.Tasks.Task<FileOperationResult> WriteFileTextAsync(string path, string content, Func<Action, bool> tryCommit, CancellationToken cancellationToken = default);
     }
 }

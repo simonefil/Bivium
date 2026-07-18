@@ -9,7 +9,7 @@ namespace Bivium.Components.Panel
     /// <summary>
     /// A single file panel containing tree view and file list
     /// </summary>
-    public partial class FilePanel : ComponentBase
+    public partial class FilePanel : ComponentBase, IAsyncDisposable
     {
         #region Injected Services
 
@@ -83,6 +83,18 @@ namespace Bivium.Components.Panel
         [Parameter]
         public EventCallback<ContextMenuEventArgs> OnContextMenu { get; set; }
 
+        /// <summary>
+        /// Callback when the semantic file-list scroll anchor changes
+        /// </summary>
+        [Parameter]
+        public EventCallback<string> OnScrollAnchorChanged { get; set; }
+
+        /// <summary>
+        /// Callback when directory-tree expansion changes
+        /// </summary>
+        [Parameter]
+        public EventCallback OnTreeExpansionChanged { get; set; }
+
         #endregion
 
         #region Class Variables
@@ -111,6 +123,66 @@ namespace Bivium.Components.Panel
         /// Parent directory used for current autocomplete session
         /// </summary>
         private string _autocompleteParentDir = "";
+
+        /// <summary>
+        /// JavaScript module used for scroll persistence
+        /// </summary>
+        private IJSObjectReference _jsModule;
+
+        /// <summary>
+        /// JavaScript callback reference
+        /// </summary>
+        private DotNetObjectReference<FilePanel> _dotNetReference;
+
+        /// <summary>
+        /// Last anchor restored into this component instance
+        /// </summary>
+        private string _restoredScrollAnchorPath = "";
+
+        #endregion
+
+        #region Overrides
+
+        /// <summary>
+        /// Registers semantic scroll tracking and restores the saved anchor
+        /// </summary>
+        /// <param name="firstRender">True on the first render</param>
+        protected override async System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender)
+        {
+            if (firstRender)
+            {
+                this._jsModule = await this._jsRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js");
+                this._dotNetReference = DotNetObjectReference.Create(this);
+                await this._jsModule.InvokeVoidAsync("registerFilePanelScroll", this.PanelId, this._dotNetReference);
+            }
+
+            if (this._jsModule != null && !string.IsNullOrEmpty(this.State.ScrollAnchorPath) && this.State.ScrollAnchorPath != this._restoredScrollAnchorPath)
+            {
+                this._restoredScrollAnchorPath = this.State.ScrollAnchorPath;
+                int anchorIndex = this.State.Entries.FindIndex(entry => entry.FullPath == this.State.ScrollAnchorPath);
+                await this._jsModule.InvokeVoidAsync("restoreFilePanelScrollAnchor", this.PanelId, this.State.ScrollAnchorPath, anchorIndex);
+            }
+        }
+
+        #endregion
+
+        #region Public Methods
+
+        /// <summary>
+        /// Receives the first visible semantic row from JavaScript
+        /// </summary>
+        /// <param name="path">Full path of the first visible entry</param>
+        /// <returns>Asynchronous callback task</returns>
+        [JSInvokable]
+        public async System.Threading.Tasks.Task OnFileListScrollAnchorChanged(string path)
+        {
+            if (!string.IsNullOrEmpty(path) && path != this.State.ScrollAnchorPath)
+            {
+                this.State.ScrollAnchorPath = path;
+                this._restoredScrollAnchorPath = path;
+                await this.OnScrollAnchorChanged.InvokeAsync(path);
+            }
+        }
 
         #endregion
 
@@ -362,6 +434,15 @@ namespace Bivium.Components.Panel
         }
 
         /// <summary>
+        /// Persists a semantic directory-tree expansion change
+        /// </summary>
+        /// <param name="change">Expansion change</param>
+        private async System.Threading.Tasks.Task HandleTreeExpansionChanged(Bivium.Components.Tree.DirectoryTreeExpansionChange change)
+        {
+            await this.OnTreeExpansionChanged.InvokeAsync();
+        }
+
+        /// <summary>
         /// Handles navigation from the file list (double-click directory)
         /// </summary>
         /// <param name="path">Selected directory path</param>
@@ -418,6 +499,27 @@ namespace Bivium.Components.Panel
             contextArgs.Y = args.ClientY;
             contextArgs.Entry = null;
             await this.OnContextMenu.InvokeAsync(contextArgs);
+        }
+
+        /// <summary>
+        /// Releases JavaScript scroll tracking resources
+        /// </summary>
+        /// <returns>Asynchronous disposal operation</returns>
+        public async ValueTask DisposeAsync()
+        {
+            try
+            {
+                if (this._jsModule != null)
+                {
+                    await this._jsModule.InvokeVoidAsync("unregisterFilePanelScroll", this.PanelId);
+                    await this._jsModule.DisposeAsync();
+                }
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+
+            this._dotNetReference?.Dispose();
         }
 
         #endregion

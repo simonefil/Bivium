@@ -1,10 +1,12 @@
 @inject IJSRuntime JSRuntime
 
 <div id="terminal-window" class="terminal-window @(this._isVisible ? "visible" : "")"
+     data-viewport-width="@this._viewportWidth" data-viewport-height="@this._viewportHeight" data-mru-order="@this._mruOrder" data-focus-target="@this._focusTarget"
      style="left: @(this._windowLeft)px; top: @(this._windowTop)px; width: @(this._windowWidth)px; height: @(this._windowHeight)px;">
 
     <div class="terminal-titlebar" id="terminal-titlebar">
         <span class="terminal-titlebar-title">Terminal</span>
+        <span class="terminal-persistence-indicator" title="Terminal processes keep running when the browser disconnects">server-persistent</span>
         <div class="terminal-titlebar-actions">
             <span class="terminal-titlebar-btn" @onclick="this.Minimize" title="Minimize terminal">-</span>
             <span class="terminal-titlebar-btn" @onclick="this.RequestCloseContainer" title="Close terminal">X</span>
@@ -12,7 +14,7 @@
     </div>
 
     <div class="terminal-tabbar">
-        @foreach (TerminalSession session in this._sessions)
+        @foreach (TerminalSessionSnapshot session in this._sessions)
         {
             <div @key="session.Id" class="@this.GetTabCssClass(session)" @onclick="() => this.SelectTab(session.Id)" @ondblclick="() => this.BeginRename(session)" title="@session.WorkingDirectory">
                 @if (this._renamingSessionId == session.Id)
@@ -23,14 +25,14 @@
                 {
                     <span class="terminal-tab-label">@session.Label</span>
                 }
-                <span class="terminal-tab-close" @onclick="async () => await this.RequestCloseTab(session.Id)" @onclick:stopPropagation="true" title="Close tab">X</span>
+                <span class="terminal-tab-close" @onclick="() => this.RequestCloseTab(session.Id)" @onclick:stopPropagation="true" title="Close tab">X</span>
             </div>
         }
-        <button type="button" class="terminal-tab-add" @onclick="async () => await this.CreateTab()" title="New terminal tab">+</button>
+        <button type="button" class="terminal-tab-add" @onclick="this.CreateTab" title="New terminal tab">+</button>
     </div>
 
     <div class="terminal-body">
-        @foreach (TerminalSession session in this._sessions)
+        @foreach (TerminalSessionSnapshot session in this._sessions)
         {
             <div @key="session.Id" id="terminal-container-@session.Id" class="terminal-session @(session.Id == this._activeSessionId ? "active" : "")"></div>
         }

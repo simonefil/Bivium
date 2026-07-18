@@ -44,12 +44,15 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
 
 builder.Services.AddAuthorization();
 builder.Services.AddCascadingAuthenticationState();
+builder.Services.AddHttpContextAccessor();
 
 // Register configuration
 builder.Services.Configure<CommanderSettings>(builder.Configuration.GetSection("CommanderSettings"));
 
 // Register services
 builder.Services.AddSingleton<AuthenticationService>();
+builder.Services.AddSingleton<BiviumWorkspaceService>();
+builder.Services.AddSingleton<TerminalRuntimeService>();
 builder.Services.AddSingleton<SecurityService>();
 builder.Services.AddSingleton<IFileSystemService, FileSystemService>();
 builder.Services.AddSingleton<IFileOperationService, FileOperationService>();
@@ -60,6 +63,10 @@ builder.Services.AddControllers(ConfigureControllers);
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 
 WebApplication app = builder.Build();
+BiviumWorkspaceService workspaceService = app.Services.GetRequiredService<BiviumWorkspaceService>();
+TerminalRuntimeService terminalRuntimeService = app.Services.GetRequiredService<TerminalRuntimeService>();
+app.Lifetime.ApplicationStopping.Register(workspaceService.Stop);
+app.Lifetime.ApplicationStopping.Register(terminalRuntimeService.Stop);
 
 // Configure the HTTP request pipeline
 if (!app.Environment.IsDevelopment())

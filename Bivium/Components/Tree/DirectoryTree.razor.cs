@@ -29,6 +29,18 @@ namespace Bivium.Components.Tree
         [Parameter]
         public EventCallback<string> OnDirectorySelected { get; set; }
 
+        /// <summary>
+        /// Semantic paths of expanded nodes
+        /// </summary>
+        [Parameter]
+        public HashSet<string> ExpandedDirectoryPaths { get; set; } = new HashSet<string>();
+
+        /// <summary>
+        /// Callback when a node is expanded or collapsed
+        /// </summary>
+        [Parameter]
+        public EventCallback<DirectoryTreeExpansionChange> OnExpansionChanged { get; set; }
+
         #endregion
 
         #region Class Variables
@@ -95,5 +107,21 @@ namespace Bivium.Components.Tree
         }
 
         #endregion
+    }
+
+    /// <summary>
+    /// Describes a semantic directory-tree expansion change
+    /// </summary>
+    public sealed class DirectoryTreeExpansionChange
+    {
+        /// <summary>
+        /// Full directory path
+        /// </summary>
+        public string Path { get; set; } = "";
+
+        /// <summary>
+        /// True when the node is expanded
+        /// </summary>
+        public bool Expanded { get; set; }
     }
 }

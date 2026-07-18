@@ -8,6 +8,8 @@
             <Bivium.Components.Tree.DirectoryTreeNode
                 Entry="@root"
                 CurrentPath="@this.CurrentPath"
+                ExpandedDirectoryPaths="@this.ExpandedDirectoryPaths"
+                OnExpansionChanged="this.OnExpansionChanged"
                 OnDirectorySelected="this.HandleDirectorySelected"
                 Depth="0" />
         }

@@ -50,10 +50,13 @@ namespace Bivium.Services
         /// <param name="archivePath">Path to the archive file</param>
         /// <param name="destinationDir">Directory to extract into</param>
         /// <param name="onProgress">Progress callback (current, total, currentFileName)</param>
+        /// <param name="cancellationToken">Cancellation token for lease revocation</param>
         /// <returns>Operation result</returns>
-        public FileOperationResult ExtractArchive(string archivePath, string destinationDir, Action<int, int, string> onProgress)
+        public FileOperationResult ExtractArchive(string archivePath, string destinationDir, Action<int, int, string> onProgress, CancellationToken cancellationToken = default)
         {
             FileOperationResult result = new FileOperationResult();
+
+            cancellationToken.ThrowIfCancellationRequested();
 
             if (!this._securityService.IsPathSafe(archivePath) || !this._securityService.IsPathSafe(destinationDir))
             {
@@ -74,18 +77,22 @@ namespace Bivium.Services
                 // ZIP: use native System.IO.Compression
                 if (lowerPath.EndsWith(".zip"))
                 {
-                    result = this.ExtractZip(archivePath, destinationDir, onProgress);
+                    result = this.ExtractZip(archivePath, destinationDir, onProgress, cancellationToken);
                 }
                 // TAR.ZST: native tar + ZstdSharp
                 else if (lowerPath.EndsWith(".tar.zst") || lowerPath.EndsWith(".tzst"))
                 {
-                    result = this.ExtractTarZst(archivePath, destinationDir, onProgress);
+                    result = this.ExtractTarZst(archivePath, destinationDir, onProgress, cancellationToken);
                 }
                 // TAR, TAR.GZ, TAR.BZ2, TAR.XZ: SharpCompress handles all
                 else
                 {
-                    result = this.ExtractWithSharpCompress(archivePath, destinationDir, onProgress);
+                    result = this.ExtractWithSharpCompress(archivePath, destinationDir, onProgress, cancellationToken);
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -102,10 +109,13 @@ namespace Bivium.Services
         /// <param name="sourcePaths">List of file/directory paths to compress</param>
         /// <param name="format">Archive format to create</param>
         /// <param name="onProgress">Progress callback (current, total, currentFileName)</param>
+        /// <param name="cancellationToken">Cancellation token for lease revocation</param>
         /// <returns>Operation result</returns>
-        public FileOperationResult CreateArchive(string outputPath, List<string> sourcePaths, ArchiveFormat format, Action<int, int, string> onProgress)
+        public FileOperationResult CreateArchive(string outputPath, List<string> sourcePaths, ArchiveFormat format, Action<int, int, string> onProgress, CancellationToken cancellationToken = default)
         {
             FileOperationResult result = new FileOperationResult();
+
+            cancellationToken.ThrowIfCancellationRequested();
 
             if (!this._securityService.IsPathSafe(outputPath))
             {
@@ -131,17 +141,22 @@ namespace Bivium.Services
                 int totalFiles = 0;
                 for (int i = 0; i < sourcePaths.Count; i++)
                 {
-                    totalFiles += this.CountFiles(sourcePaths[i]);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    totalFiles += this.CountFiles(sourcePaths[i], cancellationToken);
                 }
 
                 if (format == ArchiveFormat.Zip)
                 {
-                    result = this.CreateZip(outputPath, sourcePaths, totalFiles, onProgress);
+                    result = this.CreateZip(outputPath, sourcePaths, totalFiles, onProgress, cancellationToken);
                 }
                 else
                 {
-                    result = this.CreateTarVariant(outputPath, sourcePaths, format, totalFiles, onProgress);
+                    result = this.CreateTarVariant(outputPath, sourcePaths, format, totalFiles, onProgress, cancellationToken);
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -217,14 +232,15 @@ namespace Bivium.Services
         /// <param name="destinationDir">Destination directory</param>
         /// <param name="onProgress">Progress callback</param>
         /// <returns>Operation result</returns>
-        private FileOperationResult ExtractZip(string archivePath, string destinationDir, Action<int, int, string> onProgress)
+        private FileOperationResult ExtractZip(string archivePath, string destinationDir, Action<int, int, string> onProgress, CancellationToken cancellationToken)
         {
             int processed = 0;
-            ZipArchive archive = ZipFile.OpenRead(archivePath);
+            using ZipArchive archive = ZipFile.OpenRead(archivePath);
             int totalEntries = archive.Entries.Count;
 
             for (int i = 0; i < archive.Entries.Count; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 ZipArchiveEntry entry = archive.Entries[i];
                 string destPath = Path.Combine(destinationDir, entry.FullName);
 
@@ -243,7 +259,9 @@ namespace Bivium.Services
                 {
                     // File entry
                     Directory.CreateDirectory(Path.GetDirectoryName(destPath));
-                    entry.ExtractToFile(destPath, true);
+                    using Stream source = entry.Open();
+                    using FileStream destination = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                    this.CopyStreamCancellable(source, destination, cancellationToken);
                     processed++;
                 }
 
@@ -252,8 +270,6 @@ namespace Bivium.Services
                     onProgress(i + 1, totalEntries, entry.FullName);
                 }
             }
-
-            archive.Dispose();
 
             FileOperationResult result = FileOperationResult.Ok(processed);
             return result;
@@ -266,34 +282,33 @@ namespace Bivium.Services
         /// <param name="destinationDir">Destination directory</param>
         /// <param name="onProgress">Progress callback</param>
         /// <returns>Operation result</returns>
-        private FileOperationResult ExtractTarZst(string archivePath, string destinationDir, Action<int, int, string> onProgress)
+        private FileOperationResult ExtractTarZst(string archivePath, string destinationDir, Action<int, int, string> onProgress, CancellationToken cancellationToken)
         {
             int processed = 0;
 
             // First pass: count entries
             int totalEntries = 0;
-            FileStream countStream = new FileStream(archivePath, FileMode.Open, FileAccess.Read);
-            ZstdSharp.DecompressionStream countDecomp = new ZstdSharp.DecompressionStream(countStream);
-            TarReader countReader = new TarReader(countDecomp);
-
-            while (countReader.GetNextEntry() != null)
+            using (FileStream countStream = new FileStream(archivePath, FileMode.Open, FileAccess.Read))
+            using (ZstdSharp.DecompressionStream countDecomp = new ZstdSharp.DecompressionStream(countStream))
+            using (TarReader countReader = new TarReader(countDecomp))
             {
-                totalEntries++;
+                while (countReader.GetNextEntry() != null)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    totalEntries++;
+                }
             }
 
-            countReader.Dispose();
-            countDecomp.Dispose();
-            countStream.Dispose();
-
             // Second pass: extract
-            FileStream fileStream = new FileStream(archivePath, FileMode.Open, FileAccess.Read);
-            ZstdSharp.DecompressionStream decompStream = new ZstdSharp.DecompressionStream(fileStream);
-            TarReader tarReader = new TarReader(decompStream);
+            using FileStream fileStream = new FileStream(archivePath, FileMode.Open, FileAccess.Read);
+            using ZstdSharp.DecompressionStream decompStream = new ZstdSharp.DecompressionStream(fileStream);
+            using TarReader tarReader = new TarReader(decompStream);
             int current = 0;
 
             TarEntry entry = tarReader.GetNextEntry();
             while (entry != null)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 current++;
                 string destPath = Path.Combine(destinationDir, entry.Name);
 
@@ -307,7 +322,9 @@ namespace Bivium.Services
                     else if (entry.EntryType == TarEntryType.RegularFile)
                     {
                         Directory.CreateDirectory(Path.GetDirectoryName(destPath));
-                        entry.ExtractToFile(destPath, true);
+                        using FileStream destination = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                        if (entry.DataStream != null)
+                            this.CopyStreamCancellable(entry.DataStream, destination, cancellationToken);
                         processed++;
                     }
                 }
@@ -320,10 +337,6 @@ namespace Bivium.Services
                 entry = tarReader.GetNextEntry();
             }
 
-            tarReader.Dispose();
-            decompStream.Dispose();
-            fileStream.Dispose();
-
             FileOperationResult result = FileOperationResult.Ok(processed);
             return result;
         }
@@ -335,28 +348,30 @@ namespace Bivium.Services
         /// <param name="destinationDir">Destination directory</param>
         /// <param name="onProgress">Progress callback</param>
         /// <returns>Operation result</returns>
-        private FileOperationResult ExtractWithSharpCompress(string archivePath, string destinationDir, Action<int, int, string> onProgress)
+        private FileOperationResult ExtractWithSharpCompress(string archivePath, string destinationDir, Action<int, int, string> onProgress, CancellationToken cancellationToken)
         {
             int processed = 0;
 
             // First pass: count entries
             int totalEntries = 0;
-            FileStream countStream = new FileStream(archivePath, FileMode.Open, FileAccess.Read);
-            IReader countReader = ReaderFactory.OpenReader(countStream);
-            while (countReader.MoveToNextEntry())
+            using (FileStream countStream = new FileStream(archivePath, FileMode.Open, FileAccess.Read))
+            using (IReader countReader = ReaderFactory.OpenReader(countStream))
             {
-                totalEntries++;
+                while (countReader.MoveToNextEntry())
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    totalEntries++;
+                }
             }
-            countReader.Dispose();
-            countStream.Dispose();
 
             // Second pass: extract
-            FileStream fileStream = new FileStream(archivePath, FileMode.Open, FileAccess.Read);
-            IReader reader = ReaderFactory.OpenReader(fileStream);
+            using FileStream fileStream = new FileStream(archivePath, FileMode.Open, FileAccess.Read);
+            using IReader reader = ReaderFactory.OpenReader(fileStream);
             int current = 0;
 
             while (reader.MoveToNextEntry())
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 current++;
                 IEntry entry = reader.Entry;
 
@@ -381,14 +396,13 @@ namespace Bivium.Services
                     if (this.IsPathInsideDirectory(destPath, destinationDir))
                     {
                         Directory.CreateDirectory(Path.GetDirectoryName(destPath));
-                        reader.WriteEntryToFile(destPath, new ExtractionOptions() { Overwrite = true });
+                        using Stream source = reader.OpenEntryStream();
+                        using FileStream destination = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                        this.CopyStreamCancellable(source, destination, cancellationToken);
                         processed++;
                     }
                 }
             }
-
-            reader.Dispose();
-            fileStream.Dispose();
 
             FileOperationResult result = FileOperationResult.Ok(processed);
             return result;
@@ -424,9 +438,7 @@ namespace Bivium.Services
         /// <returns>String comparison for filesystem paths</returns>
         private StringComparison GetPathComparison()
         {
-            StringComparison result = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
-                ? StringComparison.OrdinalIgnoreCase
-                : StringComparison.Ordinal;
+            StringComparison result = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
             return result;
         }
 
@@ -442,25 +454,26 @@ namespace Bivium.Services
         /// <param name="totalFiles">Total file count for progress</param>
         /// <param name="onProgress">Progress callback</param>
         /// <returns>Operation result</returns>
-        private FileOperationResult CreateZip(string outputPath, List<string> sourcePaths, int totalFiles, Action<int, int, string> onProgress)
+        private FileOperationResult CreateZip(string outputPath, List<string> sourcePaths, int totalFiles, Action<int, int, string> onProgress, CancellationToken cancellationToken)
         {
             int processed = 0;
-            FileStream outStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write);
-            ZipArchive archive = new ZipArchive(outStream, ZipArchiveMode.Create);
+            using FileStream outStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write);
+            using ZipArchive archive = new ZipArchive(outStream, ZipArchiveMode.Create);
 
             for (int i = 0; i < sourcePaths.Count; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 string source = sourcePaths[i];
 
                 if (Directory.Exists(source))
                 {
                     string baseName = Path.GetFileName(source);
-                    this.AddDirectoryToZip(archive, source, baseName, ref processed, totalFiles, onProgress);
+                    this.AddDirectoryToZip(archive, source, baseName, ref processed, totalFiles, onProgress, cancellationToken);
                 }
                 else if (File.Exists(source))
                 {
                     string entryName = Path.GetFileName(source);
-                    archive.CreateEntryFromFile(source, entryName, CompressionLevel.Optimal);
+                    this.AddFileToZip(archive, source, entryName, cancellationToken);
                     processed++;
 
                     if (onProgress != null)
@@ -469,9 +482,6 @@ namespace Bivium.Services
                     }
                 }
             }
-
-            archive.Dispose();
-            outStream.Dispose();
 
             FileOperationResult result = FileOperationResult.Ok(processed);
             return result;
@@ -486,8 +496,9 @@ namespace Bivium.Services
         /// <param name="processed">Running file count</param>
         /// <param name="totalFiles">Total file count for progress</param>
         /// <param name="onProgress">Progress callback</param>
-        private void AddDirectoryToZip(ZipArchive archive, string dirPath, string entryBase, ref int processed, int totalFiles, Action<int, int, string> onProgress)
+        private void AddDirectoryToZip(ZipArchive archive, string dirPath, string entryBase, ref int processed, int totalFiles, Action<int, int, string> onProgress, CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             // Add files in this directory
             DirectoryInfo dirInfo = new DirectoryInfo(dirPath);
             FileInfo[] files = dirInfo.GetFiles();
@@ -500,8 +511,9 @@ namespace Bivium.Services
 
             for (int i = 0; i < files.Length; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 string entryName = entryBase + "/" + files[i].Name;
-                archive.CreateEntryFromFile(files[i].FullName, entryName, CompressionLevel.Optimal);
+                this.AddFileToZip(archive, files[i].FullName, entryName, cancellationToken);
                 processed++;
 
                 if (onProgress != null)
@@ -513,8 +525,9 @@ namespace Bivium.Services
             // Recurse into subdirectories
             for (int i = 0; i < subDirs.Length; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 string subBase = entryBase + "/" + subDirs[i].Name;
-                this.AddDirectoryToZip(archive, subDirs[i].FullName, subBase, ref processed, totalFiles, onProgress);
+                this.AddDirectoryToZip(archive, subDirs[i].FullName, subBase, ref processed, totalFiles, onProgress, cancellationToken);
             }
         }
 
@@ -527,30 +540,31 @@ namespace Bivium.Services
         /// <param name="totalFiles">Total file count for progress</param>
         /// <param name="onProgress">Progress callback</param>
         /// <returns>Operation result</returns>
-        private FileOperationResult CreateTarVariant(string outputPath, List<string> sourcePaths, ArchiveFormat format, int totalFiles, Action<int, int, string> onProgress)
+        private FileOperationResult CreateTarVariant(string outputPath, List<string> sourcePaths, ArchiveFormat format, int totalFiles, Action<int, int, string> onProgress, CancellationToken cancellationToken)
         {
             int processed = 0;
-            FileStream outStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write);
+            using FileStream outStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write);
 
             // Wrap in compression stream based on format
-            Stream compressionStream = this.WrapWithCompression(outStream, format);
+            using Stream compressionStream = this.WrapWithCompression(outStream, format);
 
             // Write tar entries
-            TarWriter tarWriter = new TarWriter(compressionStream, TarEntryFormat.Pax, leaveOpen: false);
+            using TarWriter tarWriter = new TarWriter(compressionStream, TarEntryFormat.Pax, leaveOpen: false);
 
             for (int i = 0; i < sourcePaths.Count; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 string source = sourcePaths[i];
 
                 if (Directory.Exists(source))
                 {
                     string baseName = Path.GetFileName(source);
-                    this.AddDirectoryToTar(tarWriter, source, baseName, ref processed, totalFiles, onProgress);
+                    this.AddDirectoryToTar(tarWriter, source, baseName, ref processed, totalFiles, onProgress, cancellationToken);
                 }
                 else if (File.Exists(source))
                 {
                     string entryName = Path.GetFileName(source);
-                    tarWriter.WriteEntry(source, entryName);
+                    this.AddFileToTar(tarWriter, source, entryName, cancellationToken);
                     processed++;
 
                     if (onProgress != null)
@@ -558,15 +572,6 @@ namespace Bivium.Services
                         onProgress(processed, totalFiles, entryName);
                     }
                 }
-            }
-
-            tarWriter.Dispose();
-
-            // Compression stream is disposed by TarWriter (leaveOpen: false)
-            // But if compressionStream != outStream, outStream may need disposal
-            if (compressionStream != outStream)
-            {
-                outStream.Dispose();
             }
 
             FileOperationResult result = FileOperationResult.Ok(processed);
@@ -612,8 +617,9 @@ namespace Bivium.Services
         /// <param name="processed">Running file count</param>
         /// <param name="totalFiles">Total file count for progress</param>
         /// <param name="onProgress">Progress callback</param>
-        private void AddDirectoryToTar(TarWriter tarWriter, string dirPath, string entryBase, ref int processed, int totalFiles, Action<int, int, string> onProgress)
+        private void AddDirectoryToTar(TarWriter tarWriter, string dirPath, string entryBase, ref int processed, int totalFiles, Action<int, int, string> onProgress, CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             // Add files in this directory
             DirectoryInfo dirInfo = new DirectoryInfo(dirPath);
             FileInfo[] files = dirInfo.GetFiles();
@@ -626,8 +632,9 @@ namespace Bivium.Services
 
             for (int i = 0; i < files.Length; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 string entryName = entryBase + "/" + files[i].Name;
-                tarWriter.WriteEntry(files[i].FullName, entryName);
+                this.AddFileToTar(tarWriter, files[i].FullName, entryName, cancellationToken);
                 processed++;
 
                 if (onProgress != null)
@@ -639,14 +646,106 @@ namespace Bivium.Services
             // Recurse into subdirectories
             for (int i = 0; i < subDirs.Length; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 string subBase = entryBase + "/" + subDirs[i].Name;
-                this.AddDirectoryToTar(tarWriter, subDirs[i].FullName, subBase, ref processed, totalFiles, onProgress);
+                this.AddDirectoryToTar(tarWriter, subDirs[i].FullName, subBase, ref processed, totalFiles, onProgress, cancellationToken);
             }
         }
 
         #endregion
 
         #region Private Methods - Helpers
+
+        /// <summary>
+        /// Adds a ZIP file by copying it in cancellable blocks
+        /// </summary>
+        private void AddFileToZip(ZipArchive archive, string sourcePath, string entryName, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ZipArchiveEntry entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
+            using FileStream source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using Stream destination = entry.Open();
+            this.CopyStreamCancellable(source, destination, cancellationToken);
+        }
+
+        /// <summary>
+        /// Adds a TAR file through a stream that observes revocation during writes
+        /// </summary>
+        private void AddFileToTar(TarWriter tarWriter, string sourcePath, string entryName, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using FileStream source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using CancellationObservingStream cancellableSource = new CancellationObservingStream(source, cancellationToken);
+            PaxTarEntry entry = new PaxTarEntry(TarEntryType.RegularFile, entryName);
+            entry.DataStream = cancellableSource;
+            entry.ModificationTime = File.GetLastWriteTimeUtc(sourcePath);
+            tarWriter.WriteEntry(entry);
+        }
+
+        /// <summary>
+        /// Copies a stream while observing revocation for large payloads
+        /// </summary>
+        private void CopyStreamCancellable(Stream source, Stream destination, CancellationToken cancellationToken)
+        {
+            source.CopyToAsync(destination, 128 * 1024, cancellationToken).GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// Read-only stream that checks a token before each read performed by TarWriter
+        /// </summary>
+        private sealed class CancellationObservingStream : Stream
+        {
+            private readonly Stream _inner;
+
+            private readonly CancellationToken _cancellationToken;
+
+            public CancellationObservingStream(Stream inner, CancellationToken cancellationToken)
+            {
+                this._inner = inner;
+                this._cancellationToken = cancellationToken;
+            }
+
+            public override bool CanRead { get { return this._inner.CanRead; } }
+
+            public override bool CanSeek { get { return this._inner.CanSeek; } }
+
+            public override bool CanWrite { get { return false; } }
+
+            public override long Length { get { return this._inner.Length; } }
+
+            public override long Position
+            {
+                get { return this._inner.Position; }
+                set { this._inner.Position = value; }
+            }
+
+            public override void Flush()
+            {
+                this._inner.Flush();
+            }
+
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                this._cancellationToken.ThrowIfCancellationRequested();
+                return this._inner.Read(buffer, offset, count);
+            }
+
+            public override long Seek(long offset, SeekOrigin origin)
+            {
+                this._cancellationToken.ThrowIfCancellationRequested();
+                return this._inner.Seek(offset, origin);
+            }
+
+            public override void SetLength(long value)
+            {
+                throw new NotSupportedException();
+            }
+
+            public override void Write(byte[] buffer, int offset, int count)
+            {
+                throw new NotSupportedException();
+            }
+        }
 
         /// <summary>
         /// Validates source paths before archive creation starts
@@ -675,10 +774,7 @@ namespace Bivium.Services
                 }
 
                 string fullSourcePath = Path.GetFullPath(sourcePath);
-                bool samePath = string.Equals(
-                    Path.TrimEndingDirectorySeparator(fullSourcePath),
-                    Path.TrimEndingDirectorySeparator(fullOutputPath),
-                    this.GetPathComparison());
+                bool samePath = string.Equals(Path.TrimEndingDirectorySeparator(fullSourcePath), Path.TrimEndingDirectorySeparator(fullOutputPath), this.GetPathComparison());
 
                 if (samePath)
                 {
@@ -700,8 +796,9 @@ namespace Bivium.Services
         /// </summary>
         /// <param name="path">File or directory path</param>
         /// <returns>Total file count</returns>
-        private int CountFiles(string path)
+        private int CountFiles(string path, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             int count = 0;
 
             if (File.Exists(path))
@@ -720,7 +817,8 @@ namespace Bivium.Services
                     DirectoryInfo[] subDirs = dirInfo.GetDirectories();
                     for (int i = 0; i < subDirs.Length; i++)
                     {
-                        count += this.CountFiles(subDirs[i].FullName);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        count += this.CountFiles(subDirs[i].FullName, cancellationToken);
                     }
                 }
                 catch (UnauthorizedAccessException)

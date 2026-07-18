@@ -17,6 +17,12 @@ namespace Bivium.Components.Shared
         [Inject]
         private IPermissionService _permissionService { get; set; }
 
+        /// <summary>
+        /// Workspace lease authority
+        /// </summary>
+        [Inject]
+        private BiviumWorkspaceService _workspaceService { get; set; }
+
         #endregion
 
         #region Parameters
@@ -26,6 +32,12 @@ namespace Bivium.Components.Shared
         /// </summary>
         [Parameter]
         public EventCallback<bool> OnClose { get; set; }
+
+        [Parameter]
+        public string AttachmentId { get; set; } = "";
+
+        [Parameter]
+        public long LeaseGeneration { get; set; }
 
         #endregion
 
@@ -160,9 +172,25 @@ namespace Bivium.Components.Shared
                 this._errorMessage = "Cannot save permissions because current permissions were not loaded.";
                 return;
             }
+            if (!this._workspaceService.ValidateMutation(new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration)))
+            {
+                this._errorMessage = "This browser no longer controls the workspace.";
+                return;
+            }
+
+            CancellationToken cancellationToken = this._workspaceService.GetRevocationToken(new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration));
 
             // Apply permission changes
-            FileOperationResult permResult = this._permissionService.SetPermissions(this._entryPath, this._model, this._recursive);
+            FileOperationResult permResult;
+            try
+            {
+                permResult = this._permissionService.SetPermissions(this._entryPath, this._model, this._recursive, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                this._errorMessage = "Permission update cancelled because browser control was revoked.";
+                return;
+            }
             if (!permResult.Success)
             {
                 this._errorMessage = permResult.ErrorMessage;
@@ -176,7 +204,16 @@ namespace Bivium.Components.Shared
 
             if (applyOwner)
             {
-                FileOperationResult ownResult = this._permissionService.SetOwner(this._entryPath, this._model.Owner, this._model.Group, this._recursive);
+                FileOperationResult ownResult;
+                try
+                {
+                    ownResult = this._permissionService.SetOwner(this._entryPath, this._model.Owner, this._model.Group, this._recursive, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    this._errorMessage = "Ownership update cancelled because browser control was revoked.";
+                    return;
+                }
                 if (!ownResult.Success)
                 {
                     this._errorMessage = ownResult.ErrorMessage;
@@ -200,7 +237,7 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Calculates the octal permission string for Unix permissions
         /// </summary>
-        /// <returns>Octal string (e.g. 755)</returns>
+        /// <returns>Octal string (and.g. 755)</returns>
         private string GetOctalString()
         {
             int owner = 0;

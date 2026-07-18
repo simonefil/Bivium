@@ -17,6 +17,12 @@ namespace Bivium.Components.Shared
         [Parameter]
         public EventCallback OnClose { get; set; }
 
+        [Parameter]
+        public string AttachmentId { get; set; } = "";
+
+        [Parameter]
+        public long LeaseGeneration { get; set; }
+
         #endregion
 
         #region Class Variables
@@ -27,7 +33,7 @@ namespace Bivium.Components.Shared
         private bool _isVisible = false;
 
         /// <summary>
-        /// Extensions text, one per line
+        /// Extensions text, one for line
         /// </summary>
         private string _extensionsText = "";
 
@@ -120,7 +126,7 @@ namespace Bivium.Components.Shared
 
             // Load JS module and send PUT request via fetch
             await this.EnsureJsModule();
-            bool success = await this._jsModule.InvokeAsync<bool>("putJson", "/api/Settings/extensions", jsonBody);
+            bool success = await this._jsModule.InvokeAsync<bool>("putJson", "/api/Settings/extensions", jsonBody, this.AttachmentId, this.LeaseGeneration);
 
             if (success)
             {

@@ -39,6 +39,8 @@
         <Bivium.Components.Tree.DirectoryTree
             RootPath="@this.State.CurrentPath"
             CurrentPath="@this.State.CurrentPath"
+            ExpandedDirectoryPaths="@this.State.ExpandedDirectoryPaths"
+            OnExpansionChanged="this.HandleTreeExpansionChanged"
             OnDirectorySelected="this.HandleTreeNavigation" />
     </div>
 
@@ -48,7 +50,7 @@
                        CssVariable="--tree-height" />
 
     <!-- File list section -->
-    <div class="panel-filelist"
+    <div class="panel-filelist" id="@(this.PanelId + "-filelist")"
          @oncontextmenu="this.HandlePanelContextMenu"
          @oncontextmenu:preventDefault="true">
         <Bivium.Components.FileList.FileListTable

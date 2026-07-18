@@ -55,8 +55,10 @@ export function selectFile() {
  * Upload the selected file in chunks to the server
  * @param {string} destinationDir - Server destination directory path
  * @param {string} fileName - File name for the upload
+ * @param {string} attachmentId - Authorized workspace attachment
+ * @param {number} leaseGeneration - Authorized lease generation
  */
-export async function uploadFile(destinationDir, fileName) {
+export async function uploadFile(destinationDir, fileName, attachmentId, leaseGeneration) {
     if (!_selectedFile) {
         if (_dotNetRef) {
             await _dotNetRef.invokeMethodAsync('OnUploadComplete', false, 'No file selected');
@@ -86,7 +88,9 @@ export async function uploadFile(destinationDir, fileName) {
                         'X-File-Name': encodeURIComponent(fileName),
                         'X-Chunk-Index': i.toString(),
                         'X-Total-Chunks': totalChunks.toString(),
-                        'X-Upload-Id': uploadId
+                        'X-Upload-Id': uploadId,
+                        'X-Bivium-Attachment': attachmentId,
+                        'X-Bivium-Lease-Generation': String(leaseGeneration)
                     },
                     body: chunk
                 });

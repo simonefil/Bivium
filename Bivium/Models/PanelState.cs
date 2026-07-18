@@ -32,6 +32,16 @@ namespace Bivium.Models
         /// </summary>
         public int CursorIndex { get; set; } = 0;
 
+        /// <summary>
+        /// Full path of the first visible row used to restore list scrolling
+        /// </summary>
+        public string ScrollAnchorPath { get; set; } = "";
+
+        /// <summary>
+        /// Semantic full paths of expanded directory-tree nodes
+        /// </summary>
+        public HashSet<string> ExpandedDirectoryPaths { get; set; } = new HashSet<string>();
+
         #endregion
 
         #region Constructor
