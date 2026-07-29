@@ -256,8 +256,8 @@
 }
 
 .terminal-cell.selected {
-    color: var(--background) !important;
-    background: var(--foreground) !important;
+    color: var(--background0) !important;
+    background-color: var(--foreground0) !important;
 }
 
 .terminal-hyperlink {

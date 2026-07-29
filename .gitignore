@@ -50,6 +50,9 @@ Generated\ Files/
 [Tt]est[Rr]esult*/
 [Bb]uild[Ll]og.*
 
+# Project test sources
+/Bivium.Tests/
+
 # NUnit
 *.VisualState.xml
 TestResult.xml

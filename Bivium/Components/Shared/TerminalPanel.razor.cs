@@ -77,6 +77,16 @@ namespace Bivium.Components.Shared
         private readonly Dictionary<int, long> _appliedRevisions = new Dictionary<int, long>();
 
         /// <summary>
+        /// Protects terminal runtime notifications received outside the circuit dispatcher
+        /// </summary>
+        private readonly object _runtimeEventSyncRoot = new object();
+
+        /// <summary>
+        /// Latest pending runtime notification for each session
+        /// </summary>
+        private readonly Dictionary<int, TerminalRuntimeEvent> _pendingRuntimeEvents = new Dictionary<int, TerminalRuntimeEvent>();
+
+        /// <summary>
         /// Cancels every request started by the circuit
         /// </summary>
         private readonly CancellationTokenSource _requestCancellation = new CancellationTokenSource();
@@ -105,6 +115,16 @@ namespace Bivium.Components.Shared
         /// Whether the circuit was detached
         /// </summary>
         private bool _isDisposed = false;
+
+        /// <summary>
+        /// Whether the browser page can consume terminal renderer updates
+        /// </summary>
+        private bool _terminalPageVisible = true;
+
+        /// <summary>
+        /// Whether one circuit-dispatcher drain is already scheduled
+        /// </summary>
+        private bool _runtimeEventDrainScheduled = false;
 
         /// <summary>
         /// Whether the window manager was initialized
@@ -427,6 +447,31 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
+        /// Suspends renderer delivery while the browser page is hidden
+        /// </summary>
+        /// <param name="visible">Whether the document is visible</param>
+        [JSInvokable]
+        public void OnTerminalVisibilityChanged(bool visible)
+        {
+            lock (this._runtimeEventSyncRoot)
+            {
+                if (this._isDisposed || this._terminalPageVisible == visible)
+                    return;
+
+                this._terminalPageVisible = visible;
+                if (!visible)
+                    this._pendingRuntimeEvents.Clear();
+            }
+
+            if (visible)
+            {
+                // Rebuild tab chrome while JavaScript requests one authoritative renderer handoff
+                this.RefreshSessions();
+                this.StateHasChanged();
+            }
+        }
+
+        /// <summary>
         /// Forwards mouse events to the authoritative VT tracker
         /// </summary>
         /// <param name="sessionId">Session identifier</param>
@@ -465,7 +510,10 @@ namespace Bivium.Components.Shared
         [JSInvokable]
         public TerminalAttachSnapshot GetTerminalAttach(int sessionId)
         {
-            return this._terminalRuntime.GetAttachSnapshot(sessionId, this._requestCancellation.Token);
+            TerminalAttachSnapshot attach = this._terminalRuntime.GetAttachSnapshot(sessionId, this._requestCancellation.Token);
+            if (attach?.Session != null)
+                this._appliedRevisions[sessionId] = attach.Session.Revision;
+            return attach;
         }
 
         /// <summary>
@@ -734,7 +782,51 @@ namespace Bivium.Components.Shared
             if (this._isDisposed)
                 return;
 
-            _ = this.InvokeAsync(() => this.ApplyRuntimeChangeAsync(runtimeEvent));
+            lock (this._runtimeEventSyncRoot)
+            {
+                if (this._isDisposed || !this._terminalPageVisible)
+                    return;
+
+                this._pendingRuntimeEvents.TryGetValue(runtimeEvent.SessionId, out TerminalRuntimeEvent pending);
+                this._pendingRuntimeEvents[runtimeEvent.SessionId] = MergeRuntimeEvents(pending, runtimeEvent);
+                if (this._runtimeEventDrainScheduled)
+                    return;
+                this._runtimeEventDrainScheduled = true;
+            }
+
+            _ = this.InvokeAsync(this.DrainRuntimeChangesAsync);
+        }
+
+        /// <summary>
+        /// Drains coalesced terminal changes serially on the circuit dispatcher
+        /// </summary>
+        private async System.Threading.Tasks.Task DrainRuntimeChangesAsync()
+        {
+            while (true)
+            {
+                List<TerminalRuntimeEvent> pendingEvents;
+                lock (this._runtimeEventSyncRoot)
+                {
+                    if (this._isDisposed || !this._terminalPageVisible)
+                    {
+                        this._pendingRuntimeEvents.Clear();
+                        this._runtimeEventDrainScheduled = false;
+                        return;
+                    }
+
+                    if (this._pendingRuntimeEvents.Count == 0)
+                    {
+                        this._runtimeEventDrainScheduled = false;
+                        return;
+                    }
+
+                    pendingEvents = new List<TerminalRuntimeEvent>(this._pendingRuntimeEvents.Values);
+                    this._pendingRuntimeEvents.Clear();
+                }
+
+                for (int i = 0; i < pendingEvents.Count; i++)
+                    await this.ApplyRuntimeChangeAsync(pendingEvents[i]);
+            }
         }
 
         /// <summary>
@@ -745,8 +837,13 @@ namespace Bivium.Components.Shared
         {
             try
             {
-                if (this._isDisposed)
-                    return;
+                lock (this._runtimeEventSyncRoot)
+                {
+                    if (this._isDisposed || !this._terminalPageVisible)
+                        return;
+                }
+
+                bool renderRequired = runtimeEvent.SessionsChanged;
 
                 // Update the tab list first because the patch may reference a newly created session
                 if (runtimeEvent.SessionsChanged)
@@ -765,6 +862,8 @@ namespace Bivium.Components.Shared
                     TerminalAttachSnapshot attach = this._terminalRuntime.GetAttachSnapshot(runtimeEvent.SessionId, this._requestCancellation.Token);
                     if (attach != null)
                     {
+                        TerminalSessionSnapshot previous = this._sessions.Find(item => item.Id == attach.Session.Id);
+                        renderRequired |= HasSessionChromeChanged(previous, attach.Session);
                         this.ReplaceSession(attach.Session);
                         if (this._jsModule != null)
                         {
@@ -776,6 +875,8 @@ namespace Bivium.Components.Shared
                 else if (patch?.Session != null)
                 {
                     // The patch updates only the affected session and leaves other renderers intact
+                    TerminalSessionSnapshot previous = this._sessions.Find(item => item.Id == patch.Session.Id);
+                    renderRequired |= HasSessionChromeChanged(previous, patch.Session);
                     this.ReplaceSession(patch.Session);
                     if (this._jsModule != null)
                     {
@@ -784,8 +885,11 @@ namespace Bivium.Components.Shared
                     }
                 }
 
-                this.StateHasChanged();
-                await this.OnStateChanged.InvokeAsync();
+                if (renderRequired)
+                {
+                    this.StateHasChanged();
+                    await this.OnStateChanged.InvokeAsync();
+                }
             }
             catch (OperationCanceledException)
             {
@@ -799,6 +903,53 @@ namespace Bivium.Components.Shared
             {
                 // Concurrent disposal completes only pending UI work
             }
+        }
+
+        /// <summary>
+        /// Determines whether a session update changes Razor-rendered terminal chrome
+        /// </summary>
+        /// <param name="previous">Previously rendered session</param>
+        /// <param name="current">Current authoritative session</param>
+        /// <returns>True when the tab representation must be rendered again</returns>
+        internal static bool HasSessionChromeChanged(TerminalSessionSnapshot previous, TerminalSessionSnapshot current)
+        {
+            if (previous == null || current == null)
+                return true;
+
+            return previous.Id != current.Id ||
+                previous.Label != current.Label ||
+                previous.WorkingDirectory != current.WorkingDirectory ||
+                previous.Running != current.Running ||
+                previous.Exited != current.Exited ||
+                previous.HasUnreadOutput != current.HasUnreadOutput;
+        }
+
+        /// <summary>
+        /// Keeps the newest revision and every pending tab-list change for one session
+        /// </summary>
+        /// <param name="pending">Previously pending event</param>
+        /// <param name="current">New runtime event</param>
+        /// <returns>Coalesced immutable notification copy</returns>
+        internal static TerminalRuntimeEvent MergeRuntimeEvents(TerminalRuntimeEvent pending, TerminalRuntimeEvent current)
+        {
+            if (current == null)
+                return pending;
+            if (pending == null)
+            {
+                return new TerminalRuntimeEvent
+                {
+                    SessionId = current.SessionId,
+                    Revision = current.Revision,
+                    SessionsChanged = current.SessionsChanged
+                };
+            }
+
+            return new TerminalRuntimeEvent
+            {
+                SessionId = current.SessionId,
+                Revision = Math.Max(pending.Revision, current.Revision),
+                SessionsChanged = pending.SessionsChanged || current.SessionsChanged
+            };
         }
 
         /// <summary>
@@ -891,9 +1042,9 @@ namespace Bivium.Components.Shared
             if (this._dotNetRef == null)
                 this._dotNetRef = DotNetObjectReference.Create(this);
             if (this._jsModule == null)
-                this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/terminal.js?v=20260718-persistent-runtime-v5");
+                this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/terminal.js?v=20260729-terminal-grid-v7");
             if (this._interopModule == null)
-                this._interopModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260718-workspace-window-v2");
+                this._interopModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260725-window-geometry-v3");
             if (!this._windowDragInitialized)
             {
                 await this._interopModule.InvokeVoidAsync("initWindowDrag", "terminal-window", "terminal-titlebar", "terminal-resize-handle", this._dotNetRef);
@@ -988,6 +1139,11 @@ namespace Bivium.Components.Shared
                 return;
 
             this._isDisposed = true;
+            lock (this._runtimeEventSyncRoot)
+            {
+                this._pendingRuntimeEvents.Clear();
+                this._runtimeEventDrainScheduled = false;
+            }
 
             // Cancel callbacks and requests first to prevent new work on the closing circuit
             this._requestCancellation.Cancel();

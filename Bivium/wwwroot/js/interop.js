@@ -690,28 +690,49 @@ export function restoreFilePanelScrollAnchor(panelId, anchorPath, anchorIndex) {
  * @param {number} viewportWidth - Current viewport width.
  * @param {number} viewportHeight - Current viewport height.
  * @param {boolean} scaleFromSavedViewport - Whether coordinates should be scaled proportionally.
+ * @param {number} usableTop - First usable viewport coordinate below fixed application chrome.
  * @returns {object} Reachable geometry.
  */
-export function computeWindowGeometry(geometry, viewportWidth, viewportHeight, scaleFromSavedViewport) {
-    let left = Number(geometry.left) || 0;
-    let top = Number(geometry.top) || 0;
-    let width = Number(geometry.width) || 800;
-    let height = Number(geometry.height) || 400;
-    const savedWidth = Number(geometry.viewportWidth) || viewportWidth;
-    const savedHeight = Number(geometry.viewportHeight) || viewportHeight;
+export function computeWindowGeometry(geometry, viewportWidth, viewportHeight, scaleFromSavedViewport, usableTop = 0) {
+    const safeViewportWidth = Number.isFinite(Number(viewportWidth)) && Number(viewportWidth) > 0 ? Number(viewportWidth) : 1;
+    const safeViewportHeight = Number.isFinite(Number(viewportHeight)) && Number(viewportHeight) > 0 ? Number(viewportHeight) : 1;
+    const safeUsableTop = Number.isFinite(Number(usableTop)) ? Math.max(0, Math.min(Number(usableTop), safeViewportHeight - 1)) : 0;
+    let left = Number(geometry?.left);
+    let top = Number(geometry?.top);
+    let width = Number(geometry?.width);
+    let height = Number(geometry?.height);
+    const savedViewportWidth = Number(geometry?.viewportWidth);
+    const savedViewportHeight = Number(geometry?.viewportHeight);
+    if (!Number.isFinite(left)) left = 0;
+    if (!Number.isFinite(top)) top = safeUsableTop;
+    if (!Number.isFinite(width) || width <= 0) width = 800;
+    if (!Number.isFinite(height) || height <= 0) height = 400;
+    const savedWidth = Number.isFinite(savedViewportWidth) && savedViewportWidth > 0 ? savedViewportWidth : safeViewportWidth;
+    const savedHeight = Number.isFinite(savedViewportHeight) && savedViewportHeight > 0 ? savedViewportHeight : safeViewportHeight;
     if (scaleFromSavedViewport && savedWidth > 0 && savedHeight > 0) {
-        left *= viewportWidth / savedWidth;
-        top *= viewportHeight / savedHeight;
+        left *= safeViewportWidth / savedWidth;
+        top *= safeViewportHeight / savedHeight;
     }
-    const maxWidth = Math.max(1, viewportWidth - 16);
-    const maxHeight = Math.max(1, viewportHeight - 16);
+    const maxWidth = Math.max(1, safeViewportWidth - 16);
+    const maxHeight = Math.max(1, safeViewportHeight - safeUsableTop - 16);
     const minWidth = Math.min(300, maxWidth);
     const minHeight = Math.min(150, maxHeight);
     width = Math.max(minWidth, Math.min(width, maxWidth));
     height = Math.max(minHeight, Math.min(height, maxHeight));
-    left = Math.max(0, Math.min(left, Math.max(0, viewportWidth - width)));
-    top = Math.max(0, Math.min(top, Math.max(0, viewportHeight - height)));
+    left = Math.max(0, Math.min(left, Math.max(0, safeViewportWidth - width)));
+    top = Math.max(safeUsableTop, Math.min(top, Math.max(safeUsableTop, safeViewportHeight - height)));
     return { left, top, width, height };
+}
+
+/**
+ * Measures the application chrome that fixed windows must remain below.
+ * @returns {number} First usable vertical viewport coordinate.
+ */
+function getFloatingWindowUsableTop() {
+    const menuBar = document.querySelector('.menu-bar');
+    if (!menuBar) return 0;
+    const bottom = Number(menuBar.getBoundingClientRect().bottom);
+    return Number.isFinite(bottom) ? Math.max(0, bottom) : 0;
 }
 
 /**
@@ -739,6 +760,7 @@ export function initWindowDrag(windowId, titlebarId, resizeHandleId, dotNetRefer
     let dragOffsetX = 0;
     let dragOffsetY = 0;
     let geometryTimer = 0;
+    let lastNotifiedGeometry = '';
 
     function getFocusTarget() {
         const active = document.activeElement;
@@ -750,23 +772,36 @@ export function initWindowDrag(windowId, titlebarId, resizeHandleId, dotNetRefer
     }
 
     function clampToViewport(scaleFromSavedViewport) {
+        const previous = {
+            left: parseFloat(win.style.left),
+            top: parseFloat(win.style.top),
+            width: parseFloat(win.style.width),
+            height: parseFloat(win.style.height)
+        };
         const geometry = computeWindowGeometry({
-            left: parseFloat(win.style.left) || win.offsetLeft || 0,
-            top: parseFloat(win.style.top) || win.offsetTop || 0,
-            width: parseFloat(win.style.width) || win.offsetWidth || 800,
-            height: parseFloat(win.style.height) || win.offsetHeight || 400,
-            viewportWidth: parseFloat(win.dataset.viewportWidth) || window.innerWidth,
-            viewportHeight: parseFloat(win.dataset.viewportHeight) || window.innerHeight
-        }, window.innerWidth, window.innerHeight, scaleFromSavedViewport);
+            left: Number.isFinite(previous.left) ? previous.left : win.offsetLeft,
+            top: Number.isFinite(previous.top) ? previous.top : win.offsetTop,
+            width: Number.isFinite(previous.width) ? previous.width : win.offsetWidth,
+            height: Number.isFinite(previous.height) ? previous.height : win.offsetHeight,
+            viewportWidth: parseFloat(win.dataset.viewportWidth),
+            viewportHeight: parseFloat(win.dataset.viewportHeight)
+        }, window.innerWidth, window.innerHeight, scaleFromSavedViewport, getFloatingWindowUsableTop());
         win.style.left = geometry.left + 'px';
         win.style.top = geometry.top + 'px';
         win.style.width = geometry.width + 'px';
         win.style.height = geometry.height + 'px';
+        return !Number.isFinite(previous.left) || !Number.isFinite(previous.top) ||
+            !Number.isFinite(previous.width) || !Number.isFinite(previous.height) ||
+            Math.abs(previous.left - geometry.left) > 0.01 ||
+            Math.abs(previous.top - geometry.top) > 0.01 ||
+            Math.abs(previous.width - geometry.width) > 0.01 ||
+            Math.abs(previous.height - geometry.height) > 0.01;
     }
 
     function notifyGeometry() {
-        if (!dotNetReference) return;
+        if (!dotNetReference || !isFloatingWindowVisible(win)) return;
         const rect = win.getBoundingClientRect();
+        if (![rect.left, rect.top, rect.width, rect.height].every(Number.isFinite) || rect.width <= 0 || rect.height <= 0) return;
         const update = {
             left: rect.left,
             top: rect.top,
@@ -777,6 +812,9 @@ export function initWindowDrag(windowId, titlebarId, resizeHandleId, dotNetRefer
             mruOrder: Number(win.dataset.mruOrder || 0),
             focusTarget: getFocusTarget()
         };
+        const signature = [update.left, update.top, update.width, update.height, update.viewportWidth, update.viewportHeight, update.mruOrder, update.focusTarget].join('|');
+        if (signature === lastNotifiedGeometry) return;
+        lastNotifiedGeometry = signature;
         dotNetReference.invokeMethodAsync('OnWindowGeometryChanged', update).catch(function () { });
     }
 
@@ -788,7 +826,7 @@ export function initWindowDrag(windowId, titlebarId, resizeHandleId, dotNetRefer
         }, 150);
     }
 
-    clampToViewport(true);
+    if (clampToViewport(true)) scheduleGeometryNotification();
 
     win.addEventListener('pointerdown', function () {
         bringFloatingWindowToFront(win, false);
@@ -807,7 +845,9 @@ export function initWindowDrag(windowId, titlebarId, resizeHandleId, dotNetRefer
     const visibilityObserver = new MutationObserver(function () {
         const isVisible = isFloatingWindowVisible(win);
         if (isVisible && !wasVisible) {
+            clampToViewport(false);
             bringFloatingWindowToFront(win, true);
+            scheduleGeometryNotification();
         } else if (!isVisible && wasVisible) {
             activateTopVisibleFloatingWindow();
         }
@@ -835,27 +875,15 @@ export function initWindowDrag(windowId, titlebarId, resizeHandleId, dotNetRefer
 
     document.addEventListener('mousemove', function (e) {
         if (isDragging) {
-            let newX = e.clientX - dragOffsetX;
-            let newY = e.clientY - dragOffsetY;
-
-            // Keep window within viewport
-            newX = Math.max(0, Math.min(newX, window.innerWidth - 50));
-            newY = Math.max(0, Math.min(newY, window.innerHeight - 50));
-
-            win.style.left = newX + 'px';
-            win.style.top = newY + 'px';
+            win.style.left = e.clientX - dragOffsetX + 'px';
+            win.style.top = e.clientY - dragOffsetY + 'px';
+            clampToViewport(false);
         }
 
         if (isResizing) {
-            let newWidth = e.clientX - win.offsetLeft;
-            let newHeight = e.clientY - win.offsetTop;
-
-            // Minimum size
-            newWidth = Math.max(300, newWidth);
-            newHeight = Math.max(150, newHeight);
-
-            win.style.width = newWidth + 'px';
-            win.style.height = newHeight + 'px';
+            win.style.width = e.clientX - win.offsetLeft + 'px';
+            win.style.height = e.clientY - win.offsetTop + 'px';
+            clampToViewport(false);
 
             // Recalculate terminal dimensions after resize
             window.dispatchEvent(new Event('resize'));
