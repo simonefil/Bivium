@@ -762,7 +762,7 @@ namespace Bivium.Services
                 result.SessionId = session.Id;
                 result.Truncated = session.History.Truncated;
                 result.HistoryLines = session.History.GetLinesSnapshot(cancellationToken);
-                result.Screen = this.CreateScreenSnapshot(session);
+                result.Screen = this.CreateHistoryExportScreenSnapshot(session);
                 return result;
             }
         }
@@ -1011,6 +1011,41 @@ namespace Bivium.Services
         }
 
         /// <summary>
+        /// Creates an export screen without rows already archived before entering the alternate buffer
+        /// </summary>
+        /// <param name="session">Source session</param>
+        /// <returns>Compact current rows not already present in the archive</returns>
+        private TerminalScreenSnapshot CreateHistoryExportScreenSnapshot(TerminalSessionRuntime session)
+        {
+            TerminalScreenSnapshot result = this.CreateScreenSnapshot(session);
+            if (result.AlternateBuffer || session.DeactivatedNormalLines.Count == 0)
+                return result;
+
+            List<TerminalLineSnapshot> lines = new List<TerminalLineSnapshot>();
+            int firstLine = session.Terminal.Buffer.BaseY;
+            bool skippedPreviousRow = false;
+            for (int i = 0; i < result.Lines.Count; i++)
+            {
+                BufferLine line = firstLine + i < session.Terminal.Buffer.Lines.Length ? session.Terminal.Buffer.Lines[firstLine + i] : null;
+                TerminalLineSnapshot snapshot = result.Lines[i];
+                if (line != null && session.DeactivatedNormalLines.TryGetValue(line, out TerminalLineSnapshot archivedLine) && AreLineSnapshotsEquivalent(snapshot, archivedLine))
+                {
+                    skippedPreviousRow = true;
+                    continue;
+                }
+
+                if (skippedPreviousRow)
+                    snapshot.Wrapped = false;
+                lines.Add(snapshot);
+                skippedPreviousRow = false;
+            }
+
+            result.Lines = lines.AsReadOnly();
+            result.CursorY = lines.Count - 1;
+            return result;
+        }
+
+        /// <summary>
         /// Serializes an XTerm.NET row while preserving cells, attributes and wrapping
         /// </summary>
         /// <param name="session">Session owning the row</param>
@@ -1101,9 +1136,69 @@ namespace Bivium.Services
         private void CaptureExitedLine(TerminalSessionRuntime session, TerminalEvents.LineExitedViewportEventArgs args)
         {
             BufferLine line = args.Line;
-            session.History.Append(this.SerializeLine(session, line, session.History.EndIndex));
+            TerminalLineSnapshot snapshot = this.SerializeLine(session, line, session.History.EndIndex);
+            if (args.Buffer == BufferType.Normal && args.Reason == LineExitReason.BufferDeactivated)
+            {
+                if (session.PendingDeactivatedNormalLines == null)
+                    session.PendingDeactivatedNormalLines = new Dictionary<BufferLine, TerminalLineSnapshot>();
+
+                bool unchanged = session.DeactivatedNormalLines.TryGetValue(line, out TerminalLineSnapshot archivedLine) && AreLineSnapshotsEquivalent(snapshot, archivedLine);
+                if (!unchanged)
+                    session.History.Append(snapshot);
+                session.PendingDeactivatedNormalLines[line] = snapshot;
+                return;
+            }
+
+            if (args.Buffer == BufferType.Normal && args.Reason == LineExitReason.Scrolled)
+            {
+                bool unchanged = session.DeactivatedNormalLines.TryGetValue(line, out TerminalLineSnapshot archivedLine) && AreLineSnapshotsEquivalent(snapshot, archivedLine);
+                session.DeactivatedNormalLines.Remove(line);
+                if (!unchanged)
+                    session.History.Append(snapshot);
+            }
+            else
+            {
+                session.History.Append(snapshot);
+            }
+
             if (args.Reason == LineExitReason.Scrolled)
                 session.HyperlinksByLine.Remove(line);
+        }
+
+        /// <summary>
+        /// Finalizes the normal-buffer checkpoint after XTerm.NET activates another buffer
+        /// </summary>
+        /// <param name="session">Affected session</param>
+        /// <param name="args">Activated buffer</param>
+        private void HandleBufferChanged(TerminalSessionRuntime session, TerminalEvents.BufferChangedEventArgs args)
+        {
+            if (args.Buffer != BufferType.Alternate)
+                return;
+
+            session.DeactivatedNormalLines = session.PendingDeactivatedNormalLines ?? new Dictionary<BufferLine, TerminalLineSnapshot>();
+            session.PendingDeactivatedNormalLines = null;
+        }
+
+        /// <summary>
+        /// Determines whether two serialized rows contain the same terminal state
+        /// </summary>
+        /// <param name="left">First row</param>
+        /// <param name="right">Second row</param>
+        /// <returns>True when text, wrapping and cells are equal</returns>
+        private static bool AreLineSnapshotsEquivalent(TerminalLineSnapshot left, TerminalLineSnapshot right)
+        {
+            if (left == null || right == null || left.Text != right.Text || left.Wrapped != right.Wrapped || left.LineAttribute != right.LineAttribute || left.Cells.Count != right.Cells.Count)
+                return false;
+
+            for (int i = 0; i < left.Cells.Count; i++)
+            {
+                TerminalCellSnapshot leftCell = left.Cells[i];
+                TerminalCellSnapshot rightCell = right.Cells[i];
+                if (leftCell.Content != rightCell.Content || leftCell.Width != rightCell.Width || leftCell.Foreground != rightCell.Foreground || leftCell.ForegroundMode != rightCell.ForegroundMode || leftCell.Background != rightCell.Background || leftCell.BackgroundMode != rightCell.BackgroundMode || leftCell.Attributes != rightCell.Attributes || leftCell.Hyperlink != rightCell.Hyperlink)
+                    return false;
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -1610,6 +1705,7 @@ namespace Bivium.Services
                 this.Terminal = new Terminal(terminalOptions);
                 this.Shell = new ShellService();
                 this.Terminal.LineExitedViewport += (sender, args) => this._owner.CaptureExitedLine(this, args);
+                this.Terminal.BufferChanged += (sender, args) => this._owner.HandleBufferChanged(this, args);
                 this.Terminal.DataReceived += (sender, args) => this.Shell.SendInput(args.Data);
                 this.Terminal.HyperlinkChanged += (sender, args) => this._owner.HandleHyperlinkChanged(this, args);
             }
@@ -1732,6 +1828,16 @@ namespace Bivium.Services
             /// Segmented history archive
             /// </summary>
             public TerminalHistoryArchive History { get; }
+
+            /// <summary>
+            /// Latest normal-buffer rows archived before entering the alternate buffer
+            /// </summary>
+            public Dictionary<BufferLine, TerminalLineSnapshot> DeactivatedNormalLines { get; set; } = new Dictionary<BufferLine, TerminalLineSnapshot>();
+
+            /// <summary>
+            /// Normal-buffer checkpoint being collected during a buffer transition
+            /// </summary>
+            public Dictionary<BufferLine, TerminalLineSnapshot> PendingDeactivatedNormalLines { get; set; }
 
             /// <summary>
             /// OSC 8 ranges indexed by buffer row
