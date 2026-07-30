@@ -1,0 +1,3 @@
+[submodule "Dependencies/XTerm.NET"]
+	path = Dependencies/XTerm.NET
+	url = https://github.com/simonefil/XTerm.NET.git

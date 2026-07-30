@@ -638,6 +638,18 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
+        /// Downloads the complete retained history of the active terminal tab
+        /// </summary>
+        private void ExportActiveHistory()
+        {
+            if (this._isDisposed || this._activeSessionId <= 0)
+                return;
+
+            string url = "/api/terminal/history?sessionId=" + this._activeSessionId + "&attachmentId=" + Uri.EscapeDataString(this.AttachmentId) + "&generation=" + this.LeaseGeneration;
+            _ = this.JSRuntime.InvokeVoidAsync("open", url, "_blank");
+        }
+
+        /// <summary>
         /// Requests confirmation before destructively closing the window
         /// </summary>
         private void RequestCloseContainer()

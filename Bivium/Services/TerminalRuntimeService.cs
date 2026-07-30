@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using XTerm;
 using XTerm.Buffer;
+using XTerm.Common;
 using XTerm.Events;
 using XTerm.Input;
 using XTerm.Options;
@@ -508,7 +509,6 @@ namespace Bivium.Services
                     session.Cols = safeCols;
                     session.Rows = safeRows;
                     session.Terminal.Resize(safeCols, safeRows);
-                    session.LastBaseY = session.Terminal.Buffer.BaseY;
                     if (session.Running)
                         session.Shell.Resize(safeCols, safeRows);
                     this.AdvanceSessionRevisionLocked(session);
@@ -736,6 +736,34 @@ namespace Bivium.Services
                 if (session.Disposed)
                     return new TerminalHistoryPage();
                 return session.History.GetPage(start, count, session.Revision, cancellationToken);
+            }
+        }
+
+        /// <summary>
+        /// Captures all retained history and the current screen without holding the session lock during download
+        /// </summary>
+        /// <param name="sessionId">Session identifier</param>
+        /// <param name="cancellationToken">Current request token</param>
+        /// <returns>Point-in-time export source or null</returns>
+        internal TerminalHistoryExportSnapshot GetHistoryExportSnapshot(int sessionId, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            TerminalSessionRuntime session = this.GetSession(sessionId);
+            if (session == null)
+                return null;
+
+            lock (session.SyncRoot)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (session.Disposed)
+                    return null;
+
+                TerminalHistoryExportSnapshot result = new TerminalHistoryExportSnapshot();
+                result.SessionId = session.Id;
+                result.Truncated = session.History.Truncated;
+                result.HistoryLines = session.History.GetLinesSnapshot(cancellationToken);
+                result.Screen = this.CreateScreenSnapshot(session);
+                return result;
             }
         }
 
@@ -1066,25 +1094,16 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Captures a row when it becomes final in normal scrollback
+        /// Captures a row before it leaves the active terminal viewport
         /// </summary>
         /// <param name="session">Affected session</param>
-        private void CaptureScrolledLine(TerminalSessionRuntime session)
+        /// <param name="args">Exited row and source buffer</param>
+        private void CaptureExitedLine(TerminalSessionRuntime session, TerminalEvents.LineExitedViewportEventArgs args)
         {
-            if (session.Terminal.IsAlternateBufferActive)
-                return;
-
-            int baseY = session.Terminal.Buffer.BaseY;
-            bool scrolled = baseY > session.LastBaseY || session.TrimmedSinceLineFeed > 0;
-            if (scrolled && baseY > 0 && baseY - 1 < session.Terminal.Buffer.Lines.Length)
-            {
-                BufferLine line = session.Terminal.Buffer.Lines[baseY - 1];
-                session.History.Append(this.SerializeLine(session, line, session.History.EndIndex));
+            BufferLine line = args.Line;
+            session.History.Append(this.SerializeLine(session, line, session.History.EndIndex));
+            if (args.Reason == LineExitReason.Scrolled)
                 session.HyperlinksByLine.Remove(line);
-            }
-
-            session.LastBaseY = baseY;
-            session.TrimmedSinceLineFeed = 0;
         }
 
         /// <summary>
@@ -1590,8 +1609,7 @@ namespace Bivium.Services
                 };
                 this.Terminal = new Terminal(terminalOptions);
                 this.Shell = new ShellService();
-                this.Terminal.LineFed += (sender, args) => this._owner.CaptureScrolledLine(this);
-                this.Terminal.Buffer.Trimmed += count => this.TrimmedSinceLineFeed += count;
+                this.Terminal.LineExitedViewport += (sender, args) => this._owner.CaptureExitedLine(this, args);
                 this.Terminal.DataReceived += (sender, args) => this.Shell.SendInput(args.Data);
                 this.Terminal.HyperlinkChanged += (sender, args) => this._owner.HandleHyperlinkChanged(this, args);
             }
@@ -1674,16 +1692,6 @@ namespace Bivium.Services
             /// Shell generation used to discard stale callbacks
             /// </summary>
             public int ShellGeneration { get; set; }
-
-            /// <summary>
-            /// Last base offset observed in the normal buffer
-            /// </summary>
-            public int LastBaseY { get; set; }
-
-            /// <summary>
-            /// Rows removed from the buffer after the last line feed
-            /// </summary>
-            public int TrimmedSinceLineFeed { get; set; }
 
             /// <summary>
             /// Monotonic session revision

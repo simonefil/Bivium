@@ -169,6 +169,26 @@ namespace Bivium.Services
         }
 
         /// <summary>
+        /// Copies retained row references for a point-in-time export
+        /// </summary>
+        /// <param name="cancellationToken">Current request token</param>
+        /// <returns>All retained rows in logical order</returns>
+        public IReadOnlyList<TerminalLineSnapshot> GetLinesSnapshot(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            List<TerminalLineSnapshot> lines = new List<TerminalLineSnapshot>();
+            LinkedListNode<HistorySegment> node = this._segments.First;
+            while (node != null)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                lines.AddRange(node.Value.Lines);
+                node = node.Next;
+            }
+
+            return lines.AsReadOnly();
+        }
+
+        /// <summary>
         /// Searches a bounded number of rows without retaining the lock during a long search
         /// </summary>
         /// <param name="query">Text to search</param>

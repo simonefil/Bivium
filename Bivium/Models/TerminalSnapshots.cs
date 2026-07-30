@@ -274,6 +274,32 @@ namespace Bivium.Models
     }
 
     /// <summary>
+    /// Point-in-time source for a complete retained-history export
+    /// </summary>
+    internal sealed class TerminalHistoryExportSnapshot
+    {
+        /// <summary>
+        /// Session identifier
+        /// </summary>
+        public int SessionId { get; set; }
+
+        /// <summary>
+        /// Whether output older than the retained archive was discarded
+        /// </summary>
+        public bool Truncated { get; set; }
+
+        /// <summary>
+        /// Immutable archived rows retained by the runtime
+        /// </summary>
+        public IReadOnlyList<TerminalLineSnapshot> HistoryLines { get; set; } = Array.Empty<TerminalLineSnapshot>();
+
+        /// <summary>
+        /// Current terminal screen captured with the archive
+        /// </summary>
+        public TerminalScreenSnapshot Screen { get; set; } = new TerminalScreenSnapshot();
+    }
+
+    /// <summary>
     /// Bounded result for a history search portion
     /// </summary>
     public sealed class TerminalSearchPage

@@ -8,6 +8,7 @@
         <span class="terminal-titlebar-title">Terminal</span>
         <span class="terminal-persistence-indicator" title="Terminal processes keep running when the browser disconnects">server-persistent</span>
         <div class="terminal-titlebar-actions">
+            <button type="button" class="terminal-titlebar-btn" @onclick="this.ExportActiveHistory" title="Export active terminal history">Export</button>
             <span class="terminal-titlebar-btn" @onclick="this.Minimize" title="Minimize terminal">-</span>
             <span class="terminal-titlebar-btn" @onclick="this.RequestCloseContainer" title="Close terminal">X</span>
         </div>
