@@ -1585,7 +1585,8 @@ namespace Bivium.Services
                     Cols = this.Cols,
                     Rows = this.Rows,
                     Scrollback = Math.Max(256, settings.HeadlessScrollbackRows),
-                    TermName = "xterm-256color"
+                    TermName = "xterm-256color",
+                    ConvertEol = true
                 };
                 this.Terminal = new Terminal(terminalOptions);
                 this.Shell = new ShellService();
