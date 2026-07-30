@@ -563,6 +563,14 @@ function stopSelectionAutoscroll(state) {
     state.selectionPointerY = null;
 }
 
+export function getTerminalClipboardAction(key, control, shift, meta, alt) {
+    if (alt || !(meta || (control && shift))) return '';
+    const normalizedKey = (key || '').toLowerCase();
+    if (normalizedKey === 'c') return 'copy';
+    if (normalizedKey === 'v') return 'paste';
+    return '';
+}
+
 function runSelectionAutoscroll(state) {
     if (!state.selecting || state.selectionPointerY === null) {
         stopSelectionAutoscroll(state);
@@ -591,15 +599,16 @@ function attachInputHandlers(state) {
             searchHistory(state, !event.shiftKey);
             return;
         }
-        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c') {
+        const clipboardAction = getTerminalClipboardAction(event.key, event.ctrlKey, event.shiftKey, event.metaKey, event.altKey);
+        if (clipboardAction === 'copy') {
             if (window.getSelection()?.toString()) return;
+            event.preventDefault();
             if (state.selectionAnchor !== null) {
-                event.preventDefault();
                 copyRemoteSelection(state).catch(function () { });
-                return;
             }
+            return;
         }
-        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v') return;
+        if (clipboardAction === 'paste') return;
         if (event.key === 'Escape' && state.selectionAnchor !== null) {
             state.selectionAnchor = null;
             state.selectionFocus = null;
