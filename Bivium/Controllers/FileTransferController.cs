@@ -33,6 +33,11 @@ namespace Bivium.Controllers
         /// </summary>
         private readonly BiviumWorkspaceService _workspaceService;
 
+        /// <summary>
+        /// Permission service for configured upload defaults
+        /// </summary>
+        private readonly IPermissionService _permissionService;
+
         #endregion
 
         #region Constructor
@@ -42,10 +47,12 @@ namespace Bivium.Controllers
         /// </summary>
         /// <param name="securityService">Security service instance</param>
         /// <param name="workspaceService">Global workspace</param>
-        public FileTransferController(SecurityService securityService, BiviumWorkspaceService workspaceService)
+        /// <param name="permissionService">Permission service instance</param>
+        public FileTransferController(SecurityService securityService, BiviumWorkspaceService workspaceService, IPermissionService permissionService)
         {
             this._securityService = securityService;
             this._workspaceService = workspaceService;
+            this._permissionService = permissionService;
         }
 
         #endregion
@@ -171,13 +178,8 @@ namespace Bivium.Controllers
             IActionResult result;
             string tempPath = "";
 
-            string attachmentId = this.Request.Headers["X-Bivium-Attachment"].ToString();
-            string generationValue = this.Request.Headers["X-Bivium-Lease-Generation"].ToString();
-            long generation;
-            if (!long.TryParse(generationValue, out generation))
-                return this.StatusCode(409, "Workspace lease revoked");
-            WorkspaceClientToken workspaceToken = new WorkspaceClientToken(attachmentId, generation);
-            if (!this._workspaceService.ValidateMutation(workspaceToken))
+            WorkspaceClientToken workspaceToken;
+            if (!this.TryGetWorkspaceToken(out workspaceToken))
                 return this.StatusCode(409, "Workspace lease revoked");
             CancellationToken revocationToken = this._workspaceService.GetRevocationToken(workspaceToken);
             using CancellationTokenSource uploadCancellation = CancellationTokenSource.CreateLinkedTokenSource(this.HttpContext.RequestAborted, revocationToken);
@@ -185,6 +187,7 @@ namespace Bivium.Controllers
 
             string destinationDir = Uri.UnescapeDataString(this.Request.Headers["X-Destination-Dir"].ToString());
             string fileName = Uri.UnescapeDataString(this.Request.Headers["X-File-Name"].ToString());
+            string relativePath = Uri.UnescapeDataString(this.Request.Headers["X-Relative-Path"].ToString());
             string chunkIndexStr = this.Request.Headers["X-Chunk-Index"].ToString();
             string totalChunksStr = this.Request.Headers["X-Total-Chunks"].ToString();
             string uploadIdStr = this.Request.Headers["X-Upload-Id"].ToString();
@@ -211,6 +214,18 @@ namespace Bivium.Controllers
             }
             else
             {
+                if (string.IsNullOrEmpty(relativePath))
+                    relativePath = fileName;
+
+                string destPath;
+                string pathError;
+                if (!this.TryResolveUploadPath(destinationDir, relativePath, out destPath, out pathError))
+                    return this.BadRequest(pathError);
+                if (Path.GetFileName(destPath) != fileName)
+                    return this.BadRequest("File name does not match relative path");
+                if (!Directory.Exists(Path.GetDirectoryName(destPath)))
+                    return this.BadRequest("Upload directory was not prepared");
+
                 int chunkIndex;
                 int totalChunks;
                 bool chunkIndexValid = int.TryParse(chunkIndexStr, out chunkIndex);
@@ -224,7 +239,6 @@ namespace Bivium.Controllers
                 {
                     try
                     {
-                        string destPath = Path.Combine(destinationDir, fileName);
                         tempPath = Path.Combine(destinationDir, "." + fileName + "." + uploadId.ToString("N") + ".uploading");
                         cancellationToken.ThrowIfCancellationRequested();
 
@@ -257,11 +271,20 @@ namespace Bivium.Controllers
                         // Last chunk: rename temp file to final name
                         if (chunkIndex >= totalChunks - 1)
                         {
-                            bool committed = this._workspaceService.TryExecuteMutation(workspaceToken, () => System.IO.File.Move(tempPath, destPath, true));
+                            FileOperationResult permissionResult = null;
+                            bool committed = this._workspaceService.TryExecuteMutation(workspaceToken, () =>
+                            {
+                                System.IO.File.Move(tempPath, destPath, true);
+                                permissionResult = this._permissionService.ApplyDefaultCreationPermissions(destPath, false, cancellationToken);
+                            });
                             if (!committed)
                             {
                                 this.DeleteUploadTempFile(tempPath);
                                 return this.StatusCode(409, "Workspace lease revoked");
+                            }
+                            if (permissionResult != null && !permissionResult.Success)
+                            {
+                                return this.StatusCode(500, permissionResult.ErrorMessage);
                             }
                         }
 
@@ -288,9 +311,130 @@ namespace Bivium.Controllers
             return result;
         }
 
+        /// <summary>
+        /// Creates or finalizes one directory in a hierarchical upload
+        /// </summary>
+        /// <returns>Directory operation result</returns>
+        [HttpPost("upload-directory")]
+        public IActionResult UploadDirectory()
+        {
+            WorkspaceClientToken workspaceToken;
+            if (!this.TryGetWorkspaceToken(out workspaceToken))
+                return this.StatusCode(409, "Workspace lease revoked");
+
+            string destinationDir = Uri.UnescapeDataString(this.Request.Headers["X-Destination-Dir"].ToString());
+            string relativePath = Uri.UnescapeDataString(this.Request.Headers["X-Relative-Path"].ToString());
+            bool finalize = string.Equals(this.Request.Headers["X-Finalize"].ToString(), "true", StringComparison.OrdinalIgnoreCase);
+
+            if (string.IsNullOrWhiteSpace(destinationDir) || !this._securityService.IsPathSafe(destinationDir) || !Directory.Exists(destinationDir))
+                return this.BadRequest("Invalid destination directory");
+
+            string directoryPath;
+            string pathError;
+            if (!this.TryResolveUploadPath(destinationDir, relativePath, out directoryPath, out pathError))
+                return this.BadRequest(pathError);
+
+            CancellationToken cancellationToken = this._workspaceService.GetRevocationToken(workspaceToken);
+            try
+            {
+                bool created = false;
+                FileOperationResult permissionResult = null;
+                bool committed = this._workspaceService.TryExecuteMutation(workspaceToken, () =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (finalize)
+                    {
+                        if (!Directory.Exists(directoryPath))
+                            throw new DirectoryNotFoundException("Upload directory not found: " + relativePath);
+                        permissionResult = this._permissionService.ApplyDefaultCreationPermissions(directoryPath, true, cancellationToken);
+                    }
+                    else
+                    {
+                        created = !Directory.Exists(directoryPath);
+                        Directory.CreateDirectory(directoryPath);
+                    }
+                });
+
+                if (!committed)
+                    return this.StatusCode(409, "Workspace lease revoked");
+                if (permissionResult != null && !permissionResult.Success)
+                    return this.StatusCode(500, permissionResult.ErrorMessage);
+
+                IActionResult result = this.Ok(new { success = true, created = created });
+                return result;
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return this.StatusCode(403, "Access denied: " + ex.Message);
+            }
+            catch (OperationCanceledException)
+            {
+                return this.StatusCode(409, "Workspace lease revoked");
+            }
+            catch (IOException ex)
+            {
+                return this.StatusCode(500, "I/O error: " + ex.Message);
+            }
+        }
+
         #endregion
 
         #region Private Methods
+
+        /// <summary>
+        /// Validates request lease headers and returns the current workspace token
+        /// </summary>
+        /// <param name="workspaceToken">Validated workspace token</param>
+        /// <returns>True when the request controls the workspace</returns>
+        private bool TryGetWorkspaceToken(out WorkspaceClientToken workspaceToken)
+        {
+            string attachmentId = this.Request.Headers["X-Bivium-Attachment"].ToString();
+            string generationValue = this.Request.Headers["X-Bivium-Lease-Generation"].ToString();
+            long generation;
+            bool result = long.TryParse(generationValue, out generation);
+            workspaceToken = result ? new WorkspaceClientToken(attachmentId, generation) : default;
+            result = result && this._workspaceService.ValidateMutation(workspaceToken);
+            return result;
+        }
+
+        /// <summary>
+        /// Resolves a browser-relative upload path inside its destination directory
+        /// </summary>
+        /// <param name="destinationDir">Server destination directory</param>
+        /// <param name="relativePath">Browser-relative path using slash separators</param>
+        /// <param name="resolvedPath">Validated absolute path</param>
+        /// <param name="errorMessage">Validation error</param>
+        /// <returns>True when the path is valid and inside the destination</returns>
+        private bool TryResolveUploadPath(string destinationDir, string relativePath, out string resolvedPath, out string errorMessage)
+        {
+            resolvedPath = "";
+            errorMessage = "Invalid relative upload path";
+            if (string.IsNullOrWhiteSpace(relativePath) || relativePath.StartsWith('/') || relativePath.StartsWith('\\') || Path.IsPathRooted(relativePath))
+                return false;
+
+            string[] parts = relativePath.Split('/');
+            string combinedPath = destinationDir;
+            for (int i = 0; i < parts.Length; i++)
+            {
+                string part = parts[i];
+                if (string.IsNullOrWhiteSpace(part) || part == "." || part == ".." || part.Contains('\\') || part.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+                    return false;
+                combinedPath = Path.Combine(combinedPath, part);
+            }
+
+            string fullDestination = Path.GetFullPath(destinationDir);
+            string fullPath = Path.GetFullPath(combinedPath);
+            if (!fullDestination.EndsWith(Path.DirectorySeparatorChar))
+                fullDestination += Path.DirectorySeparatorChar;
+
+            StringComparison comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            if (!fullPath.StartsWith(fullDestination, comparison))
+                return false;
+
+            resolvedPath = fullPath;
+            errorMessage = "";
+            return true;
+        }
 
         /// <summary>
         /// Removes the temporary file of a cancelled upload without hiding the primary result

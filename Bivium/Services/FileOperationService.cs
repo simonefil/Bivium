@@ -14,6 +14,11 @@ namespace Bivium.Services
         /// </summary>
         private readonly SecurityService _securityService;
 
+        /// <summary>
+        /// Permission service for configured creation defaults
+        /// </summary>
+        private readonly IPermissionService _permissionService;
+
         #endregion
 
         #region Constructor
@@ -22,9 +27,11 @@ namespace Bivium.Services
         /// Creates a new FileOperationService
         /// </summary>
         /// <param name="securityService">Security service instance</param>
-        public FileOperationService(SecurityService securityService)
+        /// <param name="permissionService">Permission service instance</param>
+        public FileOperationService(SecurityService securityService, IPermissionService permissionService)
         {
             this._securityService = securityService;
+            this._permissionService = permissionService;
         }
 
         #endregion
@@ -83,6 +90,7 @@ namespace Bivium.Services
                         }
 
                         File.Copy(source, destPath, overwrite);
+                        this.CopyPermissionsAndOwnership(source, destPath);
                         processed++;
                     }
                     else
@@ -614,7 +622,8 @@ namespace Bivium.Services
                     else
                     {
                         Directory.CreateDirectory(newPath);
-                        result = FileOperationResult.Ok(1);
+                        FileOperationResult permissionResult = this._permissionService.ApplyDefaultCreationPermissions(newPath, true);
+                        result = permissionResult.Success ? FileOperationResult.Ok(1) : permissionResult;
                     }
                 }
                 catch (UnauthorizedAccessException ex)
@@ -668,7 +677,8 @@ namespace Bivium.Services
                         FileStream fs = File.Create(newPath);
                         fs.Close();
                         fs.Dispose();
-                        result = FileOperationResult.Ok(1);
+                        FileOperationResult permissionResult = this._permissionService.ApplyDefaultCreationPermissions(newPath, false);
+                        result = permissionResult.Success ? FileOperationResult.Ok(1) : permissionResult;
                     }
                 }
                 catch (UnauthorizedAccessException ex)
@@ -765,7 +775,14 @@ namespace Bivium.Services
                     cancellationToken.ThrowIfCancellationRequested();
 
                     // Only the final publish runs inside the atomic workspace-authorized mutation
-                    bool committed = tryCommit(() => File.Move(tempPath, path, true));
+                    bool committed = tryCommit(() =>
+                    {
+                        using FileStream source = new FileStream(tempPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                        using FileStream destination = new FileStream(path, FileMode.Truncate, FileAccess.Write, FileShare.None);
+                        source.CopyTo(destination);
+                        destination.Flush(true);
+                        File.Delete(tempPath);
+                    });
                     if (committed)
                     {
                         tempPath = "";
@@ -983,6 +1000,8 @@ namespace Bivium.Services
                 string destSubDir = Path.Combine(destDir, subDirs[i].Name);
                 this.CopyDirectoryRecursive(subDirs[i].FullName, destSubDir, cancellationToken);
             }
+
+            this.CopyPermissionsAndOwnership(sourceDir, destDir, cancellationToken);
         }
 
         /// <summary>
@@ -1021,6 +1040,8 @@ namespace Bivium.Services
                 string destSubDir = Path.Combine(destDir, subDirs[i].Name);
                 this.CopyDirectoryRecursiveWithProgress(subDirs[i].FullName, destSubDir, onProgress, ref currentCount, totalCount, cancellationToken);
             }
+
+            this.CopyPermissionsAndOwnership(sourceDir, destDir, cancellationToken);
         }
 
         /// <summary>
@@ -1074,9 +1095,38 @@ namespace Bivium.Services
         {
             cancellationToken.ThrowIfCancellationRequested();
             FileMode destinationMode = overwrite ? FileMode.Create : FileMode.CreateNew;
-            using FileStream source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-            using FileStream destination = new FileStream(destinationPath, destinationMode, FileAccess.Write, FileShare.None);
-            source.CopyToAsync(destination, 128 * 1024, cancellationToken).GetAwaiter().GetResult();
+            using (FileStream source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            using (FileStream destination = new FileStream(destinationPath, destinationMode, FileAccess.Write, FileShare.None))
+            {
+                source.CopyToAsync(destination, 128 * 1024, cancellationToken).GetAwaiter().GetResult();
+            }
+            this.CopyPermissionsAndOwnership(sourcePath, destinationPath, cancellationToken);
+        }
+
+        /// <summary>
+        /// Copies permission and ownership metadata from one entry to another
+        /// </summary>
+        /// <param name="sourcePath">Source entry path</param>
+        /// <param name="destinationPath">Destination entry path</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        private void CopyPermissionsAndOwnership(string sourcePath, string destinationPath, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            PermissionModel permissions = this._permissionService.GetPermissions(sourcePath);
+            PermissionModel destinationPermissions = this._permissionService.GetPermissions(destinationPath);
+
+            bool ownerChanged = permissions.Owner != destinationPermissions.Owner;
+            bool groupChanged = permissions.IsUnix && permissions.Group != destinationPermissions.Group;
+            if (ownerChanged || groupChanged)
+            {
+                FileOperationResult ownerResult = this._permissionService.SetOwner(destinationPath, permissions.Owner, permissions.Group, false, cancellationToken);
+                if (!ownerResult.Success)
+                    throw new IOException(ownerResult.ErrorMessage);
+            }
+
+            FileOperationResult permissionResult = this._permissionService.SetPermissions(destinationPath, permissions, false, cancellationToken);
+            if (!permissionResult.Success)
+                throw new IOException(permissionResult.ErrorMessage);
         }
 
         /// <summary>

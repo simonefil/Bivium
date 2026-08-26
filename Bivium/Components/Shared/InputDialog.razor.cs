@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
+using Microsoft.JSInterop;
 
 namespace Bivium.Components.Shared
 {
@@ -41,9 +42,19 @@ namespace Bivium.Components.Shared
         private string _inputValue = "";
 
         /// <summary>
+        /// Number of leading characters to select after focus, or -1 for no selection
+        /// </summary>
+        private int _selectionLength = -1;
+
+        /// <summary>
         /// Reference to the input element for focus
         /// </summary>
         private ElementReference _inputElement;
+
+        /// <summary>
+        /// JS module reference for input text selection
+        /// </summary>
+        private IJSObjectReference _jsModule;
 
         #endregion
 
@@ -55,11 +66,13 @@ namespace Bivium.Components.Shared
         /// <param name="title">Dialog title</param>
         /// <param name="label">Input label</param>
         /// <param name="defaultValue">Pre-filled input value</param>
-        public void Show(string title, string label, string defaultValue)
+        /// <param name="selectionLength">Number of leading characters to select, or -1 for no selection</param>
+        public void Show(string title, string label, string defaultValue, int selectionLength = -1)
         {
             this._title = title;
             this._label = label;
             this._inputValue = defaultValue;
+            this._selectionLength = selectionLength;
             this._isVisible = true;
             this.StateHasChanged();
 
@@ -74,6 +87,12 @@ namespace Bivium.Components.Shared
         {
             await System.Threading.Tasks.Task.Delay(50);
             await this._inputElement.FocusAsync();
+
+            if (this._selectionLength >= 0)
+            {
+                await this.EnsureJsModule();
+                await this._jsModule.InvokeVoidAsync("selectInputText", this._inputElement, this._selectionLength);
+            }
         }
 
         /// <summary>
@@ -88,6 +107,17 @@ namespace Bivium.Components.Shared
         #endregion
 
         #region Private Methods
+
+        /// <summary>
+        /// Ensures the JS interop module is loaded
+        /// </summary>
+        private async System.Threading.Tasks.Task EnsureJsModule()
+        {
+            if (this._jsModule == null)
+            {
+                this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js");
+            }
+        }
 
         /// <summary>
         /// Handles confirm

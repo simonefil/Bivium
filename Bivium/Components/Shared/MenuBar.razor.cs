@@ -117,6 +117,12 @@ namespace Bivium.Components.Shared
         public EventCallback OnEditorExtensions { get; set; }
 
         /// <summary>
+        /// Callback for default creation permissions action
+        /// </summary>
+        [Parameter]
+        public EventCallback OnCreationPermissions { get; set; }
+
+        /// <summary>
         /// Callback for Authentication Settings action
         /// </summary>
         [Parameter]
@@ -419,6 +425,14 @@ namespace Bivium.Components.Shared
         private async System.Threading.Tasks.Task HandleEditorExtensions()
         {
             await this.HandleAction(this.OnEditorExtensions);
+        }
+
+        /// <summary>
+        /// Handles default creation permissions action
+        /// </summary>
+        private async System.Threading.Tasks.Task HandleCreationPermissions()
+        {
+            await this.HandleAction(this.OnCreationPermissions);
         }
 
         /// <summary>

@@ -25,6 +25,15 @@ namespace Bivium.Services
         FileOperationResult SetPermissions(string path, PermissionModel model, bool recursive, CancellationToken cancellationToken = default);
 
         /// <summary>
+        /// Applies configured ownership and permissions to a newly created entry
+        /// </summary>
+        /// <param name="path">Created file or directory path</param>
+        /// <param name="isDirectory">Whether the created entry is a directory</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        /// <returns>Operation result</returns>
+        FileOperationResult ApplyDefaultCreationPermissions(string path, bool isDirectory, CancellationToken cancellationToken = default);
+
+        /// <summary>
         /// Sets the owner of a file or directory
         /// </summary>
         /// <param name="path">File or directory path</param>

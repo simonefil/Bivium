@@ -3,34 +3,47 @@
 @if (this._isVisible)
 {
     <div class="context-menu-overlay" @onclick="this.HandleCancel">
-        <div class="context-menu" style="position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 50ch;"
+        <div class="context-menu" style="position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 64ch; max-width: min(92vw, 90ch);"
              @onclick:stopPropagation="true">
             <div style="background-color: var(--background1); padding: 0 1ch; border-bottom: 1px solid var(--foreground2);">
-                Upload File
+                Upload Files and Folders
             </div>
             <div style="padding: 1lh 1ch;">
                 <div style="margin-bottom: 0.5lh;">
                     <span style="color: var(--foreground2);">Destination:</span> @this._destinationDir
                 </div>
 
-                <!-- Hidden file input -->
-                <input type="file" id="upload-file-input" style="display: none;" />
+                <input type="file" id="upload-files-input" multiple style="display: none;" />
+                <input type="file" id="upload-directories-input" webkitdirectory multiple style="display: none;" />
 
-                <!-- Browse button and file name -->
-                <div style="display: flex; align-items: center; gap: 1ch; margin-bottom: 0.5lh;">
-                    <button @ref="this._browseButton" @onclick="this.HandleBrowse" disabled="@this._isUploading">Browse...</button>
-                    <span>@(string.IsNullOrEmpty(this._fileName) ? "(no file selected)" : this._fileName)</span>
+                <div style="display: flex; align-items: center; gap: 1ch; margin-bottom: 1lh;">
+                    <button @ref="this._browseButton" @onclick="this.HandleBrowseFiles" disabled="@this._isUploading">Add Files...</button>
+                    <button @onclick="this.HandleBrowseFolders" disabled="@this._isUploading">Add Folders...</button>
+                    <button @onclick="this.HandleClearSelection" disabled="@(this._isUploading || !this.HasSelection())">Clear</button>
                 </div>
 
-                <!-- Progress bar -->
+                <div id="upload-drop-zone" class="upload-drop-zone @(this._isUploading ? "upload-drop-disabled" : "")">
+                    <div>Drop files and folders here</div>
+                    <div style="color: var(--foreground2); margin-top: 0.5lh;">Selections are added to the current queue</div>
+                </div>
+
+                <div style="margin-top: 1lh;">
+                    @this.GetSelectionSummary()
+                </div>
+
                 @if (this._isUploading)
                 {
-                    <div style="margin-bottom: 0.5lh; font-family: monospace;">
+                    <div style="margin-top: 1lh; font-family: monospace;">
                         @this.RenderProgressBar()
                     </div>
+                    @if (!string.IsNullOrEmpty(this._currentItem))
+                    {
+                        <div class="upload-current-item">
+                            @this.GetProgressSummary() @this._currentItem
+                        </div>
+                    }
                 }
 
-                <!-- Status text -->
                 @if (!string.IsNullOrEmpty(this._statusText))
                 {
                     <div style="color: var(--foreground2); margin-top: 0.5lh;">
@@ -40,7 +53,7 @@
             </div>
             <div style="display: flex; justify-content: flex-end; gap: 2ch; padding: 0 1ch 1lh 1ch;">
                 <button @onclick="this.HandleCancel" disabled="@this._isUploading">Cancel</button>
-                <button @onclick="this.HandleUpload" disabled="@(this._isUploading || string.IsNullOrEmpty(this._fileName))">Upload</button>
+                <button @onclick="this.HandleUpload" disabled="@(this._isUploading || !this.HasSelection())">Upload</button>
             </div>
         </div>
     </div>

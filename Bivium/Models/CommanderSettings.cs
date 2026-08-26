@@ -23,9 +23,144 @@ namespace Bivium.Models
         public List<string> EditableExtensions { get; set; } = new List<string>();
 
         /// <summary>
+        /// Optional ownership and permission defaults for newly created entries
+        /// </summary>
+        public DefaultCreationPermissionsSettings DefaultCreationPermissions { get; set; } = new DefaultCreationPermissionsSettings();
+
+        /// <summary>
         /// Persistent terminal runtime settings
         /// </summary>
         public TerminalRuntimeSettings TerminalRuntime { get; set; } = new TerminalRuntimeSettings();
+
+        #endregion
+    }
+
+    /// <summary>
+    /// Ownership and permission defaults for entries created by Bivium
+    /// </summary>
+    public class DefaultCreationPermissionsSettings
+    {
+        #region Properties
+
+        /// <summary>
+        /// Whether Bivium overrides the operating system creation defaults
+        /// </summary>
+        public bool Enabled { get; set; } = false;
+
+        /// <summary>
+        /// Optional owner assigned to created entries
+        /// </summary>
+        public string Owner { get; set; } = "";
+
+        /// <summary>
+        /// Optional Unix group assigned to created entries
+        /// </summary>
+        public string Group { get; set; } = "";
+
+        /// <summary>
+        /// Permissions assigned to created files
+        /// </summary>
+        public CreationPermissionSettings FilePermissions { get; set; } = new CreationPermissionSettings
+        {
+            OwnerRead = true,
+            OwnerWrite = true,
+            GroupRead = true,
+            OthersRead = true,
+            WinArchive = true
+        };
+
+        /// <summary>
+        /// Permissions assigned to created directories
+        /// </summary>
+        public CreationPermissionSettings DirectoryPermissions { get; set; } = new CreationPermissionSettings
+        {
+            OwnerRead = true,
+            OwnerWrite = true,
+            OwnerExecute = true,
+            GroupRead = true,
+            GroupExecute = true,
+            OthersRead = true,
+            OthersExecute = true
+        };
+
+        #endregion
+    }
+
+    /// <summary>
+    /// Cross-platform permission values for one created entry type
+    /// </summary>
+    public class CreationPermissionSettings
+    {
+        #region Properties - Unix
+
+        /// <summary>
+        /// Owner read permission
+        /// </summary>
+        public bool OwnerRead { get; set; } = false;
+
+        /// <summary>
+        /// Owner write permission
+        /// </summary>
+        public bool OwnerWrite { get; set; } = false;
+
+        /// <summary>
+        /// Owner execute permission
+        /// </summary>
+        public bool OwnerExecute { get; set; } = false;
+
+        /// <summary>
+        /// Group read permission
+        /// </summary>
+        public bool GroupRead { get; set; } = false;
+
+        /// <summary>
+        /// Group write permission
+        /// </summary>
+        public bool GroupWrite { get; set; } = false;
+
+        /// <summary>
+        /// Group execute permission
+        /// </summary>
+        public bool GroupExecute { get; set; } = false;
+
+        /// <summary>
+        /// Others read permission
+        /// </summary>
+        public bool OthersRead { get; set; } = false;
+
+        /// <summary>
+        /// Others write permission
+        /// </summary>
+        public bool OthersWrite { get; set; } = false;
+
+        /// <summary>
+        /// Others execute permission
+        /// </summary>
+        public bool OthersExecute { get; set; } = false;
+
+        #endregion
+
+        #region Properties - Windows
+
+        /// <summary>
+        /// Read-only attribute
+        /// </summary>
+        public bool WinReadOnly { get; set; } = false;
+
+        /// <summary>
+        /// Hidden attribute
+        /// </summary>
+        public bool WinHidden { get; set; } = false;
+
+        /// <summary>
+        /// System attribute
+        /// </summary>
+        public bool WinSystem { get; set; } = false;
+
+        /// <summary>
+        /// Archive attribute
+        /// </summary>
+        public bool WinArchive { get; set; } = false;
 
         #endregion
     }

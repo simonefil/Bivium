@@ -90,6 +90,11 @@ namespace Bivium.Components.Pages
         /// </summary>
         private const int PROGRESS_UPDATE_INTERVAL_MS = 100;
 
+        /// <summary>
+        /// Maximum interval between characters in incremental entry search
+        /// </summary>
+        private const int TYPE_SEARCH_TIMEOUT_MS = 1000;
+
         #endregion
 
         #region Class Variables
@@ -183,6 +188,11 @@ namespace Bivium.Components.Pages
         /// Reference to settings dialog component
         /// </summary>
         private SettingsDialog _settingsDialog;
+
+        /// <summary>
+        /// Reference to default creation permissions dialog component
+        /// </summary>
+        private CreationPermissionsDialog _creationPermissionsDialog;
 
         /// <summary>
         /// Reference to authentication settings dialog component
@@ -323,6 +333,26 @@ namespace Bivium.Components.Pages
         /// Whether keyboard capture has been initialized
         /// </summary>
         private bool _keyboardInitialized = false;
+
+        /// <summary>
+        /// Prefix accumulated from recent character keys
+        /// </summary>
+        private string _typeSearchPrefix = "";
+
+        /// <summary>
+        /// Time of the last character added to incremental search
+        /// </summary>
+        private DateTime _typeSearchLastInputUtc = DateTime.MinValue;
+
+        /// <summary>
+        /// Panel owning the current incremental search
+        /// </summary>
+        private int _typeSearchPanelIndex = -1;
+
+        /// <summary>
+        /// Directory owning the current incremental search
+        /// </summary>
+        private string _typeSearchPath = "";
 
         /// <summary>
         /// Workspace revision currently rendered by this circuit
@@ -1592,8 +1622,16 @@ namespace Bivium.Components.Pages
             FileSystemEntry entry = this.GetSingleTargetEntry(active, "Rename");
             if (entry != null)
             {
+                int selectionLength = entry.Name.Length;
+                if (!entry.IsDirectory)
+                {
+                    string extension = Path.GetExtension(entry.Name);
+                    if (extension.Length < entry.Name.Length)
+                        selectionLength -= extension.Length;
+                }
+
                 this._pendingOperation = "rename";
-                this._inputDialog.Show("Rename", "New name:", entry.Name);
+                this._inputDialog.Show("Rename", "New name:", entry.Name, selectionLength);
             }
         }
 
@@ -1764,6 +1802,14 @@ namespace Bivium.Components.Pages
         {
             List<string> extensions = this._settings.CurrentValue.EditableExtensions;
             this._settingsDialog.Show(extensions);
+        }
+
+        /// <summary>
+        /// Shows default creation permissions settings
+        /// </summary>
+        private void DoCreationPermissions()
+        {
+            this._creationPermissionsDialog.Show(this._settings.CurrentValue.DefaultCreationPermissions);
         }
 
         /// <summary>
@@ -2995,7 +3041,7 @@ namespace Bivium.Components.Pages
                 return;
             }
 
-            // Single letter/digit: jump to first matching entry
+            // Letter/digit: incrementally search the first matching entry
             if (key.Length == 1 && !ctrl && !alt)
             {
                 char ch = key[0];
@@ -3004,10 +3050,19 @@ namespace Bivium.Components.Pages
                 if (isLetterOrDigit)
                 {
                     PanelState active = this.GetActivePanel();
+                    DateTime now = DateTime.UtcNow;
+
+                    if (this._typeSearchPanelIndex != this._activePanel || this._typeSearchPath != active.CurrentPath)
+                        this._typeSearchPrefix = "";
+
+                    this._typeSearchPrefix = BuildTypeSearchPrefix(this._typeSearchPrefix, this._typeSearchLastInputUtc, key, now);
+                    this._typeSearchLastInputUtc = now;
+                    this._typeSearchPanelIndex = this._activePanel;
+                    this._typeSearchPath = active.CurrentPath;
 
                     for (int i = 0; i < active.Entries.Count; i++)
                     {
-                        if (active.Entries[i].Name.StartsWith(key, StringComparison.OrdinalIgnoreCase))
+                        if (active.Entries[i].Name.StartsWith(this._typeSearchPrefix, StringComparison.OrdinalIgnoreCase))
                         {
                             active.CursorIndex = i;
                             active.SelectedPaths.Clear();
@@ -3020,6 +3075,22 @@ namespace Bivium.Components.Pages
                     return;
                 }
             }
+        }
+
+        /// <summary>
+        /// Builds the incremental entry-search prefix for a character key
+        /// </summary>
+        /// <param name="currentPrefix">Prefix accumulated so far</param>
+        /// <param name="lastInputUtc">Time of the previous character</param>
+        /// <param name="key">Current character key</param>
+        /// <param name="nowUtc">Time of the current character</param>
+        /// <returns>Updated search prefix</returns>
+        internal static string BuildTypeSearchPrefix(string currentPrefix, DateTime lastInputUtc, string key, DateTime nowUtc)
+        {
+            if (string.IsNullOrEmpty(currentPrefix) || (nowUtc - lastInputUtc).TotalMilliseconds >= TYPE_SEARCH_TIMEOUT_MS)
+                return key;
+
+            return currentPrefix + key;
         }
 
         /// <summary>

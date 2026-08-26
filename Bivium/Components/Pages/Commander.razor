@@ -46,6 +46,7 @@ else
         OnRefresh="this.DoRefresh"
         OnTerminal="this.DoToggleTerminal"
         OnEditorExtensions="this.DoEditorExtensions"
+        OnCreationPermissions="this.DoCreationPermissions"
         OnAuthenticationSettings="this.DoAuthenticationSettings"
         OnExtract="this.DoExtract"
         OnCompress="this.DoCompress"
@@ -184,6 +185,11 @@ else
     OnClose="this.HandleCompressDialogClose" />
 
 <Bivium.Components.Shared.SettingsDialog @ref="this._settingsDialog"
+    AttachmentId="@this._attachmentId"
+    LeaseGeneration="@this._leaseGeneration"
+    OnClose="this.HandleSettingsDialogClose" />
+
+<Bivium.Components.Shared.CreationPermissionsDialog @ref="this._creationPermissionsDialog"
     AttachmentId="@this._attachmentId"
     LeaseGeneration="@this._leaseGeneration"
     OnClose="this.HandleSettingsDialogClose" />

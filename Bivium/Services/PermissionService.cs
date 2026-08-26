@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using Bivium.Models;
+using Microsoft.Extensions.Options;
 
 namespace Bivium.Services
 {
@@ -19,6 +20,11 @@ namespace Bivium.Services
         private readonly SecurityService _securityService;
 
         /// <summary>
+        /// Application settings with hot-reload support
+        /// </summary>
+        private readonly IOptionsMonitor<CommanderSettings> _settings;
+
+        /// <summary>
         /// True if running on Linux/Unix
         /// </summary>
         private readonly bool _isUnix;
@@ -31,9 +37,11 @@ namespace Bivium.Services
         /// Creates a new PermissionService
         /// </summary>
         /// <param name="securityService">Security service instance</param>
-        public PermissionService(SecurityService securityService)
+        /// <param name="settings">Application settings monitor</param>
+        public PermissionService(SecurityService securityService, IOptionsMonitor<CommanderSettings> settings)
         {
             this._securityService = securityService;
+            this._settings = settings;
             this._isUnix = RuntimeInformation.IsOSPlatform(OSPlatform.Linux) || RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
         }
 
@@ -111,6 +119,37 @@ namespace Bivium.Services
         }
 
         /// <summary>
+        /// Applies configured ownership and permissions to a newly created entry
+        /// </summary>
+        /// <param name="path">Created file or directory path</param>
+        /// <param name="isDirectory">Whether the created entry is a directory</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        /// <returns>Operation result</returns>
+        public FileOperationResult ApplyDefaultCreationPermissions(string path, bool isDirectory, CancellationToken cancellationToken = default)
+        {
+            DefaultCreationPermissionsSettings defaults = this._settings.CurrentValue.DefaultCreationPermissions;
+            if (defaults == null || !defaults.Enabled)
+                return FileOperationResult.Ok(0);
+
+            CreationPermissionSettings configuredPermissions = isDirectory ? defaults.DirectoryPermissions : defaults.FilePermissions;
+            if (configuredPermissions == null)
+                return FileOperationResult.Fail("Default creation permissions are incomplete");
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!string.IsNullOrEmpty(defaults.Owner) || (this._isUnix && !string.IsNullOrEmpty(defaults.Group)))
+            {
+                FileOperationResult ownerResult = this.SetOwner(path, defaults.Owner, defaults.Group, false, cancellationToken);
+                if (!ownerResult.Success)
+                    return ownerResult;
+            }
+
+            PermissionModel model = this.BuildPermissionModel(configuredPermissions);
+            FileOperationResult result = this.SetPermissions(path, model, false, cancellationToken);
+            return result;
+        }
+
+        /// <summary>
         /// Sets the owner of a file or directory
         /// </summary>
         /// <param name="path">File or directory path</param>
@@ -151,6 +190,35 @@ namespace Bivium.Services
                 }
             }
 
+            return result;
+        }
+
+        #endregion
+
+        #region Private Methods - Model
+
+        /// <summary>
+        /// Builds the runtime permission model from persisted creation settings
+        /// </summary>
+        /// <param name="settings">Persisted permission values</param>
+        /// <returns>Runtime permission model</returns>
+        private PermissionModel BuildPermissionModel(CreationPermissionSettings settings)
+        {
+            PermissionModel result = new PermissionModel();
+            result.IsUnix = this._isUnix;
+            result.OwnerRead = settings.OwnerRead;
+            result.OwnerWrite = settings.OwnerWrite;
+            result.OwnerExecute = settings.OwnerExecute;
+            result.GroupRead = settings.GroupRead;
+            result.GroupWrite = settings.GroupWrite;
+            result.GroupExecute = settings.GroupExecute;
+            result.OthersRead = settings.OthersRead;
+            result.OthersWrite = settings.OthersWrite;
+            result.OthersExecute = settings.OthersExecute;
+            result.WinReadOnly = settings.WinReadOnly;
+            result.WinHidden = settings.WinHidden;
+            result.WinSystem = settings.WinSystem;
+            result.WinArchive = settings.WinArchive;
             return result;
         }
 

@@ -423,6 +423,18 @@ export function focusElement(elementId) {
 }
 
 /**
+ * Selects the leading portion of a text input.
+ * @param {HTMLInputElement} input - Input element.
+ * @param {number} selectionEnd - Exclusive end of the selection.
+ */
+export function selectInputText(input, selectionEnd) {
+    if (!input || typeof input.setSelectionRange !== 'function') return;
+
+    const boundedEnd = Math.max(0, Math.min(Number(selectionEnd) || 0, input.value.length));
+    input.setSelectionRange(0, boundedEnd);
+}
+
+/**
  * Send a PUT request with JSON body and return success status
  * @param {string} url - Request URL
  * @param {string} jsonBody - JSON string to send as body

@@ -19,6 +19,11 @@ namespace Bivium.Services
         private readonly SecurityService _securityService;
 
         /// <summary>
+        /// Permission service for configured extraction defaults
+        /// </summary>
+        private readonly IPermissionService _permissionService;
+
+        /// <summary>
         /// Supported archive extensions mapped to detection
         /// </summary>
         private static readonly string[] s_archiveExtensions = new string[]
@@ -35,9 +40,11 @@ namespace Bivium.Services
         /// Creates a new ArchiveService
         /// </summary>
         /// <param name="securityService">Security service instance</param>
-        public ArchiveService(SecurityService securityService)
+        /// <param name="permissionService">Permission service instance</param>
+        public ArchiveService(SecurityService securityService, IPermissionService permissionService)
         {
             this._securityService = securityService;
+            this._permissionService = permissionService;
         }
 
         #endregion
@@ -235,6 +242,7 @@ namespace Bivium.Services
         private FileOperationResult ExtractZip(string archivePath, string destinationDir, Action<int, int, string> onProgress, CancellationToken cancellationToken)
         {
             int processed = 0;
+            List<string> createdDirectories = new List<string>();
             using ZipArchive archive = ZipFile.OpenRead(archivePath);
             int totalEntries = archive.Entries.Count;
 
@@ -253,15 +261,18 @@ namespace Bivium.Services
                 if (string.IsNullOrEmpty(entry.Name))
                 {
                     // Directory entry
-                    Directory.CreateDirectory(destPath);
+                    this.EnsureExtractionDirectory(destPath, createdDirectories);
                 }
                 else
                 {
                     // File entry
-                    Directory.CreateDirectory(Path.GetDirectoryName(destPath));
-                    using Stream source = entry.Open();
-                    using FileStream destination = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
-                    this.CopyStreamCancellable(source, destination, cancellationToken);
+                    this.EnsureExtractionDirectory(Path.GetDirectoryName(destPath), createdDirectories);
+                    using (Stream source = entry.Open())
+                    using (FileStream destination = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                    {
+                        this.CopyStreamCancellable(source, destination, cancellationToken);
+                    }
+                    this.ApplyCreationDefaults(destPath, false, cancellationToken);
                     processed++;
                 }
 
@@ -271,6 +282,7 @@ namespace Bivium.Services
                 }
             }
 
+            this.ApplyDirectoryCreationDefaults(createdDirectories, cancellationToken);
             FileOperationResult result = FileOperationResult.Ok(processed);
             return result;
         }
@@ -285,6 +297,7 @@ namespace Bivium.Services
         private FileOperationResult ExtractTarZst(string archivePath, string destinationDir, Action<int, int, string> onProgress, CancellationToken cancellationToken)
         {
             int processed = 0;
+            List<string> createdDirectories = new List<string>();
 
             // First pass: count entries
             int totalEntries = 0;
@@ -317,14 +330,17 @@ namespace Bivium.Services
                 {
                     if (entry.EntryType == TarEntryType.Directory)
                     {
-                        Directory.CreateDirectory(destPath);
+                        this.EnsureExtractionDirectory(destPath, createdDirectories);
                     }
                     else if (entry.EntryType == TarEntryType.RegularFile)
                     {
-                        Directory.CreateDirectory(Path.GetDirectoryName(destPath));
-                        using FileStream destination = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
-                        if (entry.DataStream != null)
-                            this.CopyStreamCancellable(entry.DataStream, destination, cancellationToken);
+                        this.EnsureExtractionDirectory(Path.GetDirectoryName(destPath), createdDirectories);
+                        using (FileStream destination = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                        {
+                            if (entry.DataStream != null)
+                                this.CopyStreamCancellable(entry.DataStream, destination, cancellationToken);
+                        }
+                        this.ApplyCreationDefaults(destPath, false, cancellationToken);
                         processed++;
                     }
                 }
@@ -337,6 +353,7 @@ namespace Bivium.Services
                 entry = tarReader.GetNextEntry();
             }
 
+            this.ApplyDirectoryCreationDefaults(createdDirectories, cancellationToken);
             FileOperationResult result = FileOperationResult.Ok(processed);
             return result;
         }
@@ -351,6 +368,7 @@ namespace Bivium.Services
         private FileOperationResult ExtractWithSharpCompress(string archivePath, string destinationDir, Action<int, int, string> onProgress, CancellationToken cancellationToken)
         {
             int processed = 0;
+            List<string> createdDirectories = new List<string>();
 
             // First pass: count entries
             int totalEntries = 0;
@@ -385,7 +403,7 @@ namespace Bivium.Services
                     string dirPath = Path.Combine(destinationDir, entry.Key);
                     if (this.IsPathInsideDirectory(dirPath, destinationDir))
                     {
-                        Directory.CreateDirectory(dirPath);
+                        this.EnsureExtractionDirectory(dirPath, createdDirectories);
                     }
                 }
                 else
@@ -395,17 +413,77 @@ namespace Bivium.Services
                     // Security: prevent path traversal
                     if (this.IsPathInsideDirectory(destPath, destinationDir))
                     {
-                        Directory.CreateDirectory(Path.GetDirectoryName(destPath));
-                        using Stream source = reader.OpenEntryStream();
-                        using FileStream destination = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
-                        this.CopyStreamCancellable(source, destination, cancellationToken);
+                        this.EnsureExtractionDirectory(Path.GetDirectoryName(destPath), createdDirectories);
+                        using (Stream source = reader.OpenEntryStream())
+                        using (FileStream destination = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                        {
+                            this.CopyStreamCancellable(source, destination, cancellationToken);
+                        }
+                        this.ApplyCreationDefaults(destPath, false, cancellationToken);
                         processed++;
                     }
                 }
             }
 
+            this.ApplyDirectoryCreationDefaults(createdDirectories, cancellationToken);
             FileOperationResult result = FileOperationResult.Ok(processed);
             return result;
+        }
+
+        #endregion
+
+        #region Private Methods - Extraction Permissions
+
+        /// <summary>
+        /// Creates a directory tree and records only directories created by the extraction
+        /// </summary>
+        /// <param name="directoryPath">Directory path to ensure</param>
+        /// <param name="createdDirectories">Directories created by the current extraction</param>
+        private void EnsureExtractionDirectory(string directoryPath, List<string> createdDirectories)
+        {
+            if (Directory.Exists(directoryPath))
+                return;
+
+            List<string> missingDirectories = new List<string>();
+            string currentPath = directoryPath;
+            while (!string.IsNullOrEmpty(currentPath) && !Directory.Exists(currentPath))
+            {
+                missingDirectories.Add(currentPath);
+                currentPath = Path.GetDirectoryName(currentPath);
+            }
+
+            Directory.CreateDirectory(directoryPath);
+            for (int i = missingDirectories.Count - 1; i >= 0; i--)
+            {
+                createdDirectories.Add(missingDirectories[i]);
+            }
+        }
+
+        /// <summary>
+        /// Applies defaults after extraction so restrictive directory permissions cannot block child creation
+        /// </summary>
+        /// <param name="createdDirectories">Directories created by the extraction</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        private void ApplyDirectoryCreationDefaults(List<string> createdDirectories, CancellationToken cancellationToken)
+        {
+            for (int i = createdDirectories.Count - 1; i >= 0; i--)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                this.ApplyCreationDefaults(createdDirectories[i], true, cancellationToken);
+            }
+        }
+
+        /// <summary>
+        /// Applies configured defaults and turns failures into extraction failures
+        /// </summary>
+        /// <param name="path">Created entry path</param>
+        /// <param name="isDirectory">Whether the entry is a directory</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        private void ApplyCreationDefaults(string path, bool isDirectory, CancellationToken cancellationToken)
+        {
+            FileOperationResult result = this._permissionService.ApplyDefaultCreationPermissions(path, isDirectory, cancellationToken);
+            if (!result.Success)
+                throw new IOException(result.ErrorMessage);
         }
 
         #endregion

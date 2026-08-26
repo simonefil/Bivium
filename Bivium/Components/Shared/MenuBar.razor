@@ -185,6 +185,10 @@
                 <span>Editor Extensions...</span>
                 <span class="shortcut"></span>
             </div>
+            <div class="context-menu-item" @onclick="this.HandleCreationPermissions">
+                <span>Default Permissions...</span>
+                <span class="shortcut"></span>
+            </div>
             @if (this.CanManageAuthenticationSettings)
             {
                 <div class="context-menu-item" @onclick="this.HandleAuthenticationSettings">

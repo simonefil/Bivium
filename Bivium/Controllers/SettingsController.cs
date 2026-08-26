@@ -129,6 +129,64 @@ namespace Bivium.Controllers
         }
 
         /// <summary>
+        /// Updates default permissions for newly created entries and writes them to appsettings.json
+        /// </summary>
+        /// <param name="settingsRequest">New default creation permission settings</param>
+        /// <returns>Result</returns>
+        [HttpPut("default-creation-permissions")]
+        public IActionResult UpdateDefaultCreationPermissions([FromBody] DefaultCreationPermissionsSettings settingsRequest)
+        {
+            if (!this.HasValidWorkspaceLease())
+                return this.Conflict("This browser no longer controls the workspace");
+            if (settingsRequest == null || settingsRequest.FilePermissions == null || settingsRequest.DirectoryPermissions == null)
+                return this.BadRequest("Invalid default creation permissions");
+
+            CancellationToken cancellationToken = this.GetWorkspaceRevocationToken();
+            IActionResult result;
+
+            try
+            {
+                settingsRequest.Owner = settingsRequest.Owner?.Trim() ?? "";
+                settingsRequest.Group = settingsRequest.Group?.Trim() ?? "";
+
+                string settingsPath = Path.Combine(this._environment.ContentRootPath, "appsettings.json");
+                string json = System.IO.File.ReadAllText(settingsPath);
+
+                JsonDocumentOptions docOptions = new JsonDocumentOptions();
+                docOptions.CommentHandling = JsonCommentHandling.Skip;
+                JsonDocument doc = JsonDocument.Parse(json, docOptions);
+                Dictionary<string, object> root = this.JsonElementToDict(doc.RootElement);
+                doc.Dispose();
+
+                if (!root.ContainsKey("CommanderSettings"))
+                {
+                    root["CommanderSettings"] = new Dictionary<string, object>();
+                }
+
+                Dictionary<string, object> settings = (Dictionary<string, object>)root["CommanderSettings"];
+                settings["DefaultCreationPermissions"] = settingsRequest;
+
+                JsonSerializerOptions writeOptions = new JsonSerializerOptions();
+                writeOptions.WriteIndented = true;
+                string updatedJson = JsonSerializer.Serialize(root, writeOptions);
+                cancellationToken.ThrowIfCancellationRequested();
+                System.IO.File.WriteAllText(settingsPath, updatedJson);
+
+                result = this.Ok(new { success = true });
+            }
+            catch (IOException ex)
+            {
+                result = this.StatusCode(500, "Failed to write settings: " + ex.Message);
+            }
+            catch (OperationCanceledException)
+            {
+                result = this.Conflict("This browser no longer controls the workspace");
+            }
+
+            return result;
+        }
+
+        /// <summary>
         /// Gets current authentication settings status
         /// </summary>
         /// <returns>Authentication status</returns>

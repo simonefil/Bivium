@@ -1,0 +1,126 @@
+@inject IJSRuntime JSRuntime
+
+@if (this._isVisible)
+{
+    <div class="context-menu-overlay" @onclick="this.HandleCancel">
+        <div class="context-menu" style="position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 72ch; outline: none;"
+             tabindex="0"
+             @ref="this._dialogElement"
+             @onclick:stopPropagation="true">
+            <div style="background-color: var(--background1); padding: 0 1ch; border-bottom: 1px solid var(--foreground2);">
+                Default Creation Permissions
+            </div>
+            <div style="padding: 1lh 1ch;">
+                <div style="margin-bottom: 1lh;">
+                    <label><input type="checkbox" @bind="this._useSystemDefaults" /> Use system defaults</label>
+                </div>
+
+                <table style="width: 100%;">
+                    <tr>
+                        <td style="width: 12ch; color: var(--foreground2);">Owner:</td>
+                        <td><input type="text" @bind="this._model.Owner" disabled="@this._useSystemDefaults" style="width: 28ch; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2); padding: 0 0.5ch;" /></td>
+                    </tr>
+                    @if (this._isUnix)
+                    {
+                        <tr>
+                            <td style="color: var(--foreground2);">Group:</td>
+                            <td><input type="text" @bind="this._model.Group" disabled="@this._useSystemDefaults" style="width: 28ch; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2); padding: 0 0.5ch;" /></td>
+                        </tr>
+                    }
+                </table>
+
+                @if (this._isUnix)
+                {
+                    <div style="display: flex; gap: 3ch; margin-top: 1lh;">
+                        <div style="flex: 1;">
+                            <div style="color: var(--foreground2); margin-bottom: 0.5lh;">Files (@this.GetOctalString(this._model.FilePermissions))</div>
+                            <table style="width: 100%;">
+                                <tr>
+                                    <td style="width: 10ch;"></td>
+                                    <td style="width: 6ch; text-align: center; color: var(--foreground2);">Read</td>
+                                    <td style="width: 6ch; text-align: center; color: var(--foreground2);">Write</td>
+                                    <td style="width: 6ch; text-align: center; color: var(--foreground2);">Exec</td>
+                                </tr>
+                                <tr>
+                                    <td style="color: var(--foreground2);">Owner:</td>
+                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.FilePermissions.OwnerRead" disabled="@this._useSystemDefaults" /></td>
+                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.FilePermissions.OwnerWrite" disabled="@this._useSystemDefaults" /></td>
+                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.FilePermissions.OwnerExecute" disabled="@this._useSystemDefaults" /></td>
+                                </tr>
+                                <tr>
+                                    <td style="color: var(--foreground2);">Group:</td>
+                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.FilePermissions.GroupRead" disabled="@this._useSystemDefaults" /></td>
+                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.FilePermissions.GroupWrite" disabled="@this._useSystemDefaults" /></td>
+                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.FilePermissions.GroupExecute" disabled="@this._useSystemDefaults" /></td>
+                                </tr>
+                                <tr>
+                                    <td style="color: var(--foreground2);">Others:</td>
+                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.FilePermissions.OthersRead" disabled="@this._useSystemDefaults" /></td>
+                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.FilePermissions.OthersWrite" disabled="@this._useSystemDefaults" /></td>
+                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.FilePermissions.OthersExecute" disabled="@this._useSystemDefaults" /></td>
+                                </tr>
+                            </table>
+                        </div>
+                        <div style="flex: 1;">
+                            <div style="color: var(--foreground2); margin-bottom: 0.5lh;">Folders (@this.GetOctalString(this._model.DirectoryPermissions))</div>
+                            <table style="width: 100%;">
+                                <tr>
+                                    <td style="width: 10ch;"></td>
+                                    <td style="width: 6ch; text-align: center; color: var(--foreground2);">Read</td>
+                                    <td style="width: 6ch; text-align: center; color: var(--foreground2);">Write</td>
+                                    <td style="width: 6ch; text-align: center; color: var(--foreground2);">Exec</td>
+                                </tr>
+                                <tr>
+                                    <td style="color: var(--foreground2);">Owner:</td>
+                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.DirectoryPermissions.OwnerRead" disabled="@this._useSystemDefaults" /></td>
+                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.DirectoryPermissions.OwnerWrite" disabled="@this._useSystemDefaults" /></td>
+                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.DirectoryPermissions.OwnerExecute" disabled="@this._useSystemDefaults" /></td>
+                                </tr>
+                                <tr>
+                                    <td style="color: var(--foreground2);">Group:</td>
+                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.DirectoryPermissions.GroupRead" disabled="@this._useSystemDefaults" /></td>
+                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.DirectoryPermissions.GroupWrite" disabled="@this._useSystemDefaults" /></td>
+                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.DirectoryPermissions.GroupExecute" disabled="@this._useSystemDefaults" /></td>
+                                </tr>
+                                <tr>
+                                    <td style="color: var(--foreground2);">Others:</td>
+                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.DirectoryPermissions.OthersRead" disabled="@this._useSystemDefaults" /></td>
+                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.DirectoryPermissions.OthersWrite" disabled="@this._useSystemDefaults" /></td>
+                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.DirectoryPermissions.OthersExecute" disabled="@this._useSystemDefaults" /></td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div style="display: flex; gap: 4ch; margin-top: 1lh;">
+                        <div style="flex: 1;">
+                            <div style="color: var(--foreground2); margin-bottom: 0.5lh;">Files</div>
+                            <div><label><input type="checkbox" @bind="this._model.FilePermissions.WinReadOnly" disabled="@this._useSystemDefaults" /> Read-only</label></div>
+                            <div><label><input type="checkbox" @bind="this._model.FilePermissions.WinHidden" disabled="@this._useSystemDefaults" /> Hidden</label></div>
+                            <div><label><input type="checkbox" @bind="this._model.FilePermissions.WinSystem" disabled="@this._useSystemDefaults" /> System</label></div>
+                            <div><label><input type="checkbox" @bind="this._model.FilePermissions.WinArchive" disabled="@this._useSystemDefaults" /> Archive</label></div>
+                        </div>
+                        <div style="flex: 1;">
+                            <div style="color: var(--foreground2); margin-bottom: 0.5lh;">Folders</div>
+                            <div><label><input type="checkbox" @bind="this._model.DirectoryPermissions.WinReadOnly" disabled="@this._useSystemDefaults" /> Read-only</label></div>
+                            <div><label><input type="checkbox" @bind="this._model.DirectoryPermissions.WinHidden" disabled="@this._useSystemDefaults" /> Hidden</label></div>
+                            <div><label><input type="checkbox" @bind="this._model.DirectoryPermissions.WinSystem" disabled="@this._useSystemDefaults" /> System</label></div>
+                            <div><label><input type="checkbox" @bind="this._model.DirectoryPermissions.WinArchive" disabled="@this._useSystemDefaults" /> Archive</label></div>
+                        </div>
+                    </div>
+                }
+
+                @if (!string.IsNullOrEmpty(this._statusText))
+                {
+                    <div style="margin-top: 1lh; color: var(--foreground2);">@this._statusText</div>
+                }
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 2ch; padding: 0 1ch 1lh 1ch;">
+                <button @onclick="this.HandleCancel">Cancel</button>
+                <button @onclick="this.HandleSave">Save</button>
+            </div>
+        </div>
+    </div>
+}

@@ -21,6 +21,7 @@
 @import 'terminal.css';
 @import 'editor.css';
 @import 'renamer.css';
+@import 'upload.css';
 
 /* Global overrides */
 html, body {

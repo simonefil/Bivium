@@ -4,7 +4,7 @@ using Microsoft.JSInterop;
 namespace Bivium.Components.Shared
 {
     /// <summary>
-    /// Dialog for chunked file upload with progress display
+    /// Dialog for hierarchical chunked file and directory uploads
     /// </summary>
     public partial class UploadDialog : ComponentBase, IDisposable
     {
@@ -43,9 +43,19 @@ namespace Bivium.Components.Shared
         private string _destinationDir = "";
 
         /// <summary>
-        /// Selected file name
+        /// Number of selected files
         /// </summary>
-        private string _fileName = "";
+        private int _fileCount = 0;
+
+        /// <summary>
+        /// Number of selected directories
+        /// </summary>
+        private int _directoryCount = 0;
+
+        /// <summary>
+        /// Total bytes across selected files
+        /// </summary>
+        private long _totalBytes = 0;
 
         /// <summary>
         /// Upload progress percentage (0-100)
@@ -61,6 +71,21 @@ namespace Bivium.Components.Shared
         /// Status or error text
         /// </summary>
         private string _statusText = "";
+
+        /// <summary>
+        /// Current relative path being uploaded or prepared
+        /// </summary>
+        private string _currentItem = "";
+
+        /// <summary>
+        /// Number of completely uploaded files
+        /// </summary>
+        private int _processedFiles = 0;
+
+        /// <summary>
+        /// Total files in the active upload
+        /// </summary>
+        private int _uploadFileCount = 0;
 
         /// <summary>
         /// JS module reference for upload interop
@@ -88,10 +113,15 @@ namespace Bivium.Components.Shared
         public void Show(string destinationDir)
         {
             this._destinationDir = destinationDir;
-            this._fileName = "";
+            this._fileCount = 0;
+            this._directoryCount = 0;
+            this._totalBytes = 0;
             this._progress = 0;
             this._isUploading = false;
             this._statusText = "";
+            this._currentItem = "";
+            this._processedFiles = 0;
+            this._uploadFileCount = 0;
             this._isVisible = true;
             this.StateHasChanged();
 
@@ -113,13 +143,35 @@ namespace Bivium.Components.Shared
         #region JS Invokable Methods
 
         /// <summary>
+        /// Called from JS when files or directories are added to the upload queue
+        /// </summary>
+        /// <param name="fileCount">Selected file count</param>
+        /// <param name="directoryCount">Selected directory count</param>
+        /// <param name="totalBytes">Total selected file bytes</param>
+        [JSInvokable]
+        public void OnUploadSelectionChanged(int fileCount, int directoryCount, long totalBytes)
+        {
+            this._fileCount = fileCount;
+            this._directoryCount = directoryCount;
+            this._totalBytes = totalBytes;
+            this._statusText = "";
+            this.InvokeAsync(() => this.StateHasChanged());
+        }
+
+        /// <summary>
         /// Called from JS to update upload progress
         /// </summary>
         /// <param name="percent">Progress percentage (0-100)</param>
+        /// <param name="currentPath">Current relative path</param>
+        /// <param name="processedFiles">Number of completed files</param>
+        /// <param name="totalFiles">Total number of files</param>
         [JSInvokable]
-        public void OnUploadProgress(int percent)
+        public void OnUploadProgress(int percent, string currentPath, int processedFiles, int totalFiles)
         {
             this._progress = percent;
+            this._currentItem = currentPath;
+            this._processedFiles = processedFiles;
+            this._uploadFileCount = totalFiles;
             this.InvokeAsync(() => this.StateHasChanged());
         }
 
@@ -157,6 +209,7 @@ namespace Bivium.Components.Shared
         private async System.Threading.Tasks.Task InitializeAndFocusAsync()
         {
             await this.InitializeJsModule();
+            await this._jsModule.InvokeVoidAsync("clearUploadSelection");
             await this._browseButton.FocusAsync();
         }
 
@@ -183,23 +236,36 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Handles the Browse button click - opens file picker via JS
+        /// Opens the multiple-file picker
         /// </summary>
-        private async System.Threading.Tasks.Task HandleBrowse()
+        private async System.Threading.Tasks.Task HandleBrowseFiles()
         {
-            if (this._jsModule == null)
-            {
+            if (this._jsModule == null || this._isUploading)
                 return;
-            }
 
-            string selectedName = await this._jsModule.InvokeAsync<string>("selectFile");
+            await this._jsModule.InvokeVoidAsync("selectFiles");
+        }
 
-            if (!string.IsNullOrEmpty(selectedName))
-            {
-                this._fileName = selectedName;
-                this._statusText = "";
-                this.StateHasChanged();
-            }
+        /// <summary>
+        /// Opens the multiple-directory picker
+        /// </summary>
+        private async System.Threading.Tasks.Task HandleBrowseFolders()
+        {
+            if (this._jsModule == null || this._isUploading)
+                return;
+
+            await this._jsModule.InvokeVoidAsync("selectDirectories");
+        }
+
+        /// <summary>
+        /// Clears the current upload queue
+        /// </summary>
+        private async System.Threading.Tasks.Task HandleClearSelection()
+        {
+            if (this._jsModule == null || this._isUploading)
+                return;
+
+            await this._jsModule.InvokeVoidAsync("clearUploadSelection");
         }
 
         /// <summary>
@@ -207,17 +273,18 @@ namespace Bivium.Components.Shared
         /// </summary>
         private async System.Threading.Tasks.Task HandleUpload()
         {
-            if (this._jsModule == null || string.IsNullOrEmpty(this._fileName))
-            {
+            if (this._jsModule == null || !this.HasSelection())
                 return;
-            }
 
             this._isUploading = true;
             this._progress = 0;
             this._statusText = "Uploading...";
+            this._currentItem = "";
+            this._processedFiles = 0;
+            this._uploadFileCount = this._fileCount;
             this.StateHasChanged();
 
-            await this._jsModule.InvokeVoidAsync("uploadFile", this._destinationDir, this._fileName, this.AttachmentId, this.LeaseGeneration);
+            await this._jsModule.InvokeVoidAsync("uploadSelection", this._destinationDir, this.AttachmentId, this.LeaseGeneration);
         }
 
         /// <summary>
@@ -267,6 +334,67 @@ namespace Bivium.Components.Shared
             bar += "] " + this._progress + "%";
 
             return bar;
+        }
+
+        /// <summary>
+        /// Returns whether the upload queue contains files or directories
+        /// </summary>
+        /// <returns>True when at least one entry is selected</returns>
+        private bool HasSelection()
+        {
+            return this._fileCount > 0 || this._directoryCount > 0;
+        }
+
+        /// <summary>
+        /// Formats the current upload queue summary
+        /// </summary>
+        /// <returns>Selection summary</returns>
+        private string GetSelectionSummary()
+        {
+            if (!this.HasSelection())
+                return "No files or folders selected";
+
+            return this._fileCount + " file(s), " + this._directoryCount + " folder(s), " + this.FormatSize(this._totalBytes);
+        }
+
+        /// <summary>
+        /// Formats the current file counter prefix
+        /// </summary>
+        /// <returns>Progress prefix</returns>
+        private string GetProgressSummary()
+        {
+            if (this._uploadFileCount <= 0)
+                return "";
+            int currentFile = Math.Min(this._processedFiles + 1, this._uploadFileCount);
+            return "[" + currentFile + "/" + this._uploadFileCount + "] ";
+        }
+
+        /// <summary>
+        /// Formats a byte count for display
+        /// </summary>
+        /// <param name="bytes">Size in bytes</param>
+        /// <returns>Formatted size string</returns>
+        private string FormatSize(long bytes)
+        {
+            string result;
+            if (bytes < 1024)
+            {
+                result = bytes + " B";
+            }
+            else if (bytes < 1024 * 1024)
+            {
+                result = (bytes / 1024.0).ToString("F1") + " KB";
+            }
+            else if (bytes < 1024L * 1024 * 1024)
+            {
+                result = (bytes / (1024.0 * 1024.0)).ToString("F1") + " MB";
+            }
+            else
+            {
+                result = (bytes / (1024.0 * 1024.0 * 1024.0)).ToString("F1") + " GB";
+            }
+
+            return result;
         }
 
         #endregion
