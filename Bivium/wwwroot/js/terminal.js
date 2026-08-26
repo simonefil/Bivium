@@ -465,6 +465,11 @@ function sendInput(state, data) {
     state.dotNetRef.invokeMethodAsync('OnTerminalInput', state.sessionId, data).catch(function () { });
 }
 
+function positionTerminalInput(state) {
+    if (!state?.input || !state.viewport) return;
+    state.input.style.top = Math.max(0, state.viewport.scrollTop) + 'px';
+}
+
 function getPositionFromPointer(state, event) {
     const bounds = state.viewport.getBoundingClientRect();
     const offset = event.clientY - bounds.top + state.viewport.scrollTop;
@@ -593,6 +598,7 @@ function runSelectionAutoscroll(state) {
 
 function attachInputHandlers(state) {
     state.viewport.addEventListener('keydown', function (event) {
+        positionTerminalInput(state);
         if (state.composing || event.isComposing || event.key === 'Process' || event.keyCode === 229) return;
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
             event.preventDefault();
@@ -649,8 +655,13 @@ function attachInputHandlers(state) {
     });
     state.viewport.addEventListener('compositionend', function (event) {
         state.composing = false;
-        if (event.data) sendInput(state, event.data);
+        const data = event.data || state.input?.value || '';
+        state.pendingCompositionCommit = data;
+        if (data) sendInput(state, data);
         if (state.input) state.input.value = '';
+        setTimeout(function () {
+            if (state.pendingCompositionCommit === data) state.pendingCompositionCommit = '';
+        }, 0);
     });
     state.viewport.addEventListener('focusin', function () {
         state.dotNetRef.invokeMethodAsync('OnTerminalFocus', state.sessionId, true).catch(function () { });
@@ -661,7 +672,10 @@ function attachInputHandlers(state) {
     state.viewport.addEventListener('mousedown', function (event) {
         const hyperlink = event.target.closest?.('.terminal-hyperlink');
         if (hyperlink && (!state.snapshot?.screen?.mouseTracking || event.ctrlKey || event.metaKey)) return;
-        if (state.input) state.input.focus({ preventScroll: true });
+        if (state.input) {
+            positionTerminalInput(state);
+            state.input.focus({ preventScroll: true });
+        }
         const select = !state.snapshot?.screen?.mouseTracking || event.shiftKey;
         if (select && event.button === 0) {
             event.preventDefault();
@@ -784,6 +798,7 @@ function createRenderer(sessionId, container, dotNetReference) {
         selectionFocus: null,
         selecting: false,
         composing: false,
+        pendingCompositionCommit: '',
         selectionAnimationFrame: 0,
         selectionPointerX: 0,
         selectionPointerY: null,
@@ -794,10 +809,21 @@ function createRenderer(sessionId, container, dotNetReference) {
     terminals.set(getKey(sessionId), state);
     state.dotNetRef.invokeMethodAsync('OnTerminalVisibilityChanged', terminalPageVisible).catch(function () { });
     attachInputHandlers(state);
+    positionTerminalInput(state);
     input.addEventListener('input', function () {
-        if (!state.composing) input.value = '';
+        if (state.composing) return;
+        const data = input.value;
+        input.value = '';
+        if (!data) return;
+        if (state.pendingCompositionCommit === data) {
+            state.pendingCompositionCommit = '';
+            return;
+        }
+        state.pendingCompositionCommit = '';
+        sendInput(state, data);
     });
     viewport.addEventListener('scroll', function () {
+        positionTerminalInput(state);
         if (state.programmaticScrollTop !== null && Math.abs(state.viewport.scrollTop - state.programmaticScrollTop) < 0.5) {
             state.programmaticScrollTop = null;
             return;
@@ -901,7 +927,10 @@ export function focusTerminal(sessionId) {
         if (!terminalPageVisible || state.disposed || !isRendererVisible(state)) return;
         notifyResize(state);
         scheduleRender(state);
-        if (state.input) state.input.focus({ preventScroll: true });
+        if (state.input) {
+            positionTerminalInput(state);
+            state.input.focus({ preventScroll: true });
+        }
         else if (state.viewport) state.viewport.focus({ preventScroll: true });
     });
 }
