@@ -17,8 +17,8 @@
                 <input type="file" id="upload-directories-input" webkitdirectory multiple style="display: none;" />
 
                 <div style="display: flex; align-items: center; gap: 1ch; margin-bottom: 1lh;">
-                    <button @ref="this._browseButton" @onclick="this.HandleBrowseFiles" disabled="@this._isUploading">Add Files...</button>
-                    <button @onclick="this.HandleBrowseFolders" disabled="@this._isUploading">Add Folders...</button>
+                    <button type="button" id="upload-add-files-button" @ref="this._browseButton" disabled="@this._isUploading">Add Files...</button>
+                    <button type="button" id="upload-add-folders-button" disabled="@this._isUploading">Add Folders...</button>
                     <button @onclick="this.HandleClearSelection" disabled="@(this._isUploading || !this.HasSelection())">Clear</button>
                 </div>
 

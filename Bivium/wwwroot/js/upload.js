@@ -8,6 +8,8 @@ let _dotNetRef = null;
 let _selectedFiles = new Map();
 let _selectedDirectories = new Set();
 let _dropZone = null;
+let _filesButton = null;
+let _directoriesButton = null;
 let _dragDepth = 0;
 let _uploadInProgress = false;
 
@@ -18,13 +20,18 @@ let _uploadInProgress = false;
 export function initUpload(dotNetRef) {
     _dotNetRef = dotNetRef;
     detachDropZone();
+    detachPickerButtons();
     _dropZone = document.getElementById('upload-drop-zone');
+    _filesButton = document.getElementById('upload-add-files-button');
+    _directoriesButton = document.getElementById('upload-add-folders-button');
     if (_dropZone) {
         _dropZone.addEventListener('dragenter', handleDragEnter);
         _dropZone.addEventListener('dragover', handleDragOver);
         _dropZone.addEventListener('dragleave', handleDragLeave);
         _dropZone.addEventListener('drop', handleDrop);
     }
+    if (_filesButton) _filesButton.addEventListener('click', selectFiles);
+    if (_directoriesButton) _directoriesButton.addEventListener('click', selectDirectories);
 }
 
 /**
@@ -407,11 +414,19 @@ function detachDropZone() {
     _dragDepth = 0;
 }
 
+function detachPickerButtons() {
+    if (_filesButton) _filesButton.removeEventListener('click', selectFiles);
+    if (_directoriesButton) _directoriesButton.removeEventListener('click', selectDirectories);
+    _filesButton = null;
+    _directoriesButton = null;
+}
+
 /**
  * Disposes callbacks and DOM handlers.
  */
 export function dispose() {
     detachDropZone();
+    detachPickerButtons();
     _dotNetRef = null;
     _selectedFiles.clear();
     _selectedDirectories.clear();

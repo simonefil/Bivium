@@ -236,28 +236,6 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Opens the multiple-file picker
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleBrowseFiles()
-        {
-            if (this._jsModule == null || this._isUploading)
-                return;
-
-            await this._jsModule.InvokeVoidAsync("selectFiles");
-        }
-
-        /// <summary>
-        /// Opens the multiple-directory picker
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleBrowseFolders()
-        {
-            if (this._jsModule == null || this._isUploading)
-                return;
-
-            await this._jsModule.InvokeVoidAsync("selectDirectories");
-        }
-
-        /// <summary>
         /// Clears the current upload queue
         /// </summary>
         private async System.Threading.Tasks.Task HandleClearSelection()
