@@ -517,21 +517,6 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Searches a bounded portion of remote history
-        /// </summary>
-        /// <param name="sessionId">Session identifier</param>
-        /// <param name="query">Text to search</param>
-        /// <param name="start">Initial offset</param>
-        /// <param name="forward">Search direction</param>
-        /// <param name="count">Maximum rows to inspect</param>
-        /// <returns>Progressive search result</returns>
-        [JSInvokable]
-        public TerminalSearchPage SearchTerminalHistoryPage(int sessionId, string query, long start, bool forward, int count)
-        {
-            return this._terminalRuntime.SearchHistoryPage(sessionId, query, start, forward, count, this._requestCancellation.Token);
-        }
-
-        /// <summary>
         /// Receives geometry and viewport at the end of drag or resize
         /// </summary>
         /// <param name="update">New normalized geometry from the browser</param>

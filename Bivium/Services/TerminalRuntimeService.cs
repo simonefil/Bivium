@@ -768,32 +768,6 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Searches a bounded page while releasing the lock between frontend requests
-        /// </summary>
-        /// <param name="sessionId">Session identifier</param>
-        /// <param name="query">Text to search</param>
-        /// <param name="start">Initial offset</param>
-        /// <param name="forward">Direction</param>
-        /// <param name="count">Maximum rows to inspect</param>
-        /// <param name="cancellationToken">Circuit token</param>
-        /// <returns>Progressive result</returns>
-        public TerminalSearchPage SearchHistoryPage(int sessionId, string query, long start, bool forward, int count, CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            TerminalSessionRuntime session = this.GetSession(sessionId);
-            if (session == null)
-                return new TerminalSearchPage { Complete = true };
-
-            lock (session.SyncRoot)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (session.Disposed)
-                    return new TerminalSearchPage { Complete = true };
-                return session.History.SearchPage(query, start, forward, count, cancellationToken);
-            }
-        }
-
-        /// <summary>
         /// Registers a temporary subscriber for bounded runtime events
         /// </summary>
         /// <param name="subscriber">Client callback</param>

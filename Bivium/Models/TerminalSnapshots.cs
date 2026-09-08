@@ -300,27 +300,6 @@ namespace Bivium.Models
     }
 
     /// <summary>
-    /// Bounded result for a history search portion
-    /// </summary>
-    public sealed class TerminalSearchPage
-    {
-        /// <summary>
-        /// Found row or -1
-        /// </summary>
-        public long Found { get; set; } = -1;
-
-        /// <summary>
-        /// Offset from which to continue the search
-        /// </summary>
-        public long Next { get; set; }
-
-        /// <summary>
-        /// Whether no rows remain in the requested direction
-        /// </summary>
-        public bool Complete { get; set; }
-    }
-
-    /// <summary>
     /// Serialized row with cells and wrapping metadata
     /// </summary>
     public sealed class TerminalLineSnapshot

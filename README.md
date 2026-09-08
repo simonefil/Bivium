@@ -22,7 +22,7 @@ Runs on Linux, Windows and macOS. Accessible from any browser.
 
 **Built-in editor** powered by Monaco Editor with syntax highlighting for 40+ file types, including common languages (C#, Python, Go, Rust, TypeScript, etc.) and configuration formats (JSON, YAML, Dockerfile, etc.).
 
-**Persistent built-in terminal** (F12) — terminal processes, tabs and up to 100 MB of output per tab survive browser and network disconnections while Bivium remains running. Long histories remain responsive and searchable.
+**Persistent built-in terminal** (F12) — terminal processes, tabs and up to 100 MB of output per tab survive browser and network disconnections while Bivium remains running. Long histories remain responsive.
 
 **Archive support** — extract and create archives in ZIP, TAR, TAR.GZ, TAR.BZ2, TAR.XZ and TAR.ZST formats, with progress tracking.
 
@@ -43,7 +43,7 @@ Runs on Linux, Windows and macOS. Accessible from any browser.
 | Ctrl+F2 | Advanced Rename |
 | F4 | Edit in Monaco editor |
 | F5 | Refresh panel |
-| F12 | Toggle terminal |
+| F12 | Toggle terminal (goes to the shell while the terminal has focus) |
 | Del | Delete |
 | Ctrl+N | New file |
 | Ctrl+Shift+N | New folder |
@@ -139,7 +139,7 @@ If the controlling browser disappears without disconnecting cleanly, control bec
 
 Terminal output remains available when the browser disconnects. By default, Bivium keeps up to 100 MB for each terminal tab and 512 MB across all tabs. When a limit is reached, the oldest output is discarded first while the terminal process continues running.
 
-You can search the retained history, select and copy text across long outputs, and continue reading older output while new lines arrive. Holding Shift forces text selection in terminal applications that use the mouse themselves.
+You can select and copy text across long outputs, and continue reading older output while new lines arrive. Holding Shift forces text selection in terminal applications that use the mouse themselves.
 
 ### Advanced configuration
 

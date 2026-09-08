@@ -187,10 +187,6 @@ export function computeVirtualRange(totalRows, scrollTop, viewportHeight, lineHe
     return { start: top, end: Math.min(Math.max(0, totalRows), top + visibleCount) };
 }
 
-function historyToVisualIndex(state, historyIndex) {
-    return getHistoryLayout(state).markerRows + historyIndex - state.snapshot.historyStart;
-}
-
 function visualToHistoryIndex(state, visualIndex) {
     return state.snapshot.historyStart + visualIndex - getHistoryLayout(state).markerRows;
 }
@@ -462,6 +458,8 @@ function scheduleRender(state, followTail = false) {
 
 function sendInput(state, data) {
     if (!data || !state.dotNetRef) return;
+    // Typed text returns to the live tail like a real terminal
+    scheduleRender(state, true);
     state.dotNetRef.invokeMethodAsync('OnTerminalInput', state.sessionId, data).catch(function () { });
 }
 
@@ -540,28 +538,6 @@ async function copyRemoteSelection(state) {
     if (result.length > 0) await navigator.clipboard.writeText(result.join(''));
 }
 
-async function searchHistory(state, forward) {
-    const query = window.prompt('Search terminal history', state.lastSearch || '');
-    if (!query || !state.dotNetRef || !state.snapshot) return;
-    state.lastSearch = query;
-    const currentVisual = Math.floor(state.viewport.scrollTop / state.lineHeight);
-    let next = Math.max(state.snapshot.historyStart, visualToHistoryIndex(state, currentVisual));
-    let found = -1;
-    while (found < 0) {
-        const page = await state.dotNetRef.invokeMethodAsync('SearchTerminalHistoryPage', state.sessionId, query, next, forward, 1000).catch(function () { return null; });
-        if (!page) break;
-        found = page.found;
-        if (found >= 0 || page.complete || page.next === next) break;
-        next = page.next;
-        await new Promise(function (resolve) { setTimeout(resolve, 0); });
-    }
-    if (found >= 0) {
-        state.viewport.scrollTop = historyToVisualIndex(state, found) * state.lineHeight;
-        requestHistoryPage(state, found);
-        scheduleRender(state);
-    }
-}
-
 function stopSelectionAutoscroll(state) {
     if (state.selectionAnimationFrame) cancelAnimationFrame(state.selectionAnimationFrame);
     state.selectionAnimationFrame = 0;
@@ -600,11 +576,6 @@ function attachInputHandlers(state) {
     state.viewport.addEventListener('keydown', function (event) {
         positionTerminalInput(state);
         if (state.composing || event.isComposing || event.key === 'Process' || event.keyCode === 229) return;
-        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
-            event.preventDefault();
-            searchHistory(state, !event.shiftKey);
-            return;
-        }
         const clipboardAction = getTerminalClipboardAction(event.key, event.ctrlKey, event.shiftKey, event.metaKey, event.altKey);
         if (clipboardAction === 'copy') {
             if (window.getSelection()?.toString()) return;
@@ -615,12 +586,6 @@ function attachInputHandlers(state) {
             return;
         }
         if (clipboardAction === 'paste') return;
-        if (event.key === 'Escape' && state.selectionAnchor !== null) {
-            state.selectionAnchor = null;
-            state.selectionFocus = null;
-            scheduleRender(state);
-            return;
-        }
         const specialKeys = [
             'Enter', 'Tab', 'Backspace', 'Escape',
             'ArrowUp', 'ArrowDown', 'ArrowRight', 'ArrowLeft',
@@ -632,6 +597,10 @@ function attachInputHandlers(state) {
         const printable = !event.metaKey && event.key.length === 1;
         if (special || printable) {
             event.preventDefault();
+            // Like a real terminal, sending input drops the current selection and jumps back to the live tail
+            state.selectionAnchor = null;
+            state.selectionFocus = null;
+            scheduleRender(state, true);
             state.dotNetRef.invokeMethodAsync(
                 'OnTerminalKey',
                 state.sessionId,
@@ -647,6 +616,7 @@ function attachInputHandlers(state) {
         const text = event.clipboardData?.getData('text/plain') || '';
         if (text) {
             event.preventDefault();
+            scheduleRender(state, true);
             state.dotNetRef.invokeMethodAsync('OnTerminalPaste', state.sessionId, text).catch(function () { });
         }
     });
@@ -710,6 +680,10 @@ function attachInputHandlers(state) {
             state.selecting = false;
             stopSelectionAutoscroll(state);
             state.selectionFocus = getPositionFromPointer(state, event);
+            if (comparePositions(state.selectionAnchor, state.selectionFocus) === 0) {
+                state.selectionAnchor = null;
+                state.selectionFocus = null;
+            }
             scheduleRender(state);
             return;
         }
@@ -793,7 +767,6 @@ function createRenderer(sessionId, container, dotNetReference) {
         lastRows: 0,
         renderedStart: 0,
         renderedEnd: 0,
-        lastSearch: '',
         selectionAnchor: null,
         selectionFocus: null,
         selecting: false,

@@ -237,16 +237,16 @@ export function captureKeyboard(dotNetRef) {
             editorWindow.classList.contains('visible') &&
             (editorWindow.contains(activeEl) || (activeEl && activeEl.closest && activeEl.closest('#monaco-container')));
 
-        // F12 always goes to .NET (toggle terminal)
+        // If terminal has focus, don't intercept anything: every key belongs to the shell
+        if (inTerminal) {
+            return;
+        }
+
+        // F12 toggles the terminal whenever the terminal itself is not focused
         if (key === 'F12') {
             e.preventDefault();
             e.stopPropagation();
             dotNetRef.invokeMethodAsync('OnKeyDown', key, ctrl, shift, alt);
-            return;
-        }
-
-        // If terminal has focus, don't intercept anything else
-        if (inTerminal) {
             return;
         }
 
