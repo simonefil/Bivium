@@ -95,6 +95,11 @@ namespace Bivium.Components.Pages
         /// </summary>
         private const int TYPE_SEARCH_TIMEOUT_MS = 1000;
 
+        /// <summary>
+        /// Page jump size used until the browser reports the visible row count
+        /// </summary>
+        private const int DEFAULT_PAGE_SIZE = 20;
+
         #endregion
 
         #region Class Variables
@@ -223,6 +228,21 @@ namespace Bivium.Components.Pages
         /// Progress text displayed in the status bar during file operations
         /// </summary>
         private string _progressText = "";
+
+        /// <summary>
+        /// Cancellation source of the running file operation, null when none is running
+        /// </summary>
+        private CancellationTokenSource _operationCancellation;
+
+        /// <summary>
+        /// File rows visible in the left panel, used by page jumps
+        /// </summary>
+        private int _leftPageSize = DEFAULT_PAGE_SIZE;
+
+        /// <summary>
+        /// File rows visible in the right panel, used by page jumps
+        /// </summary>
+        private int _rightPageSize = DEFAULT_PAGE_SIZE;
 
         /// <summary>
         /// Whether the context menu cursor is on a directory
@@ -986,6 +1006,33 @@ namespace Bivium.Components.Pages
         }
 
         /// <summary>
+        /// Stores the measured page size of the left panel
+        /// </summary>
+        /// <param name="pageSize">Number of file rows visible in the panel</param>
+        private void HandleLeftPageSizeChanged(int pageSize)
+        {
+            this._leftPageSize = pageSize;
+        }
+
+        /// <summary>
+        /// Stores the measured page size of the right panel
+        /// </summary>
+        /// <param name="pageSize">Number of file rows visible in the panel</param>
+        private void HandleRightPageSizeChanged(int pageSize)
+        {
+            this._rightPageSize = pageSize;
+        }
+
+        /// <summary>
+        /// Returns the page jump size of the active panel
+        /// </summary>
+        /// <returns>Number of file rows visible in the active panel</returns>
+        private int GetActivePageSize()
+        {
+            return this._activePanel == 0 ? this._leftPageSize : this._rightPageSize;
+        }
+
+        /// <summary>
         /// Marks a semantic directory-tree expansion change for workspace persistence
         /// </summary>
         private void HandlePanelTreeExpansionChanged()
@@ -1343,6 +1390,42 @@ namespace Bivium.Components.Pages
         }
 
         /// <summary>
+        /// Creates the cancellation source of a long file operation, linked to lease revocation
+        /// </summary>
+        /// <param name="revocationToken">Lease revocation token of the current client</param>
+        /// <returns>Cancellation source owned by the running operation</returns>
+        private CancellationTokenSource BeginCancellableOperation(CancellationToken revocationToken)
+        {
+            CancellationTokenSource source = CancellationTokenSource.CreateLinkedTokenSource(revocationToken);
+            this._operationCancellation = source;
+            return source;
+        }
+
+        /// <summary>
+        /// Releases the cancellation source of a finished file operation
+        /// </summary>
+        /// <param name="source">Cancellation source created for the operation</param>
+        private void EndCancellableOperation(CancellationTokenSource source)
+        {
+            if (this._operationCancellation == source)
+                this._operationCancellation = null;
+
+            source.Dispose();
+        }
+
+        /// <summary>
+        /// Cancels the running file operation, keeping whatever has already been written
+        /// </summary>
+        private void CancelActiveOperation()
+        {
+            if (this._operationCancellation == null)
+                return;
+
+            this._operationCancellation.Cancel();
+            this._progressText = "Cancelling...";
+        }
+
+        /// <summary>
         /// Starts a paste operation after overwrite decisions have been resolved
         /// </summary>
         /// <param name="paths">Source paths to process</param>
@@ -1358,7 +1441,9 @@ namespace Bivium.Components.Pages
 
             List<string> operationPaths = new List<string>(paths);
             List<string> operationOverwritePaths = new List<string>(overwritePaths);
-            CancellationToken cancellationToken = this._workspaceService.GetRevocationToken(this.GetClientToken());
+            CancellationToken revocationToken = this._workspaceService.GetRevocationToken(this.GetClientToken());
+            CancellationTokenSource operationCancellation = this.BeginCancellableOperation(revocationToken);
+            CancellationToken cancellationToken = operationCancellation.Token;
 
             // Show initial progress
             this._progressText = isCut ? "Moving..." : "Copying...";
@@ -1383,13 +1468,15 @@ namespace Bivium.Components.Pages
                 }
                 catch (OperationCanceledException)
                 {
-                    result = FileOperationResult.Fail("Operation cancelled because browser control was revoked.");
+                    result = FileOperationResult.Fail("Operation cancelled.");
                 }
 
                 // Update UI on the render thread
                 _ = this.InvokeAsync(() =>
                 {
-                    if (this._isDisposed || cancellationToken.IsCancellationRequested)
+                    this.EndCancellableOperation(operationCancellation);
+
+                    if (this._isDisposed || revocationToken.IsCancellationRequested)
                     {
                         this._progressText = "";
                         return;
@@ -1400,12 +1487,12 @@ namespace Bivium.Components.Pages
                         this._clipboard.Clear();
                     }
 
-                    // Clear progress text
-                    this._progressText = "";
+                    // A cancelled operation keeps what it already wrote, so the panels still need a refresh
+                    this._progressText = cancellationToken.IsCancellationRequested ? "Operation cancelled, completed items kept." : "";
 
                     this.RefreshVisiblePanels();
 
-                    if (!result.Success)
+                    if (!result.Success && !cancellationToken.IsCancellationRequested)
                     {
                         this._pendingOperation = "";
                         this._confirmDialog.Show("Error", result.ErrorMessage, "OK", "");
@@ -1882,7 +1969,9 @@ namespace Bivium.Components.Pages
             }
 
             string destinationDir = active.CurrentPath;
-            CancellationToken cancellationToken = this._workspaceService.GetRevocationToken(this.GetClientToken());
+            CancellationToken revocationToken = this._workspaceService.GetRevocationToken(this.GetClientToken());
+            CancellationTokenSource operationCancellation = this.BeginCancellableOperation(revocationToken);
+            CancellationToken cancellationToken = operationCancellation.Token;
 
             // Show initial progress
             this._progressText = "Extracting...";
@@ -1899,20 +1988,24 @@ namespace Bivium.Components.Pages
                 }
                 catch (OperationCanceledException)
                 {
-                    result = FileOperationResult.Fail("Operation cancelled because browser control was revoked.");
+                    result = FileOperationResult.Fail("Operation cancelled.");
                 }
 
                 _ = this.InvokeAsync(() =>
                 {
-                    if (this._isDisposed || cancellationToken.IsCancellationRequested)
+                    this.EndCancellableOperation(operationCancellation);
+
+                    if (this._isDisposed || revocationToken.IsCancellationRequested)
                     {
                         this._progressText = "";
                         return;
                     }
-                    this._progressText = "";
+
+                    // A cancelled operation keeps what it already wrote, so the panels still need a refresh
+                    this._progressText = cancellationToken.IsCancellationRequested ? "Operation cancelled, completed items kept." : "";
                     this.RefreshVisiblePanels();
 
-                    if (!result.Success)
+                    if (!result.Success && !cancellationToken.IsCancellationRequested)
                     {
                         this._pendingOperation = "";
                         this._confirmDialog.Show("Error", result.ErrorMessage, "OK", "");
@@ -1943,7 +2036,9 @@ namespace Bivium.Components.Pages
             }
 
             string destinationDir = active.CurrentPath;
-            CancellationToken cancellationToken = this._workspaceService.GetRevocationToken(this.GetClientToken());
+            CancellationToken revocationToken = this._workspaceService.GetRevocationToken(this.GetClientToken());
+            CancellationTokenSource operationCancellation = this.BeginCancellableOperation(revocationToken);
+            CancellationToken cancellationToken = operationCancellation.Token;
 
             // Show initial progress
             this._progressText = archivePaths.Count == 1 ? "Extracting to " + this.GetArchiveBaseName(Path.GetFileName(archivePaths[0])) + "/..." : "Extracting to */...";
@@ -1960,20 +2055,24 @@ namespace Bivium.Components.Pages
                 }
                 catch (OperationCanceledException)
                 {
-                    result = FileOperationResult.Fail("Operation cancelled because browser control was revoked.");
+                    result = FileOperationResult.Fail("Operation cancelled.");
                 }
 
                 _ = this.InvokeAsync(() =>
                 {
-                    if (this._isDisposed || cancellationToken.IsCancellationRequested)
+                    this.EndCancellableOperation(operationCancellation);
+
+                    if (this._isDisposed || revocationToken.IsCancellationRequested)
                     {
                         this._progressText = "";
                         return;
                     }
-                    this._progressText = "";
+
+                    // A cancelled operation keeps what it already wrote, so the panels still need a refresh
+                    this._progressText = cancellationToken.IsCancellationRequested ? "Operation cancelled, completed items kept." : "";
                     this.RefreshVisiblePanels();
 
-                    if (!result.Success)
+                    if (!result.Success && !cancellationToken.IsCancellationRequested)
                     {
                         this._pendingOperation = "";
                         this._confirmDialog.Show("Error", result.ErrorMessage, "OK", "");
@@ -2600,7 +2699,9 @@ namespace Bivium.Components.Pages
 
             string outputPath = Path.Combine(active.CurrentPath, outputName);
             ArchiveFormat format = result.Format;
-            CancellationToken cancellationToken = this._workspaceService.GetRevocationToken(this.GetClientToken());
+            CancellationToken revocationToken = this._workspaceService.GetRevocationToken(this.GetClientToken());
+            CancellationTokenSource operationCancellation = this.BeginCancellableOperation(revocationToken);
+            CancellationToken cancellationToken = operationCancellation.Token;
 
             // Show initial progress
             this._progressText = "Compressing...";
@@ -2617,20 +2718,24 @@ namespace Bivium.Components.Pages
                 }
                 catch (OperationCanceledException)
                 {
-                    opResult = FileOperationResult.Fail("Operation cancelled because browser control was revoked.");
+                    opResult = FileOperationResult.Fail("Operation cancelled.");
                 }
 
                 _ = this.InvokeAsync(() =>
                 {
-                    if (this._isDisposed || cancellationToken.IsCancellationRequested)
+                    this.EndCancellableOperation(operationCancellation);
+
+                    if (this._isDisposed || revocationToken.IsCancellationRequested)
                     {
                         this._progressText = "";
                         return;
                     }
-                    this._progressText = "";
+
+                    // A cancelled operation keeps the partial archive, so the panels still need a refresh
+                    this._progressText = cancellationToken.IsCancellationRequested ? "Operation cancelled, incomplete archive kept." : "";
                     this.RefreshVisiblePanels();
 
-                    if (!opResult.Success)
+                    if (!opResult.Success && !cancellationToken.IsCancellationRequested)
                     {
                         this._pendingOperation = "";
                         this._confirmDialog.Show("Error", opResult.ErrorMessage, "OK", "");
@@ -3001,7 +3106,7 @@ namespace Bivium.Components.Pages
             if (key == "PageUp" && !ctrl && !alt)
             {
                 PanelState active = this.GetActivePanel();
-                int pageSize = 20;
+                int pageSize = this.GetActivePageSize();
                 active.CursorIndex = Math.Max(0, active.CursorIndex - pageSize);
                 if (!shift)
                 {
@@ -3023,7 +3128,7 @@ namespace Bivium.Components.Pages
             if (key == "PageDown" && !ctrl && !alt)
             {
                 PanelState active = this.GetActivePanel();
-                int pageSize = 20;
+                int pageSize = this.GetActivePageSize();
                 active.CursorIndex = Math.Min(active.Entries.Count - 1, active.CursorIndex + pageSize);
                 if (!shift)
                 {
@@ -3059,6 +3164,9 @@ namespace Bivium.Components.Pages
                     this._typeSearchLastInputUtc = now;
                     this._typeSearchPanelIndex = this._activePanel;
                     this._typeSearchPath = active.CurrentPath;
+                    this.ScheduleTypeSearchExpiry();
+
+                    bool matched = false;
 
                     for (int i = 0; i < active.Entries.Count; i++)
                     {
@@ -3067,14 +3175,50 @@ namespace Bivium.Components.Pages
                             active.CursorIndex = i;
                             active.SelectedPaths.Clear();
                             active.SelectedPaths.Add(active.Entries[i].FullPath);
+                            matched = true;
                             this.StateHasChangedAndScroll();
                             break;
                         }
                     }
 
+                    // Without a match nothing moves, but the typed prefix still has to reach the status bar
+                    if (!matched)
+                        this.StateHasChanged();
+
                     return;
                 }
             }
+        }
+
+        /// <summary>
+        /// Builds the status bar center text, showing the incremental search while it is active
+        /// </summary>
+        /// <returns>Text displayed in the middle of the status bar</returns>
+        private string GetStatusCenterText()
+        {
+            if (!string.IsNullOrEmpty(this._typeSearchPrefix))
+                return "Search: " + this._typeSearchPrefix;
+
+            return this._progressText;
+        }
+
+        /// <summary>
+        /// Clears the incremental search feedback once the prefix has expired
+        /// </summary>
+        private void ScheduleTypeSearchExpiry()
+        {
+            DateTime scheduledFor = this._typeSearchLastInputUtc;
+
+            _ = this.InvokeAsync(async () =>
+            {
+                await System.Threading.Tasks.Task.Delay(TYPE_SEARCH_TIMEOUT_MS);
+
+                if (this._isDisposed || this._typeSearchLastInputUtc != scheduledFor)
+                    return;
+
+                this._typeSearchPrefix = "";
+                this.StateHasChanged();
+            });
         }
 
         /// <summary>

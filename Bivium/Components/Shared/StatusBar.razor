@@ -2,6 +2,12 @@
 
 <div class="status-bar">
     <span class="status-bar-left">@this._selectionInfo</span>
-    <span class="status-bar-center">@this._progressText</span>
+    <span class="status-bar-center">
+        @this._progressText
+        @if (this.CanCancelOperation)
+        {
+            <button type="button" class="status-bar-cancel" @onclick="this.OnCancelOperation" title="Cancel the running operation">Cancel</button>
+        }
+    </span>
     <span class="status-bar-right">@this._diskInfo</span>
 </div>

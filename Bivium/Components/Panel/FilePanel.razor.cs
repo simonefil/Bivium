@@ -95,6 +95,12 @@ namespace Bivium.Components.Panel
         [Parameter]
         public EventCallback OnTreeExpansionChanged { get; set; }
 
+        /// <summary>
+        /// Callback when the number of file rows visible in the panel changes
+        /// </summary>
+        [Parameter]
+        public EventCallback<int> OnPageSizeChanged { get; set; }
+
         #endregion
 
         #region Class Variables
@@ -181,6 +187,20 @@ namespace Bivium.Components.Panel
                 this.State.ScrollAnchorPath = path;
                 this._restoredScrollAnchorPath = path;
                 await this.OnScrollAnchorChanged.InvokeAsync(path);
+            }
+        }
+
+        /// <summary>
+        /// Receives the measured file list page size from JavaScript
+        /// </summary>
+        /// <param name="pageSize">Number of file rows visible in the panel</param>
+        /// <returns>Asynchronous callback task</returns>
+        [JSInvokable]
+        public async System.Threading.Tasks.Task OnFileListPageSizeChanged(int pageSize)
+        {
+            if (pageSize > 0)
+            {
+                await this.OnPageSizeChanged.InvokeAsync(pageSize);
             }
         }
 

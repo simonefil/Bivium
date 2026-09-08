@@ -72,6 +72,7 @@ else
             OnSortChanged="this.HandleLeftSortChanged"
             OnCursorChanged="this.HandleLeftCursorChanged"
             OnScrollAnchorChanged="this.HandleLeftScrollAnchorChanged"
+            OnPageSizeChanged="this.HandleLeftPageSizeChanged"
             OnTreeExpansionChanged="this.HandlePanelTreeExpansionChanged"
             OnActivated="() => this.SetActivePanel(0)"
             OnContextMenu="args => this.HandleContextMenuRequest(args, 0)" />
@@ -94,6 +95,7 @@ else
                 OnSortChanged="this.HandleRightSortChanged"
                 OnCursorChanged="this.HandleRightCursorChanged"
                 OnScrollAnchorChanged="this.HandleRightScrollAnchorChanged"
+                OnPageSizeChanged="this.HandleRightPageSizeChanged"
                 OnTreeExpansionChanged="this.HandlePanelTreeExpansionChanged"
                 OnActivated="() => this.SetActivePanel(1)"
                 OnContextMenu="args => this.HandleContextMenuRequest(args, 1)" />
@@ -105,7 +107,9 @@ else
         SelectedPaths="@this.GetActivePanel().SelectedPaths"
         CurrentPath="@this.GetActivePanel().CurrentPath"
         Entries="@this.GetActivePanel().Entries"
-        ProgressText="@this._progressText" />
+        ProgressText="@this.GetStatusCenterText()"
+        CanCancelOperation="@(this._operationCancellation != null)"
+        OnCancelOperation="this.CancelActiveOperation" />
 
     <!-- Command bar -->
     <Bivium.Components.Shared.CommandBar

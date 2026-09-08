@@ -26,6 +26,23 @@
     text-overflow: ellipsis;
 }
 
+.status-bar-cancel {
+    cursor: pointer;
+    color: var(--background0);
+    background-color: var(--foreground0);
+    border: none;
+    font-family: var(--font-family);
+    font-size: var(--font-size);
+    margin-left: 1ch;
+    padding: 0 0.5ch;
+    height: 1lh;
+    line-height: 1lh;
+}
+
+.status-bar-cancel:hover {
+    background-color: var(--foreground1);
+}
+
 .status-bar-right {
     flex: 1;
     min-width: 0;

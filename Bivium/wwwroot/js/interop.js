@@ -638,7 +638,13 @@ export function registerFilePanelScroll(panelId, dotNetReference) {
     const scroller = document.getElementById(panelId + '-filelist');
     if (!scroller) return;
 
-    const tracker = { scroller, dotNetReference, timer: 0, restoring: false };
+    const tracker = { scroller, dotNetReference, timer: 0, restoring: false, pageSize: 0 };
+    tracker.measurePageSize = function () {
+        const pageSize = computeFileListPageSize(scroller);
+        if (pageSize < 1 || pageSize === tracker.pageSize) return;
+        tracker.pageSize = pageSize;
+        dotNetReference.invokeMethodAsync('OnFileListPageSizeChanged', pageSize).catch(function () { });
+    };
     tracker.listener = function () {
         if (tracker.restoring) return;
         window.clearTimeout(tracker.timer);
@@ -651,10 +657,37 @@ export function registerFilePanelScroll(panelId, dotNetReference) {
                     break;
                 }
             }
+            tracker.measurePageSize();
         }, 120);
     };
     scroller.addEventListener('scroll', tracker.listener, { passive: true });
+
+    // The splitter resizes the list without resizing the window, so the viewport is observed directly
+    tracker.resizeObserver = new ResizeObserver(tracker.measurePageSize);
+    tracker.resizeObserver.observe(scroller);
+
+    const body = scroller.querySelector('tbody');
+    if (body) tracker.resizeObserver.observe(body);
+
     filePanelScrollTrackers.set(panelId, tracker);
+}
+
+/**
+ * Counts the whole file rows that fit in a file list viewport.
+ * @param {HTMLElement} scroller - File list scroll container.
+ * @returns {number} Number of rows a page jump should cover.
+ */
+function computeFileListPageSize(scroller) {
+    if (!scroller) return 0;
+
+    const header = scroller.querySelector('thead');
+    const row = scroller.querySelector('tr[data-entry-path]');
+    const headerHeight = header ? header.getBoundingClientRect().height : 0;
+
+    // Before the first row exists the height used by scrollCursorIntoView is the best estimate
+    const rowHeight = row && row.getBoundingClientRect().height >= 1 ? row.getBoundingClientRect().height : 20;
+
+    return Math.max(1, Math.floor((scroller.clientHeight - headerHeight) / rowHeight));
 }
 
 /**
@@ -666,6 +699,7 @@ export function unregisterFilePanelScroll(panelId) {
     if (!tracker) return;
     window.clearTimeout(tracker.timer);
     tracker.scroller.removeEventListener('scroll', tracker.listener);
+    tracker.resizeObserver?.disconnect();
     filePanelScrollTrackers.delete(panelId);
 }
 

@@ -35,6 +35,18 @@ namespace Bivium.Components.Shared
         [Parameter]
         public string ProgressText { get; set; } = "";
 
+        /// <summary>
+        /// Whether a cancellable operation is running
+        /// </summary>
+        [Parameter]
+        public bool CanCancelOperation { get; set; } = false;
+
+        /// <summary>
+        /// Callback invoked when the user cancels the running operation
+        /// </summary>
+        [Parameter]
+        public EventCallback OnCancelOperation { get; set; }
+
         #endregion
 
         #region Class Variables
