@@ -29,9 +29,19 @@ namespace Bivium.Services
         private const int NOTIFICATION_DELAY_MS = 16;
 
         /// <summary>
+        /// Attesa massima di un aggiornamento atomico prima di riprendere la pubblicazione
+        /// </summary>
+        private const int SYNCHRONIZED_OUTPUT_TIMEOUT_MS = 1000;
+
+        /// <summary>
         /// Maximum revisions recoverable without a full handoff
         /// </summary>
         private const int PATCH_REVISION_WINDOW = 256;
+
+        /// <summary>
+        /// Maximum decoded plain-text clipboard request accepted from a terminal application
+        /// </summary>
+        private const int MAX_CLIPBOARD_BYTES = 1024 * 1024;
 
         #endregion
 
@@ -91,6 +101,11 @@ namespace Bivium.Services
         /// Monotonic revision of the entire runtime
         /// </summary>
         private long _runtimeRevision = 0;
+
+        /// <summary>
+        /// Monotonic identifier for transient browser requests
+        /// </summary>
+        private long _nextClientEventId = 0;
 
         #endregion
 
@@ -258,6 +273,7 @@ namespace Bivium.Services
                 lock (session.SyncRoot)
                 {
                     session.HasUnreadOutput = false;
+                    session.AttentionRequested = false;
                     this.AdvanceSessionRevisionLocked(session);
                     changed = true;
                 }
@@ -265,6 +281,34 @@ namespace Bivium.Services
 
             if (changed)
                 this.NotifySubscribers(new TerminalRuntimeEvent { SessionId = sessionId, Revision = this.GetRuntimeRevision(), SessionsChanged = true });
+        }
+
+        /// <summary>
+        /// Clears a pending attention request after the user opens its terminal tab
+        /// </summary>
+        public void AcknowledgeAttention(WorkspaceClientToken token, int sessionId)
+        {
+            TerminalSessionRuntime session = null;
+            bool changed = false;
+            this._workspaceService.ExecuteMutation(token, () =>
+            {
+                session = this.GetSession(sessionId);
+                if (session == null)
+                    return;
+
+                lock (session.SyncRoot)
+                {
+                    if (!session.AttentionRequested)
+                        return;
+                    session.AttentionRequested = false;
+                    this.AdvanceSessionRevisionLocked(session);
+                    changed = true;
+                }
+                this.IncrementRuntimeRevision();
+            });
+
+            if (changed)
+                this.ScheduleNotification(session, false);
         }
 
         /// <summary>
@@ -342,7 +386,11 @@ namespace Bivium.Services
         /// <param name="shift">Shift modifier</param>
         /// <param name="control">Control modifier</param>
         /// <param name="alt">Alt modifier</param>
-        public void SendKey(WorkspaceClientToken token, int sessionId, string keyName, string character, bool shift, bool control, bool alt)
+        /// <param name="meta">Modificatore Meta/Super</param>
+        /// <param name="code">Identità fisica DOM del tasto</param>
+        /// <param name="repeat">Ripetizione di una pressione mantenuta</param>
+        /// <param name="release">Rilascio del tasto</param>
+        public void SendKey(WorkspaceClientToken token, int sessionId, string keyName, string character, bool shift, bool control, bool alt, bool meta = false, string code = "", bool repeat = false, bool release = false)
         {
             KeyModifiers modifiers = this.CreateKeyModifiers(shift, control, alt);
             bool restart = false;
@@ -354,12 +402,12 @@ namespace Bivium.Services
 
                 lock (session.SyncRoot)
                 {
-                    restart = !session.Running && session.Exited && !session.RestartPending;
+                    restart = !release && !session.Running && session.Exited && !session.RestartPending;
                     if (restart)
                         session.RestartPending = true;
                     else if (session.Running)
                     {
-                        string sequence = this.GenerateKeySequence(session, keyName, character, modifiers);
+                        string sequence = GenerateKeySequence(session.Terminal, keyName, character, modifiers, meta, code, repeat, release);
                         if (!string.IsNullOrEmpty(sequence))
                             session.Shell.SendInput(sequence);
                     }
@@ -371,7 +419,7 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Sends pasted text while applying bracketed-paste mode server-side
+        /// Invia il paste tramite la sanitizzazione e i protocolli negoziati di XTerm.NET
         /// </summary>
         /// <param name="token">Client lease</param>
         /// <param name="sessionId">Session identifier</param>
@@ -394,10 +442,7 @@ namespace Bivium.Services
                     if (restart)
                         session.RestartPending = true;
                     else if (session.Running)
-                    {
-                        string sequence = session.Terminal.BracketedPasteMode ? "\x1b[200~" + text + "\x1b[201~" : text;
-                        session.Shell.SendInput(sequence);
-                    }
+                        session.Terminal.Paste(text);
                 }
             });
 
@@ -503,12 +548,32 @@ namespace Bivium.Services
 
                 lock (session.SyncRoot)
                 {
+                    if (session.SynchronizedSnapshot != null)
+                    {
+                        session.SynchronizedSnapshot = null;
+                        changed = true;
+                    }
                     if (session.Cols == safeCols && session.Rows == safeRows)
                         return;
 
+                    foreach (KeyValuePair<BufferLine, TerminalLineSnapshot> checkpoint in session.DeactivatedNormalLines)
+                        if (AreLineSnapshotsEquivalent(SerializeLine(checkpoint.Key, -1), checkpoint.Value))
+                            TerminalHistoryRowState.Get(checkpoint.Key).Commit();
+                    TerminalHistoryReflow normalReflow = new TerminalHistoryReflow(session.NormalBuffer, safeCols, safeRows, true, line => SerializeLine(line, -1));
+                    TerminalHistoryReflow alternateReflow = session.AlternateBuffer == null ? null : new TerminalHistoryReflow(session.AlternateBuffer, safeCols, safeRows, false, line => SerializeLine(line, -1));
                     session.Cols = safeCols;
                     session.Rows = safeRows;
                     session.Terminal.Resize(safeCols, safeRows);
+                    normalReflow.Complete(session.History);
+                    alternateReflow?.Complete(session.History);
+                    session.DeactivatedNormalLines.Clear();
+                    for (int row = session.NormalBuffer.BaseY; row < Math.Min(session.NormalBuffer.Lines.Length, session.NormalBuffer.BaseY + session.Rows); row++)
+                    {
+                        BufferLine line = session.NormalBuffer.Lines[row];
+                        TerminalLineSnapshot snapshot = SerializeLine(line, -1);
+                        if (TerminalHistoryRowState.Get(line).Extract(snapshot).Count == 0)
+                            session.DeactivatedNormalLines[line] = snapshot;
+                    }
                     if (session.Running)
                         session.Shell.Resize(safeCols, safeRows);
                     this.AdvanceSessionRevisionLocked(session);
@@ -519,7 +584,10 @@ namespace Bivium.Services
             });
 
             if (changed)
+            {
+                this.EnforceGlobalHistoryBudget();
                 this.ScheduleNotification(session, false);
+            }
         }
 
         /// <summary>
@@ -569,8 +637,7 @@ namespace Bivium.Services
                 previousShell = session.Shell;
                 session.Shell = new ShellService();
                 session.Terminal.Reset();
-                session.HyperlinksByLine.Clear();
-                session.ClearActiveHyperlink();
+                session.DeactivatedNormalLines.Clear();
                 session.Exited = false;
                 session.ExitedAtUtc = null;
                 this.AdvanceSessionRevisionLocked(session);
@@ -677,6 +744,12 @@ namespace Bivium.Services
                 cancellationToken.ThrowIfCancellationRequested();
                 if (session.Disposed)
                     return null;
+                // Un handoff deve recuperare subito la geometria e lo storico correnti
+                if (session.SynchronizedSnapshot != null)
+                {
+                    session.SynchronizedSnapshot = null;
+                    this.ScheduleNotification(session, false);
+                }
                 TerminalSessionSnapshot snapshot = this.CreateSessionSnapshot(session);
                 long tailStart = Math.Max(snapshot.HistoryStart, snapshot.HistoryEnd - snapshot.HistoryPageRows);
                 TerminalAttachSnapshot result = new TerminalAttachSnapshot();
@@ -707,10 +780,15 @@ namespace Bivium.Services
                     return new TerminalSessionPatch { FromRevision = fromRevision, ToRevision = fromRevision, RequiresResync = true };
                 TerminalSessionPatch result = new TerminalSessionPatch();
                 result.FromRevision = fromRevision;
-                result.ToRevision = session.Revision;
-                result.RequiresResync = fromRevision > session.Revision || fromRevision < session.MinimumPatchRevision;
-                if (!result.RequiresResync && fromRevision < session.Revision)
-                    result.Session = this.CreateSessionSnapshot(session);
+                long visibleRevision = this.IsSynchronizedOutputHeld(session) ? session.SynchronizedSnapshot.Revision : session.Revision;
+                result.ToRevision = visibleRevision;
+                long minimumRevision = session.SynchronizedSnapshot != null ? Math.Max(0, visibleRevision - PATCH_REVISION_WINDOW) : session.MinimumPatchRevision;
+                result.RequiresResync = fromRevision > visibleRevision || fromRevision < minimumRevision;
+                if (!result.RequiresResync && fromRevision < visibleRevision)
+                {
+                    result.Session = this.CreateSessionSnapshot(session, fromRevision < session.PaletteRevision);
+                    result.ToRevision = result.Session.Revision;
+                }
                 return result;
             }
         }
@@ -735,7 +813,62 @@ namespace Bivium.Services
                 cancellationToken.ThrowIfCancellationRequested();
                 if (session.Disposed)
                     return new TerminalHistoryPage();
+                if (this.IsSynchronizedOutputHeld(session))
+                {
+                    TerminalSessionSnapshot visible = session.SynchronizedSnapshot;
+                    long safeStart = Math.Clamp(start, visible.HistoryStart, visible.HistoryEnd);
+                    int safeCount = (int)Math.Min(Math.Clamp(count, 1, 1000), visible.HistoryEnd - safeStart);
+                    TerminalHistoryPage page = session.History.GetPage(safeStart, Math.Max(1, safeCount), visible.Revision, cancellationToken);
+                    if (safeCount == 0)
+                        page.Lines = Array.Empty<TerminalLineSnapshot>();
+                    page.End = visible.HistoryEnd;
+                    page.Truncated = visible.HistoryTruncated;
+                    return page;
+                }
                 return session.History.GetPage(start, count, session.Revision, cancellationToken);
+            }
+        }
+
+        /// <summary>
+        /// Finds the adjacent OSC 133 prompt in the visible normal-buffer timeline
+        /// </summary>
+        /// <param name="sessionId">Session identifier</param>
+        /// <param name="fromRow">Current logical history/screen row</param>
+        /// <param name="previous">True to search backward</param>
+        /// <returns>Logical prompt row, or -1 when unavailable</returns>
+        public long FindPrompt(int sessionId, long fromRow, bool previous)
+        {
+            TerminalSessionRuntime session = this.GetSession(sessionId);
+            if (session == null)
+                return -1;
+
+            lock (session.SyncRoot)
+            {
+                if (session.Disposed)
+                    return -1;
+                TerminalSessionSnapshot snapshot = this.CreateSessionSnapshot(session);
+                if (snapshot.Screen.AlternateBuffer || !snapshot.Screen.ShellIntegrationAvailable)
+                    return -1;
+
+                IReadOnlyList<TerminalLineSnapshot> lines = snapshot.Screen.Lines;
+                long screenStart = snapshot.HistoryEnd;
+                if (previous)
+                {
+                    int row = (int)Math.Clamp(fromRow - screenStart - 1L, -1L, lines.Count - 1L);
+                    for (int i = row; i >= 0; i--)
+                        if (lines[i].PromptColumn >= 0)
+                            return screenStart + i;
+                    long before = Math.Min(fromRow, snapshot.HistoryEnd);
+                    return session.History.TryFindPreviousPrompt(before, out long index) ? index : -1;
+                }
+
+                if (fromRow < snapshot.HistoryEnd - 1 && session.History.TryFindNextPrompt(fromRow, out long historyIndex) && historyIndex < snapshot.HistoryEnd)
+                    return historyIndex;
+                int firstScreenRow = (int)Math.Clamp(fromRow - screenStart + 1L, 0L, lines.Count);
+                for (int i = firstScreenRow; i < lines.Count; i++)
+                    if (lines[i].PromptColumn >= 0)
+                        return screenStart + i;
+                return -1;
             }
         }
 
@@ -853,11 +986,13 @@ namespace Bivium.Services
                 session.Exited = false;
                 session.RestartPending = false;
                 session.ExitedAtUtc = null;
+                session.ProgressState = TerminalProgressState.None;
+                session.ProgressValue = 0;
             }
 
             try
             {
-                session.Shell.Start(session.WorkingDirectory, session.Cols, session.Rows, data => this.HandleShellOutput(session.Id, generation, data), () => this.HandleShellExit(session.Id, generation));
+                session.Shell.Start(session.WorkingDirectory, session.Cols, session.Rows, data => this.HandleShellOutputBytes(session.Id, generation, data), () => this.HandleShellExit(session.Id, generation));
             }
             catch (Exception ex)
             {
@@ -877,8 +1012,21 @@ namespace Bivium.Services
         /// <param name="data">PTY output</param>
         private void HandleShellOutput(int sessionId, int generation, string data)
         {
+            if (string.IsNullOrEmpty(data))
+                return;
+            this.HandleShellOutputBytes(sessionId, generation, Encoding.UTF8.GetBytes(data));
+        }
+
+        /// <summary>
+        /// Feeds raw PTY bytes to the emulator without an intermediate UTF-16 string
+        /// </summary>
+        /// <param name="sessionId">Session identifier</param>
+        /// <param name="generation">Shell generation</param>
+        /// <param name="data">PTY output bytes</param>
+        private void HandleShellOutputBytes(int sessionId, int generation, ReadOnlyMemory<byte> data)
+        {
             TerminalSessionRuntime session = this.GetSession(sessionId);
-            if (session == null || string.IsNullOrEmpty(data))
+            if (session == null || data.IsEmpty)
                 return;
 
             int activeSessionId;
@@ -893,9 +1041,14 @@ namespace Bivium.Services
                 if (generation != session.ShellGeneration || session.Disposed)
                     return;
 
-                session.Terminal.Write(data);
+                session.Terminal.Write(data.Span);
                 session.LastOutputUtc = DateTime.UtcNow;
                 this.AdvanceSessionRevisionLocked(session);
+                if (session.PaletteChangePending)
+                {
+                    session.PaletteRevision = session.Revision;
+                    session.PaletteChangePending = false;
+                }
                 session.HasUnreadOutput = sessionId != activeSessionId;
             }
 
@@ -921,9 +1074,12 @@ namespace Bivium.Services
                 if (generation != session.ShellGeneration || session.Disposed)
                     return;
 
+                session.SynchronizedSnapshot = null;
                 session.Running = false;
                 session.Exited = true;
                 session.ExitedAtUtc = DateTime.UtcNow;
+                session.ProgressState = TerminalProgressState.None;
+                session.ProgressValue = 0;
                 session.Terminal.Write("\r\n[Process exited. Press any key to restart]\r\n");
                 this.AdvanceSessionRevisionLocked(session);
             }
@@ -937,8 +1093,11 @@ namespace Bivium.Services
         /// </summary>
         /// <param name="session">Source session</param>
         /// <returns>Bounded snapshot</returns>
-        private TerminalSessionSnapshot CreateSessionSnapshot(TerminalSessionRuntime session)
+        private TerminalSessionSnapshot CreateSessionSnapshot(TerminalSessionRuntime session, bool includeColors = true)
         {
+            if (this.IsSynchronizedOutputHeld(session))
+                return session.SynchronizedSnapshot;
+
             TerminalSessionSnapshot result = new TerminalSessionSnapshot();
             result.Id = session.Id;
             result.Label = session.Label;
@@ -946,6 +1105,9 @@ namespace Bivium.Services
             result.Running = session.Running;
             result.Exited = session.Exited;
             result.HasUnreadOutput = session.HasUnreadOutput;
+            result.ProgressState = session.ProgressState;
+            result.ProgressValue = session.ProgressValue;
+            result.AttentionRequested = session.AttentionRequested;
             result.Cols = session.Cols;
             result.Rows = session.Rows;
             result.Revision = session.Revision;
@@ -954,7 +1116,7 @@ namespace Bivium.Services
             result.HistoryTruncated = session.History.Truncated;
             result.HistoryBytes = session.History.RetainedBytes;
             result.HistoryPageRows = session.HistoryPageRows;
-            result.Screen = this.CreateScreenSnapshot(session);
+            result.Screen = this.CreateScreenSnapshot(session, includeColors);
             return result;
         }
 
@@ -963,21 +1125,35 @@ namespace Bivium.Services
         /// </summary>
         /// <param name="session">Source session</param>
         /// <returns>Bounded screen snapshot</returns>
-        private TerminalScreenSnapshot CreateScreenSnapshot(TerminalSessionRuntime session)
+        private TerminalScreenSnapshot CreateScreenSnapshot(TerminalSessionRuntime session, bool includeColors = true)
         {
             TerminalScreenSnapshot result = new TerminalScreenSnapshot();
+            result.ColorsIncluded = includeColors;
+            if (includeColors)
+            {
+                ColorSnapshot colors = session.Terminal.Colors.Take();
+                int[] palette = new int[ColorPalette.Size];
+                for (int i = 0; i < palette.Length; i++)
+                    palette[i] = colors[i];
+                result.Palette = Array.AsReadOnly(palette);
+                result.DefaultForeground = colors.Foreground;
+                result.DefaultBackground = colors.Background;
+                result.CursorColor = colors.Cursor;
+            }
             result.AlternateBuffer = session.Terminal.IsAlternateBufferActive;
             result.CursorX = session.Terminal.Buffer.X;
             result.CursorY = session.Terminal.Buffer.Y;
             result.CursorVisible = session.Terminal.CursorVisible;
             result.MouseTracking = session.Terminal.MouseTrackingMode != MouseTrackingMode.None;
+            result.KittyKeyboardActive = session.Terminal.KittyKeyboardActive;
+            result.ShellIntegrationAvailable = session.Terminal.ShellIntegrationState != null;
 
             List<TerminalLineSnapshot> lines = new List<TerminalLineSnapshot>();
             int firstLine = session.Terminal.Buffer.BaseY;
             for (int i = 0; i < session.Rows; i++)
             {
                 BufferLine line = firstLine + i < session.Terminal.Buffer.Lines.Length ? session.Terminal.Buffer.Lines[firstLine + i] : null;
-                lines.Add(this.SerializeLine(session, line, -1));
+                lines.Add(SerializeLine(line, -1));
             }
 
             result.Lines = lines.AsReadOnly();
@@ -985,33 +1161,24 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Creates an export screen without rows already archived before entering the alternate buffer
+        /// Esporta soltanto i frammenti non ancora presenti nello storico
         /// </summary>
         /// <param name="session">Source session</param>
         /// <returns>Compact current rows not already present in the archive</returns>
         private TerminalScreenSnapshot CreateHistoryExportScreenSnapshot(TerminalSessionRuntime session)
         {
             TerminalScreenSnapshot result = this.CreateScreenSnapshot(session);
-            if (result.AlternateBuffer || session.DeactivatedNormalLines.Count == 0)
-                return result;
-
             List<TerminalLineSnapshot> lines = new List<TerminalLineSnapshot>();
             int firstLine = session.Terminal.Buffer.BaseY;
-            bool skippedPreviousRow = false;
             for (int i = 0; i < result.Lines.Count; i++)
             {
                 BufferLine line = firstLine + i < session.Terminal.Buffer.Lines.Length ? session.Terminal.Buffer.Lines[firstLine + i] : null;
-                TerminalLineSnapshot snapshot = result.Lines[i];
-                if (line != null && session.DeactivatedNormalLines.TryGetValue(line, out TerminalLineSnapshot archivedLine) && AreLineSnapshotsEquivalent(snapshot, archivedLine))
-                {
-                    skippedPreviousRow = true;
+                if (line == null)
                     continue;
-                }
-
-                if (skippedPreviousRow)
-                    snapshot.Wrapped = false;
-                lines.Add(snapshot);
-                skippedPreviousRow = false;
+                TerminalHistoryRowState state = TerminalHistoryRowState.Get(line);
+                if (!result.AlternateBuffer && session.DeactivatedNormalLines.TryGetValue(line, out TerminalLineSnapshot checkpoint) && AreLineSnapshotsEquivalent(result.Lines[i], checkpoint))
+                    state.Commit();
+                lines.AddRange(state.Extract(result.Lines[i]));
             }
 
             result.Lines = lines.AsReadOnly();
@@ -1022,31 +1189,44 @@ namespace Bivium.Services
         /// <summary>
         /// Serializes an XTerm.NET row while preserving cells, attributes and wrapping
         /// </summary>
-        /// <param name="session">Session owning the row</param>
         /// <param name="line">Headless row</param>
         /// <param name="index">Logical offset</param>
         /// <returns>Serialized row</returns>
-        private TerminalLineSnapshot SerializeLine(TerminalSessionRuntime session, BufferLine line, long index)
+        private static TerminalLineSnapshot SerializeLine(BufferLine line, long index)
         {
             TerminalLineSnapshot result = new TerminalLineSnapshot();
             result.Index = index;
+            result.PromptColumn = -1;
             if (line == null)
                 return result;
+
+            for (int i = 0; i < line.Marks.Count; i++)
+            {
+                if (line.Marks[i].Kind == ShellIntegrationMark.PromptStart)
+                {
+                    result.PromptColumn = line.Marks[i].Column;
+                    break;
+                }
+            }
 
             // Serialize only significant cells while retaining attributes required by the remote renderer
             int length = line.GetTrimmedLength();
             List<TerminalCellSnapshot> cells = new List<TerminalCellSnapshot>();
             StringBuilder text = new StringBuilder();
             int serializedBytes = 32;
+            IReadOnlyList<LineHyperlink> links = line.Links;
+            int linkIndex = 0;
             for (int i = 0; i < length; i++)
             {
                 BufferCell cell = line[i];
                 TerminalCellSnapshot cellSnapshot = SerializeCell(cell);
-                cellSnapshot.Hyperlink = this.GetCellHyperlink(session, line, i);
+                while (linkIndex < links.Count && links[linkIndex].EndColumn <= i)
+                    linkIndex++;
+                cellSnapshot.Hyperlink = linkIndex < links.Count && links[linkIndex].Column <= i ? links[linkIndex].Url : "";
                 cells.Add(cellSnapshot);
                 if (cell.Width > 0)
                     text.Append(cellSnapshot.Content);
-                serializedBytes += 24 + Encoding.UTF8.GetByteCount(cellSnapshot.Content) + Encoding.UTF8.GetByteCount(cellSnapshot.Hyperlink);
+                serializedBytes += 40 + Encoding.UTF8.GetByteCount(cellSnapshot.Content) + Encoding.UTF8.GetByteCount(cellSnapshot.Hyperlink);
             }
 
             result.Wrapped = line.IsWrapped;
@@ -1061,7 +1241,7 @@ namespace Bivium.Services
             result.Text = text.ToString();
 
             // The budget includes UTF-8 payload and stable row and cell overhead
-            result.SerializedBytes = serializedBytes + Encoding.UTF8.GetByteCount(result.Text);
+            result.SerializedBytes = serializedBytes + 4 + Encoding.UTF8.GetByteCount(result.Text);
             return result;
         }
 
@@ -1079,6 +1259,13 @@ namespace Bivium.Services
             result.ForegroundMode = (TerminalColorMode)cell.Attributes.GetFgColorMode();
             result.Background = cell.Attributes.GetBgColor();
             result.BackgroundMode = (TerminalColorMode)cell.Attributes.GetBgColorMode();
+            result.UnderlineStyle = (TerminalUnderlineStyle)cell.Attributes.GetUnderlineStyle();
+            if (cell.Attributes.TryGetUnderlineColor(out int underlineColor, out int underlineColorMode))
+            {
+                result.HasUnderlineColor = true;
+                result.UnderlineColor = underlineColor;
+                result.UnderlineColorMode = (TerminalColorMode)underlineColorMode;
+            }
             TerminalCellAttributes attributes = TerminalCellAttributes.None;
             if (cell.Attributes.IsBold())
                 attributes |= TerminalCellAttributes.Bold;
@@ -1110,47 +1297,120 @@ namespace Bivium.Services
         private void CaptureExitedLine(TerminalSessionRuntime session, TerminalEvents.LineExitedViewportEventArgs args)
         {
             BufferLine line = args.Line;
-            TerminalLineSnapshot snapshot = this.SerializeLine(session, line, session.History.EndIndex);
+            TerminalLineSnapshot snapshot = SerializeLine(line, session.History.EndIndex);
+            TerminalHistoryRowState state = TerminalHistoryRowState.Get(line);
+            if (args.Buffer == BufferType.Normal && session.DeactivatedNormalLines.TryGetValue(line, out TerminalLineSnapshot archivedLine) && AreLineSnapshotsEquivalent(snapshot, archivedLine))
+                state.Commit();
+
+            foreach (TerminalLineSnapshot fragment in state.Extract(snapshot))
+                session.History.Append(fragment);
+            state.Commit();
+
             if (args.Buffer == BufferType.Normal && args.Reason == LineExitReason.BufferDeactivated)
-            {
-                if (session.PendingDeactivatedNormalLines == null)
-                    session.PendingDeactivatedNormalLines = new Dictionary<BufferLine, TerminalLineSnapshot>();
-
-                bool unchanged = session.DeactivatedNormalLines.TryGetValue(line, out TerminalLineSnapshot archivedLine) && AreLineSnapshotsEquivalent(snapshot, archivedLine);
-                if (!unchanged)
-                    session.History.Append(snapshot);
-                session.PendingDeactivatedNormalLines[line] = snapshot;
-                return;
-            }
-
-            if (args.Buffer == BufferType.Normal && args.Reason == LineExitReason.Scrolled)
-            {
-                bool unchanged = session.DeactivatedNormalLines.TryGetValue(line, out TerminalLineSnapshot archivedLine) && AreLineSnapshotsEquivalent(snapshot, archivedLine);
-                session.DeactivatedNormalLines.Remove(line);
-                if (!unchanged)
-                    session.History.Append(snapshot);
-            }
-            else
-            {
-                session.History.Append(snapshot);
-            }
-
+                session.DeactivatedNormalLines[line] = snapshot;
             if (args.Reason == LineExitReason.Scrolled)
-                session.HyperlinksByLine.Remove(line);
+            {
+                session.DeactivatedNormalLines.Remove(line);
+            }
         }
 
         /// <summary>
-        /// Finalizes the normal-buffer checkpoint after XTerm.NET activates another buffer
+        /// Conserva i riferimenti pubblici di entrambi i buffer, ridimensionati insieme da XTerm
         /// </summary>
-        /// <param name="session">Affected session</param>
-        /// <param name="args">Activated buffer</param>
         private void HandleBufferChanged(TerminalSessionRuntime session, TerminalEvents.BufferChangedEventArgs args)
         {
-            if (args.Buffer != BufferType.Alternate)
+            if (args.Buffer == BufferType.Alternate)
+                session.AlternateBuffer = session.Terminal.Buffer;
+        }
+
+        /// <summary>
+        /// Marks the revision that must carry a new coherent palette to existing renderers
+        /// </summary>
+        /// <param name="session">Affected session</param>
+        private void HandleColorChanged(TerminalSessionRuntime session)
+        {
+            session.PaletteChangePending = true;
+        }
+
+        /// <summary>
+        /// Publishes a plain-text clipboard request for explicit browser confirmation
+        /// </summary>
+        private void HandleClipboardWriteRequested(TerminalSessionRuntime session, TerminalEvents.ClipboardWriteEventArgs args)
+        {
+            TerminalEvents.ClipboardFormat? plainText = null;
+            for (int i = 0; i < args.Formats.Count; i++)
+            {
+                if (string.Equals(args.Formats[i].MimeType, "text/plain", StringComparison.OrdinalIgnoreCase))
+                {
+                    plainText = args.Formats[i];
+                    break;
+                }
+            }
+            if (plainText == null || plainText.Value.Data.Length > MAX_CLIPBOARD_BYTES)
                 return;
 
-            session.DeactivatedNormalLines = session.PendingDeactivatedNormalLines ?? new Dictionary<BufferLine, TerminalLineSnapshot>();
-            session.PendingDeactivatedNormalLines = null;
+            string text;
+            try
+            {
+                text = new UTF8Encoding(false, true).GetString(plainText.Value.Data);
+            }
+            catch (DecoderFallbackException)
+            {
+                return;
+            }
+
+            this.PublishClientEvent(session, TerminalClientEventType.ClipboardWrite, "Copy from " + session.Label, text);
+        }
+
+        /// <summary>
+        /// Publishes one bounded in-page notification
+        /// </summary>
+        private void HandleNotificationReceived(TerminalSessionRuntime session, TerminalEvents.NotificationEventArgs args)
+        {
+            string title = string.IsNullOrWhiteSpace(args.Title) ? session.Label : args.Title;
+            string body = string.IsNullOrWhiteSpace(args.Body) ? args.Text : args.Body;
+            if (string.IsNullOrWhiteSpace(body) && string.IsNullOrWhiteSpace(title))
+                return;
+            this.PublishClientEvent(session, TerminalClientEventType.Notification, title, body);
+        }
+
+        /// <summary>
+        /// Stores progress in the session snapshot
+        /// </summary>
+        private void HandleProgressChanged(TerminalSessionRuntime session, TerminalEvents.ProgressEventArgs args)
+        {
+            session.ProgressState = (TerminalProgressState)(int)args.State;
+            session.ProgressValue = args.Value;
+        }
+
+        /// <summary>
+        /// Marks the originating tab until the user opens it
+        /// </summary>
+        private void HandleAttentionRequested(TerminalSessionRuntime session)
+        {
+            session.AttentionRequested = true;
+            this.PublishClientEvent(session, TerminalClientEventType.Attention, "", "");
+        }
+
+        /// <summary>
+        /// Sends a transient UI request without logging terminal content
+        /// </summary>
+        private void PublishClientEvent(TerminalSessionRuntime session, TerminalClientEventType type, string title, string text)
+        {
+            TerminalClientEvent clientEvent = new TerminalClientEvent
+            {
+                Id = Interlocked.Increment(ref this._nextClientEventId),
+                SessionId = session.Id,
+                Type = type,
+                Title = title ?? "",
+                Text = text ?? ""
+            };
+            this.NotifySubscribers(new TerminalRuntimeEvent
+            {
+                SessionId = session.Id,
+                Revision = session.Revision,
+                ClientEvents = new[] { clientEvent }
+            });
         }
 
         /// <summary>
@@ -1161,127 +1421,18 @@ namespace Bivium.Services
         /// <returns>True when text, wrapping and cells are equal</returns>
         private static bool AreLineSnapshotsEquivalent(TerminalLineSnapshot left, TerminalLineSnapshot right)
         {
-            if (left == null || right == null || left.Text != right.Text || left.Wrapped != right.Wrapped || left.LineAttribute != right.LineAttribute || left.Cells.Count != right.Cells.Count)
+            if (left == null || right == null || left.Text != right.Text || left.Wrapped != right.Wrapped || left.LineAttribute != right.LineAttribute || left.PromptColumn != right.PromptColumn || left.Cells.Count != right.Cells.Count)
                 return false;
 
             for (int i = 0; i < left.Cells.Count; i++)
             {
                 TerminalCellSnapshot leftCell = left.Cells[i];
                 TerminalCellSnapshot rightCell = right.Cells[i];
-                if (leftCell.Content != rightCell.Content || leftCell.Width != rightCell.Width || leftCell.Foreground != rightCell.Foreground || leftCell.ForegroundMode != rightCell.ForegroundMode || leftCell.Background != rightCell.Background || leftCell.BackgroundMode != rightCell.BackgroundMode || leftCell.Attributes != rightCell.Attributes || leftCell.Hyperlink != rightCell.Hyperlink)
+                if (leftCell.Content != rightCell.Content || leftCell.Width != rightCell.Width || leftCell.Foreground != rightCell.Foreground || leftCell.ForegroundMode != rightCell.ForegroundMode || leftCell.Background != rightCell.Background || leftCell.BackgroundMode != rightCell.BackgroundMode || leftCell.Attributes != rightCell.Attributes || leftCell.UnderlineStyle != rightCell.UnderlineStyle || leftCell.HasUnderlineColor != rightCell.HasUnderlineColor || leftCell.UnderlineColor != rightCell.UnderlineColor || leftCell.UnderlineColorMode != rightCell.UnderlineColorMode || leftCell.Hyperlink != rightCell.Hyperlink)
                     return false;
             }
 
             return true;
-        }
-
-        /// <summary>
-        /// Associates OSC 8 spans with public buffer rows
-        /// </summary>
-        /// <param name="session">Affected session</param>
-        /// <param name="args">Hyperlink change emitted by XTerm.NET</param>
-        private void HandleHyperlinkChanged(TerminalSessionRuntime session, TerminalEvents.HyperlinkEventArgs args)
-        {
-            BufferLine currentLine = this.GetCurrentBufferLine(session);
-
-            // The opening event retains the anchor; closing materializes ranges on traversed rows
-            if (!args.IsCleared)
-            {
-                session.ActiveHyperlinkUrl = args.Url ?? "";
-                session.ActiveHyperlinkStartLine = currentLine;
-                session.ActiveHyperlinkStartX = session.Terminal.Buffer.X;
-                return;
-            }
-
-            if (string.IsNullOrEmpty(session.ActiveHyperlinkUrl) || session.ActiveHyperlinkStartLine == null || currentLine == null)
-            {
-                session.ClearActiveHyperlink();
-                return;
-            }
-
-            int startLineIndex = this.FindBufferLineIndex(session, session.ActiveHyperlinkStartLine);
-            int endLineIndex = this.FindBufferLineIndex(session, currentLine);
-            if (startLineIndex >= 0 && endLineIndex >= startLineIndex)
-            {
-                for (int lineIndex = startLineIndex; lineIndex <= endLineIndex; lineIndex++)
-                {
-                    BufferLine line = session.Terminal.Buffer.Lines[lineIndex];
-                    int startX = lineIndex == startLineIndex ? session.ActiveHyperlinkStartX : 0;
-                    int endX = lineIndex == endLineIndex ? session.Terminal.Buffer.X : line.Length;
-                    if (endX <= startX)
-                        continue;
-
-                    List<HyperlinkRange> ranges;
-                    if (!session.HyperlinksByLine.TryGetValue(line, out ranges))
-                    {
-                        ranges = new List<HyperlinkRange>();
-                        session.HyperlinksByLine.Add(line, ranges);
-                    }
-                    ranges.Add(new HyperlinkRange(startX, endX, session.ActiveHyperlinkUrl));
-                }
-            }
-
-            session.ClearActiveHyperlink();
-        }
-
-        /// <summary>
-        /// Returns the closed or still-active link associated with a cell
-        /// </summary>
-        /// <param name="session">Session owning the buffer</param>
-        /// <param name="line">Cell row</param>
-        /// <param name="cellIndex">Cell index</param>
-        /// <returns>Associated URI or an empty string</returns>
-        private string GetCellHyperlink(TerminalSessionRuntime session, BufferLine line, int cellIndex)
-        {
-            List<HyperlinkRange> ranges;
-            if (session.HyperlinksByLine.TryGetValue(line, out ranges))
-            {
-                for (int i = ranges.Count - 1; i >= 0; i--)
-                {
-                    if (cellIndex >= ranges[i].StartX && cellIndex < ranges[i].EndX)
-                        return ranges[i].Url;
-                }
-            }
-
-            if (string.IsNullOrEmpty(session.ActiveHyperlinkUrl) || session.ActiveHyperlinkStartLine == null)
-                return "";
-            int startLineIndex = this.FindBufferLineIndex(session, session.ActiveHyperlinkStartLine);
-            int currentLineIndex = this.FindBufferLineIndex(session, this.GetCurrentBufferLine(session));
-            int lineIndex = this.FindBufferLineIndex(session, line);
-            if (startLineIndex < 0 || currentLineIndex < startLineIndex || lineIndex < startLineIndex || lineIndex > currentLineIndex)
-                return "";
-            int startX = lineIndex == startLineIndex ? session.ActiveHyperlinkStartX : 0;
-            int endX = lineIndex == currentLineIndex ? session.Terminal.Buffer.X : line.Length;
-            return cellIndex >= startX && cellIndex < endX ? session.ActiveHyperlinkUrl : "";
-        }
-
-        /// <summary>
-        /// Returns the row containing the cursor in the current buffer
-        /// </summary>
-        /// <param name="session">Session owning the buffer</param>
-        /// <returns>Current row or null</returns>
-        private BufferLine GetCurrentBufferLine(TerminalSessionRuntime session)
-        {
-            int index = session.Terminal.Buffer.BaseY + session.Terminal.Buffer.Y;
-            return index >= 0 && index < session.Terminal.Buffer.Lines.Length ? session.Terminal.Buffer.Lines[index] : null;
-        }
-
-        /// <summary>
-        /// Finds a row by identity through the public buffer API
-        /// </summary>
-        /// <param name="session">Session owning the buffer</param>
-        /// <param name="line">Row to find</param>
-        /// <returns>Row index or -1</returns>
-        private int FindBufferLineIndex(TerminalSessionRuntime session, BufferLine line)
-        {
-            if (line == null)
-                return -1;
-            for (int i = 0; i < session.Terminal.Buffer.Lines.Length; i++)
-            {
-                if (ReferenceEquals(session.Terminal.Buffer.Lines[i], line))
-                    return i;
-            }
-            return -1;
         }
 
         /// <summary>
@@ -1343,6 +1494,39 @@ namespace Bivium.Services
         }
 
         /// <summary>
+        /// Congela uno stato coerente prima delle scritture del blocco senza fermare l'emulatore
+        /// </summary>
+        /// <param name="session">Sessione sotto il proprio lock</param>
+        /// <param name="active">Stato negoziato del blocco</param>
+        private void HandleSynchronizedOutputChanged(TerminalSessionRuntime session, bool active)
+        {
+            session.SynchronizedSnapshot = null;
+            if (active)
+            {
+                session.SynchronizedSnapshot = this.CreateSessionSnapshot(session);
+                session.SynchronizedStartedAt = Environment.TickCount64;
+            }
+        }
+
+        /// <summary>
+        /// Limita l'attesa usando un orologio monotono, anche quando non arriva altro output
+        /// </summary>
+        /// <param name="session">Sessione sotto il proprio lock</param>
+        /// <returns>True mentre la pubblicazione è sospesa</returns>
+        private bool IsSynchronizedOutputHeld(TerminalSessionRuntime session)
+        {
+            if (session.SynchronizedSnapshot == null)
+                return false;
+            if (session.History.StartIndex == session.SynchronizedSnapshot.HistoryStart && Environment.TickCount64 - session.SynchronizedStartedAt < SYNCHRONIZED_OUTPUT_TIMEOUT_MS)
+                return true;
+
+            // Timeout e trimming non devono mantenere un frame con storico non più disponibile
+            // Il blocco interrotto resta ignorato fino alla successiva negoziazione off/on
+            session.SynchronizedSnapshot = null;
+            return false;
+        }
+
+        /// <summary>
         /// Queues at most one bounded notification per session
         /// </summary>
         /// <param name="session">Affected session</param>
@@ -1369,6 +1553,8 @@ namespace Bivium.Services
                     {
                         if (session.Disposed)
                             return;
+                        if (this.IsSynchronizedOutputHeld(session))
+                            continue;
                         changed = session.SessionsChangedPending;
                         session.SessionsChangedPending = false;
                         deliveredSessionRevision = session.Revision;
@@ -1417,13 +1603,34 @@ namespace Bivium.Services
         /// <summary>
         /// Generates a sequence from DOM input using authoritative XTerm.NET state
         /// </summary>
-        /// <param name="session">Target session</param>
+        /// <param name="terminal">Emulatore con lo stato negoziato autorevole</param>
         /// <param name="keyName">DOM key name</param>
         /// <param name="character">Printable character</param>
         /// <param name="modifiers">XTerm.NET modifiers</param>
         /// <returns>Sequence to send to the PTY</returns>
-        private string GenerateKeySequence(TerminalSessionRuntime session, string keyName, string character, KeyModifiers modifiers)
+        /// <param name="meta">Modificatore Meta/Super</param>
+        /// <param name="code">Identità fisica DOM</param>
+        /// <param name="repeat">Ripetizione del tasto</param>
+        /// <param name="release">Rilascio del tasto</param>
+        internal static string GenerateKeySequence(Terminal terminal, string keyName, string character, KeyModifiers modifiers, bool meta = false, string code = "", bool repeat = false, bool release = false)
         {
+            if (terminal.KittyKeyboardActive)
+            {
+                KeyEvent keyEvent = new KeyEvent
+                {
+                    Key = keyName ?? "",
+                    Code = code ?? "",
+                    ShiftKey = (modifiers & KeyModifiers.Shift) != 0,
+                    CtrlKey = (modifiers & KeyModifiers.Control) != 0,
+                    AltKey = (modifiers & KeyModifiers.Alt) != 0,
+                    MetaKey = meta
+                };
+                KittyKeyboardEventType eventType = release ? KittyKeyboardEventType.Release : repeat ? KittyKeyboardEventType.Repeat : KittyKeyboardEventType.Press;
+                return terminal.GenerateKittyKeyInput(keyEvent, eventType) ?? "";
+            }
+            if (release || meta)
+                return "";
+
             Key? key = keyName switch
             {
                 "Enter" => Key.Enter,
@@ -1456,9 +1663,9 @@ namespace Bivium.Services
                 _ => null
             };
             if (key.HasValue)
-                return session.Terminal.GenerateKeyInput(key.Value, modifiers);
+                return terminal.GenerateKeyInput(key.Value, modifiers);
             if (!string.IsNullOrEmpty(character) && character.Length == 1)
-                return session.Terminal.GenerateCharInput(character[0], modifiers);
+                return terminal.GenerateCharInput(character[0], modifiers);
             return character ?? "";
         }
 
@@ -1674,14 +1881,31 @@ namespace Bivium.Services
                     Rows = this.Rows,
                     Scrollback = Math.Max(256, settings.HeadlessScrollbackRows),
                     TermName = "xterm-256color",
-                    ConvertEol = true
+                    ConvertEol = true,
+                    SixelEnabled = false,
+                    KittyGraphicsEnabled = false,
+                    ITerm2ImagesEnabled = false,
+                    KittyKeyboardEnabled = true,
+                    KittyNotificationsEnabled = true,
+                    ClipboardWriteEnabled = true,
+                    ClipboardReadEnabled = false,
+                    PointerShapesEnabled = false,
+                    AllowPasteControls = false,
+                    MaxClipboardBytes = MAX_CLIPBOARD_BYTES,
+                    WindowOptions = new WindowOptions { RequestAttention = true }
                 };
                 this.Terminal = new Terminal(terminalOptions);
+                this.NormalBuffer = this.Terminal.Buffer;
                 this.Shell = new ShellService();
                 this.Terminal.LineExitedViewport += (sender, args) => this._owner.CaptureExitedLine(this, args);
                 this.Terminal.BufferChanged += (sender, args) => this._owner.HandleBufferChanged(this, args);
+                this.Terminal.SynchronizedOutputChanged += (sender, args) => this._owner.HandleSynchronizedOutputChanged(this, args.Active);
+                this.Terminal.Colors.ColorChanged += (sender, args) => this._owner.HandleColorChanged(this);
+                this.Terminal.ClipboardWriteRequested += (sender, args) => this._owner.HandleClipboardWriteRequested(this, args);
+                this.Terminal.NotificationReceived += (sender, args) => this._owner.HandleNotificationReceived(this, args);
+                this.Terminal.ProgressChanged += (sender, args) => this._owner.HandleProgressChanged(this, args);
+                this.Terminal.AttentionRequested += (sender, args) => this._owner.HandleAttentionRequested(this);
                 this.Terminal.DataReceived += (sender, args) => this.Shell.SendInput(args.Data);
-                this.Terminal.HyperlinkChanged += (sender, args) => this._owner.HandleHyperlinkChanged(this, args);
             }
 
             #endregion
@@ -1744,9 +1968,34 @@ namespace Bivium.Services
             public bool HasUnreadOutput { get; set; }
 
             /// <summary>
+            /// Progress explicitly reported by the terminal application
+            /// </summary>
+            public TerminalProgressState ProgressState { get; set; }
+
+            /// <summary>
+            /// Determinate progress percentage
+            /// </summary>
+            public int ProgressValue { get; set; }
+
+            /// <summary>
+            /// Whether the application requested attention
+            /// </summary>
+            public bool AttentionRequested { get; set; }
+
+            /// <summary>
             /// Whether a notification is already queued
             /// </summary>
             public bool NotificationPending { get; set; }
+
+            /// <summary>
+            /// Ultimo stato completo, con revisione e confine storico coerenti, durante DEC 2026
+            /// </summary>
+            public TerminalSessionSnapshot SynchronizedSnapshot { get; set; }
+
+            /// <summary>
+            /// Inizio monotono dell'attesa del blocco corrente
+            /// </summary>
+            public long SynchronizedStartedAt { get; set; }
 
             /// <summary>
             /// Accumulates a session-list change
@@ -1772,6 +2021,16 @@ namespace Bivium.Services
             /// Minimum revision still covered by the bounded journal
             /// </summary>
             public long MinimumPatchRevision { get; set; }
+
+            /// <summary>
+            /// Last revision that changed the palette or a special color
+            /// </summary>
+            public long PaletteRevision { get; set; }
+
+            /// <summary>
+            /// Whether the current PTY chunk changed terminal colors
+            /// </summary>
+            public bool PaletteChangePending { get; set; }
 
             /// <summary>
             /// Creation UTC instant
@@ -1804,48 +2063,23 @@ namespace Bivium.Services
             public TerminalHistoryArchive History { get; }
 
             /// <summary>
-            /// Latest normal-buffer rows archived before entering the alternate buffer
+            /// Checkpoint delle righe normali interamente archiviate, inclusi i rientri dopo resize
             /// </summary>
             public Dictionary<BufferLine, TerminalLineSnapshot> DeactivatedNormalLines { get; set; } = new Dictionary<BufferLine, TerminalLineSnapshot>();
 
             /// <summary>
-            /// Normal-buffer checkpoint being collected during a buffer transition
+            /// Buffer normale conservato anche mentre è attivo quello alternate
             /// </summary>
-            public Dictionary<BufferLine, TerminalLineSnapshot> PendingDeactivatedNormalLines { get; set; }
+            public TerminalBuffer NormalBuffer { get; }
 
             /// <summary>
-            /// OSC 8 ranges indexed by buffer row
+            /// Buffer alternate acquisito alla prima attivazione
             /// </summary>
-            public Dictionary<BufferLine, List<HyperlinkRange>> HyperlinksByLine { get; } = new Dictionary<BufferLine, List<HyperlinkRange>>();
-
-            /// <summary>
-            /// URI of the still-open OSC 8 hyperlink
-            /// </summary>
-            public string ActiveHyperlinkUrl { get; set; } = "";
-
-            /// <summary>
-            /// Starting row of the still-open OSC 8 hyperlink
-            /// </summary>
-            public BufferLine ActiveHyperlinkStartLine { get; set; }
-
-            /// <summary>
-            /// Starting column of the still-open OSC 8 hyperlink
-            /// </summary>
-            public int ActiveHyperlinkStartX { get; set; }
+            public TerminalBuffer AlternateBuffer { get; set; }
 
             #endregion
 
             #region Public Methods
-
-            /// <summary>
-            /// Clears the still-open OSC 8 hyperlink state
-            /// </summary>
-            public void ClearActiveHyperlink()
-            {
-                this.ActiveHyperlinkUrl = "";
-                this.ActiveHyperlinkStartLine = null;
-                this.ActiveHyperlinkStartX = 0;
-            }
 
             /// <summary>
             /// Terminates the PTY and releases the emulator idempotently
@@ -1859,6 +2093,7 @@ namespace Bivium.Services
                     if (this.Disposed)
                         return;
                     this.Disposed = true;
+                    this.SynchronizedSnapshot = null;
                     this.Running = false;
                     this.ShellGeneration++;
                     shell = this.Shell;
@@ -1871,14 +2106,6 @@ namespace Bivium.Services
 
             #endregion
         }
-
-        /// <summary>
-        /// Cell range belonging to an OSC 8 hyperlink
-        /// </summary>
-        /// <param name="StartX">Inclusive starting column</param>
-        /// <param name="EndX">Exclusive ending column</param>
-        /// <param name="Url">URI associated with the range</param>
-        private sealed record HyperlinkRange(int StartX, int EndX, string Url);
 
         #endregion
     }

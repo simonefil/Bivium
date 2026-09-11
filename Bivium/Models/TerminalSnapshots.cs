@@ -24,6 +24,41 @@ namespace Bivium.Models
     }
 
     /// <summary>
+    /// Underline style exposed by the Bivium protocol
+    /// </summary>
+    public enum TerminalUnderlineStyle
+    {
+        None = 0,
+        Single = 1,
+        Double = 2,
+        Curly = 3,
+        Dotted = 4,
+        Dashed = 5
+    }
+
+    /// <summary>
+    /// Progress state reported by a terminal application
+    /// </summary>
+    public enum TerminalProgressState
+    {
+        None = 0,
+        Normal = 1,
+        Error = 2,
+        Indeterminate = 3,
+        Warning = 4
+    }
+
+    /// <summary>
+    /// One transient request emitted by a terminal application
+    /// </summary>
+    public enum TerminalClientEventType
+    {
+        ClipboardWrite = 1,
+        Notification = 2,
+        Attention = 3
+    }
+
+    /// <summary>
     /// Terminal cell styles exposed by the Bivium protocol
     /// </summary>
     [Flags]
@@ -119,6 +154,21 @@ namespace Bivium.Models
         public bool HasUnreadOutput { get; set; }
 
         /// <summary>
+        /// Progress state explicitly reported through OSC 9;4
+        /// </summary>
+        public TerminalProgressState ProgressState { get; set; }
+
+        /// <summary>
+        /// Reported progress percentage when the state is determinate
+        /// </summary>
+        public int ProgressValue { get; set; }
+
+        /// <summary>
+        /// Whether the application requested attention and the tab has not been opened yet
+        /// </summary>
+        public bool AttentionRequested { get; set; }
+
+        /// <summary>
         /// Current columns
         /// </summary>
         public int Cols { get; set; }
@@ -212,6 +262,31 @@ namespace Bivium.Models
     public sealed class TerminalScreenSnapshot
     {
         /// <summary>
+        /// Whether this snapshot carries a replacement palette and special colors
+        /// </summary>
+        public bool ColorsIncluded { get; set; }
+
+        /// <summary>
+        /// Current coherent 256-entry palette as RGB values
+        /// </summary>
+        public IReadOnlyList<int> Palette { get; set; } = Array.Empty<int>();
+
+        /// <summary>
+        /// Current default foreground as an RGB value
+        /// </summary>
+        public int DefaultForeground { get; set; }
+
+        /// <summary>
+        /// Current default background as an RGB value
+        /// </summary>
+        public int DefaultBackground { get; set; }
+
+        /// <summary>
+        /// Current cursor color as an RGB value
+        /// </summary>
+        public int CursorColor { get; set; }
+
+        /// <summary>
         /// Whether the alternate buffer is active
         /// </summary>
         public bool AlternateBuffer { get; set; }
@@ -235,6 +310,16 @@ namespace Bivium.Models
         /// Whether a terminal application enabled VT mouse tracking
         /// </summary>
         public bool MouseTracking { get; set; }
+
+        /// <summary>
+        /// Modalità tastiera negoziata, usata dal browser per i tasti aggiuntivi
+        /// </summary>
+        public bool KittyKeyboardActive { get; set; }
+
+        /// <summary>
+        /// Whether the current shell has emitted OSC 133 integration marks
+        /// </summary>
+        public bool ShellIntegrationAvailable { get; set; }
 
         /// <summary>
         /// Current screen rows
@@ -304,6 +389,11 @@ namespace Bivium.Models
     /// </summary>
     public sealed class TerminalLineSnapshot
     {
+        /// <summary>
+        /// Column of an OSC 133 prompt-start mark, or -1 when absent
+        /// </summary>
+        public int PromptColumn { get; set; } = -1;
+
         /// <summary>
         /// Logical row offset
         /// </summary>
@@ -376,6 +466,26 @@ namespace Bivium.Models
         public TerminalCellAttributes Attributes { get; set; }
 
         /// <summary>
+        /// Underline shape independently from the compatibility style flag
+        /// </summary>
+        public TerminalUnderlineStyle UnderlineStyle { get; set; }
+
+        /// <summary>
+        /// Whether the underline has its own color instead of following the foreground
+        /// </summary>
+        public bool HasUnderlineColor { get; set; }
+
+        /// <summary>
+        /// Underline color as palette index or RGB value
+        /// </summary>
+        public int UnderlineColor { get; set; }
+
+        /// <summary>
+        /// Underline color interpretation mode
+        /// </summary>
+        public TerminalColorMode UnderlineColorMode { get; set; }
+
+        /// <summary>
         /// OSC 8 URI associated with the cell, when present
         /// </summary>
         public string Hyperlink { get; set; } = "";
@@ -400,5 +510,41 @@ namespace Bivium.Models
         /// Whether the client must reload the session list
         /// </summary>
         public bool SessionsChanged { get; set; }
+
+        /// <summary>
+        /// Bounded transient UI requests carried with this notification
+        /// </summary>
+        public IReadOnlyList<TerminalClientEvent> ClientEvents { get; set; } = Array.Empty<TerminalClientEvent>();
+    }
+
+    /// <summary>
+    /// Bounded plain-text request destined for the attached browser
+    /// </summary>
+    public sealed class TerminalClientEvent
+    {
+        /// <summary>
+        /// Identificatore monotono della richiesta transitoria
+        /// </summary>
+        public long Id { get; set; }
+
+        /// <summary>
+        /// Sessione terminale che ha generato la richiesta
+        /// </summary>
+        public int SessionId { get; set; }
+
+        /// <summary>
+        /// Superficie client a cui destinare la richiesta
+        /// </summary>
+        public TerminalClientEventType Type { get; set; }
+
+        /// <summary>
+        /// Titolo testuale limitato al renderer Razor
+        /// </summary>
+        public string Title { get; set; } = "";
+
+        /// <summary>
+        /// Contenuto testuale della richiesta
+        /// </summary>
+        public string Text { get; set; } = "";
     }
 }

@@ -30,6 +30,11 @@ namespace Bivium.Services
         private Task _readTask;
 
         /// <summary>
+        /// Exit handler captured for the active PTY connection
+        /// </summary>
+        private EventHandler<PtyExitedEventArgs> _processExitedHandler;
+
+        /// <summary>
         /// Whether the process is running
         /// </summary>
         private bool _isRunning = false;
@@ -38,11 +43,6 @@ namespace Bivium.Services
         /// Whether stop was requested by the component
         /// </summary>
         private bool _stopRequested = false;
-
-        /// <summary>
-        /// Callback for data received from the shell
-        /// </summary>
-        private Action<string> _onDataReceived;
 
         /// <summary>
         /// Callback when the process exits
@@ -106,7 +106,7 @@ namespace Bivium.Services
         /// <param name="rows">Initial terminal rows</param>
         /// <param name="onDataReceived">Callback for output data</param>
         /// <param name="onExit">Callback when the process exits</param>
-        public void Start(string workingDirectory, int cols, int rows, Action<string> onDataReceived, Action onExit)
+        public void Start(string workingDirectory, int cols, int rows, Action<ReadOnlyMemory<byte>> onDataReceived, Action onExit)
         {
             lock (this._stateLock)
             {
@@ -167,10 +167,13 @@ namespace Bivium.Services
 
             IPtyConnection connection = null;
             CancellationTokenSource readCancellation = new CancellationTokenSource();
+            CancellationToken readCancellationToken = readCancellation.Token;
+            EventHandler<PtyExitedEventArgs> processExitedHandler = null;
 
             try
             {
                 connection = PtyProvider.SpawnAsync(options, CancellationToken.None).GetAwaiter().GetResult();
+                processExitedHandler = (sender, e) => this.CompleteProcessExit(connection);
                 lock (this._stateLock)
                 {
                     if (this._disposed)
@@ -182,13 +185,14 @@ namespace Bivium.Services
 
                     this._connection = connection;
                     this._readCancellation = readCancellation;
-                    this._onDataReceived = onDataReceived;
+                    this._processExitedHandler = processExitedHandler;
                     this._onExit = onExit;
                     this._stopRequested = false;
                     this._isRunning = true;
                 }
 
-                Task readTask = Task.Run(() => this.ReadOutputAsync(connection, readCancellation.Token));
+                connection.ProcessExited += processExitedHandler;
+                Task readTask = Task.Run(() => this.ReadOutputAsync(connection, onDataReceived, readCancellationToken));
                 lock (this._stateLock)
                 {
                     if (this._connection == connection)
@@ -196,12 +200,16 @@ namespace Bivium.Services
                         this._readTask = readTask;
                     }
                 }
-                connection.ProcessExited += this.OnProcessExited;
             }
             catch
             {
                 if (connection != null)
                 {
+                    if (processExitedHandler != null)
+                    {
+                        connection.ProcessExited -= processExitedHandler;
+                    }
+
                     ((IDisposable)connection).Dispose();
                 }
 
@@ -211,15 +219,12 @@ namespace Bivium.Services
                     if (this._connection == connection)
                     {
                         this._connection = null;
-                    }
-
-                    if (this._readCancellation == readCancellation)
-                    {
                         this._readCancellation = null;
+                        this._processExitedHandler = null;
+                        this._readTask = null;
+                        this._onExit = null;
+                        this._isRunning = false;
                     }
-
-                    this._readTask = null;
-                    this._isRunning = false;
                 }
                 throw;
             }
@@ -249,15 +254,15 @@ namespace Bivium.Services
             }
             catch (IOException)
             {
-                this.CompleteProcessExit();
+                this.CompleteProcessExit(connection);
             }
             catch (ObjectDisposedException)
             {
-                this.CompleteProcessExit();
+                this.CompleteProcessExit(connection);
             }
             catch (InvalidOperationException)
             {
-                this.CompleteProcessExit();
+                this.CompleteProcessExit(connection);
             }
         }
 
@@ -284,15 +289,15 @@ namespace Bivium.Services
             }
             catch (IOException)
             {
-                this.CompleteProcessExit();
+                this.CompleteProcessExit(connection);
             }
             catch (ObjectDisposedException)
             {
-                this.CompleteProcessExit();
+                this.CompleteProcessExit(connection);
             }
             catch (InvalidOperationException)
             {
-                this.CompleteProcessExit();
+                this.CompleteProcessExit(connection);
             }
         }
 
@@ -304,6 +309,7 @@ namespace Bivium.Services
             IPtyConnection connection;
             CancellationTokenSource readCancellation;
             Task readTask;
+            EventHandler<PtyExitedEventArgs> processExitedHandler;
 
             lock (this._stateLock)
             {
@@ -312,9 +318,12 @@ namespace Bivium.Services
                 connection = this._connection;
                 readCancellation = this._readCancellation;
                 readTask = this._readTask;
+                processExitedHandler = this._processExitedHandler;
                 this._connection = null;
                 this._readCancellation = null;
                 this._readTask = null;
+                this._processExitedHandler = null;
+                this._onExit = null;
             }
 
             if (readCancellation != null)
@@ -324,7 +333,11 @@ namespace Bivium.Services
 
             if (connection != null)
             {
-                connection.ProcessExited -= this.OnProcessExited;
+                if (processExitedHandler != null)
+                {
+                    connection.ProcessExited -= processExitedHandler;
+                }
+
                 try
                 {
                     connection.Kill();
@@ -375,8 +388,9 @@ namespace Bivium.Services
         /// <summary>
         /// Reads output from the active PTY
         /// </summary>
+        /// <param name="onDataReceived">Callback captured for this connection generation</param>
         /// <param name="cancellationToken">Cancellation token for stopping the reader</param>
-        private async Task ReadOutputAsync(IPtyConnection connection, CancellationToken cancellationToken)
+        private async Task ReadOutputAsync(IPtyConnection connection, Action<ReadOnlyMemory<byte>> onDataReceived, CancellationToken cancellationToken)
         {
             if (connection == null)
             {
@@ -385,9 +399,7 @@ namespace Bivium.Services
 
             try
             {
-                Decoder decoder = Encoding.UTF8.GetDecoder();
                 byte[] bytes = new byte[8192];
-                char[] chars = new char[8192];
 
                 while (!cancellationToken.IsCancellationRequested)
                 {
@@ -397,11 +409,7 @@ namespace Bivium.Services
                         break;
                     }
 
-                    int charCount = decoder.GetChars(bytes, 0, bytesRead, chars, 0, false);
-                    if (charCount > 0)
-                    {
-                        this._onDataReceived?.Invoke(new string(chars, 0, charCount));
-                    }
+                    onDataReceived?.Invoke(bytes.AsMemory(0, bytesRead));
                 }
             }
             catch (OperationCanceledException)
@@ -419,34 +427,27 @@ namespace Bivium.Services
 
             if (!cancellationToken.IsCancellationRequested)
             {
-                this.CompleteProcessExit();
+                this.CompleteProcessExit(connection);
             }
-        }
-
-        /// <summary>
-        /// Handles process exit events raised by the PTY connection
-        /// </summary>
-        /// <param name="sender">Event sender</param>
-        /// <param name="and">Exit event arguments</param>
-        private void OnProcessExited(object sender, PtyExitedEventArgs e)
-        {
-            this.CompleteProcessExit();
         }
 
         /// <summary>
         /// Marks the process as exited and notifies the component once
         /// </summary>
-        private void CompleteProcessExit()
+        /// <param name="expectedConnection">Connection that observed the exit</param>
+        private void CompleteProcessExit(IPtyConnection expectedConnection)
         {
             IPtyConnection connection;
             CancellationTokenSource readCancellation;
             Task readTask;
+            EventHandler<PtyExitedEventArgs> processExitedHandler;
             Action onExit;
             bool shouldNotify = false;
 
             lock (this._stateLock)
             {
-                if (!this._isRunning && this._connection == null)
+                // A late reader or ProcessExited callback must not terminate a newer shell generation
+                if (expectedConnection == null || this._connection != expectedConnection)
                 {
                     return;
                 }
@@ -456,10 +457,13 @@ namespace Bivium.Services
                 connection = this._connection;
                 readCancellation = this._readCancellation;
                 readTask = this._readTask;
+                processExitedHandler = this._processExitedHandler;
                 onExit = this._onExit;
                 this._connection = null;
                 this._readCancellation = null;
                 this._readTask = null;
+                this._processExitedHandler = null;
+                this._onExit = null;
             }
 
             if (readCancellation != null)
@@ -469,7 +473,11 @@ namespace Bivium.Services
 
             if (connection != null)
             {
-                connection.ProcessExited -= this.OnProcessExited;
+                if (processExitedHandler != null)
+                {
+                    connection.ProcessExited -= processExitedHandler;
+                }
+
                 try
                 {
                     ((IDisposable)connection).Dispose();

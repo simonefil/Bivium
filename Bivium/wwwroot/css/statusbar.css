@@ -100,6 +100,18 @@
     color: var(--background0);
 }
 
+.cmd-key.terminal-attention {
+    box-shadow: inset 0 0 0 1px var(--foreground0);
+    animation: terminal-command-attention 0.5s steps(1, end) 3;
+}
+
+@keyframes terminal-command-attention {
+    50% {
+        background-color: var(--foreground0);
+        color: var(--background0);
+    }
+}
+
 /* Key label with inverted colors */
 .key-label {
     background-color: var(--foreground0);

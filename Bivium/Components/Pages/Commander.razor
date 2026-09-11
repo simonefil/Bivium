@@ -125,6 +125,7 @@ else
         OnTerminal="this.DoToggleTerminal"
         TerminalVisible="@this.IsTerminalVisible()"
         TerminalMinimized="@this.IsTerminalMinimized()"
+        TerminalNeedsAttention="@(this._terminalPanel != null && this._terminalPanel.NeedsAttention())"
         IsMultiSelection="@(this.GetActivePanel().SelectedPaths.Count > 1)" />
 </div>
 

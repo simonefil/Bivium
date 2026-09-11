@@ -169,6 +169,60 @@ namespace Bivium.Services
         }
 
         /// <summary>
+        /// Finds the nearest retained prompt strictly before a logical row
+        /// </summary>
+        /// <param name="before">Exclusive upper logical row</param>
+        /// <param name="index">Located prompt row</param>
+        /// <returns>True when a retained prompt exists</returns>
+        public bool TryFindPreviousPrompt(long before, out long index)
+        {
+            LinkedListNode<HistorySegment> node = this._segments.Last;
+            while (node != null)
+            {
+                for (int i = node.Value.Lines.Count - 1; i >= 0; i--)
+                {
+                    TerminalLineSnapshot line = node.Value.Lines[i];
+                    if (line.Index < before && line.PromptColumn >= 0)
+                    {
+                        index = line.Index;
+                        return true;
+                    }
+                }
+                node = node.Previous;
+            }
+
+            index = -1;
+            return false;
+        }
+
+        /// <summary>
+        /// Finds the nearest retained prompt strictly after a logical row
+        /// </summary>
+        /// <param name="after">Exclusive lower logical row</param>
+        /// <param name="index">Located prompt row</param>
+        /// <returns>True when a retained prompt exists</returns>
+        public bool TryFindNextPrompt(long after, out long index)
+        {
+            LinkedListNode<HistorySegment> node = this._segments.First;
+            while (node != null)
+            {
+                for (int i = 0; i < node.Value.Lines.Count; i++)
+                {
+                    TerminalLineSnapshot line = node.Value.Lines[i];
+                    if (line.Index > after && line.PromptColumn >= 0)
+                    {
+                        index = line.Index;
+                        return true;
+                    }
+                }
+                node = node.Next;
+            }
+
+            index = -1;
+            return false;
+        }
+
+        /// <summary>
         /// Copies retained row references for a point-in-time export
         /// </summary>
         /// <param name="cancellationToken">Current request token</param>

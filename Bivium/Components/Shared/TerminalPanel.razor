@@ -24,6 +24,10 @@
                 }
                 else
                 {
+                    @if (session.ProgressState != TerminalProgressState.None)
+                    {
+                        <span class="@this.GetProgressCssClass(session)" title="@this.GetProgressTitle(session)">@this.GetProgressText(session)</span>
+                    }
                     <span class="terminal-tab-label">@session.Label</span>
                 }
                 <span class="terminal-tab-close" @onclick="() => this.RequestCloseTab(session.Id)" @onclick:stopPropagation="true" title="Close tab">X</span>
@@ -42,4 +46,15 @@
     <div class="terminal-resize-handle" id="terminal-resize-handle">/</div>
 </div>
 
+<div class="terminal-toast-stack">
+    @foreach (TerminalClientEvent toast in this._toasts)
+    {
+        <button @key="toast.Id" type="button" class="terminal-toast" @onclick="() => this.OpenToast(toast)">
+            <span class="terminal-toast-title">@toast.Title</span>
+            <span class="terminal-toast-body">@toast.Text</span>
+        </button>
+    }
+</div>
+
 <Bivium.Components.Shared.ConfirmDialog @ref="this._confirmDialog" OnClose="this.HandleConfirmClose" />
+<Bivium.Components.Shared.ConfirmDialog @ref="this._clipboardDialog" OnClose="this.HandleClipboardConfirmation" />

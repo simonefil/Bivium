@@ -82,6 +82,12 @@ namespace Bivium.Components.Shared
         public bool TerminalMinimized { get; set; } = false;
 
         /// <summary>
+        /// Whether a terminal application requested the user's attention
+        /// </summary>
+        [Parameter]
+        public bool TerminalNeedsAttention { get; set; } = false;
+
+        /// <summary>
         /// Whether the active panel has multiple selected entries
         /// </summary>
         [Parameter]
@@ -107,6 +113,8 @@ namespace Bivium.Components.Shared
                 {
                     result += " terminal-minimized";
                 }
+                if (this.TerminalNeedsAttention)
+                    result += " terminal-attention";
 
                 return result;
             }

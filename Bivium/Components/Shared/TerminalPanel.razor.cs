@@ -97,6 +97,11 @@ namespace Bivium.Components.Shared
         private CancellationTokenSource _subscriptionCancellation;
 
         /// <summary>
+        /// Generazione della lease a cui appartiene la sottoscrizione corrente
+        /// </summary>
+        private long _subscribedLeaseGeneration;
+
+        /// <summary>
         /// Active tab identifier
         /// </summary>
         private int _activeSessionId = 0;
@@ -207,6 +212,26 @@ namespace Bivium.Components.Shared
         private ConfirmDialog _confirmDialog;
 
         /// <summary>
+        /// Confirmation dialog for application clipboard writes
+        /// </summary>
+        private ConfirmDialog _clipboardDialog;
+
+        /// <summary>
+        /// Clipboard requests awaiting an explicit user gesture
+        /// </summary>
+        private readonly Queue<TerminalClientEvent> _clipboardRequests = new Queue<TerminalClientEvent>();
+
+        /// <summary>
+        /// Clipboard request currently shown to the user
+        /// </summary>
+        private TerminalClientEvent _activeClipboardRequest;
+
+        /// <summary>
+        /// Visible in-page terminal notifications
+        /// </summary>
+        private readonly List<TerminalClientEvent> _toasts = new List<TerminalClientEvent>();
+
+        /// <summary>
         /// Close operation awaiting confirmation
         /// </summary>
         private ConfirmAction _pendingConfirmAction = ConfirmAction.None;
@@ -246,6 +271,26 @@ namespace Bivium.Components.Shared
             CancellationToken revocationToken = this._workspaceService.GetRevocationToken(this.GetClientToken());
             this._subscriptionCancellation = CancellationTokenSource.CreateLinkedTokenSource(this._requestCancellation.Token, revocationToken);
             this._runtimeSubscription = this._terminalRuntime.Subscribe(this.HandleRuntimeChanged, this._subscriptionCancellation.Token);
+            this._subscribedLeaseGeneration = this.LeaseGeneration;
+            this.RefreshSessions();
+        }
+
+        /// <summary>
+        /// Ricollega gli eventi quando il recovery riacquisisce una nuova generazione della lease
+        /// </summary>
+        protected override void OnParametersSet()
+        {
+            if (this._isDisposed || this._subscribedLeaseGeneration == this.LeaseGeneration)
+                return;
+
+            this._subscriptionCancellation?.Cancel();
+            this._runtimeSubscription?.Dispose();
+            this._subscriptionCancellation?.Dispose();
+            CancellationToken revocationToken = this._workspaceService.GetRevocationToken(this.GetClientToken());
+            this._subscriptionCancellation = CancellationTokenSource.CreateLinkedTokenSource(this._requestCancellation.Token, revocationToken);
+            this._runtimeSubscription = this._terminalRuntime.Subscribe(this.HandleRuntimeChanged, this._subscriptionCancellation.Token);
+            this._subscribedLeaseGeneration = this.LeaseGeneration;
+            this._appliedRevisions.Clear();
             this.RefreshSessions();
         }
 
@@ -283,6 +328,7 @@ namespace Bivium.Components.Shared
                 // Restore focus after all visible renderers are synchronized
                 if (this._isVisible && this._activeSessionId > 0)
                     await this._jsModule.InvokeVoidAsync("focusTerminal", this._activeSessionId);
+                this.ShowNextClipboardRequest();
             }
             catch (JSDisconnectedException)
             {
@@ -309,6 +355,7 @@ namespace Bivium.Components.Shared
 
             this._isVisible = true;
             this._isMinimized = false;
+            this.AcknowledgeActiveAttention();
             this.PersistWindowState();
             this.StateHasChanged();
             _ = this.OnStateChanged.InvokeAsync();
@@ -340,6 +387,7 @@ namespace Bivium.Components.Shared
 
             this._isVisible = true;
             this._isMinimized = false;
+            this.AcknowledgeActiveAttention();
             this.PersistWindowState();
             this.StateHasChanged();
             _ = this.FocusActiveSessionAsync();
@@ -362,6 +410,14 @@ namespace Bivium.Components.Shared
         public bool IsMinimized()
         {
             return this._isMinimized;
+        }
+
+        /// <summary>
+        /// Whether any terminal tab has an unacknowledged attention request
+        /// </summary>
+        public bool NeedsAttention()
+        {
+            return this._sessions.Exists(session => session.AttentionRequested);
         }
 
         /// <summary>
@@ -402,11 +458,15 @@ namespace Bivium.Components.Shared
         /// <param name="shift">Shift modifier</param>
         /// <param name="control">Control modifier</param>
         /// <param name="alt">Alt modifier</param>
+        /// <param name="meta">Modificatore Meta/Super</param>
+        /// <param name="code">Identità fisica DOM del tasto</param>
+        /// <param name="repeat">Ripetizione di una pressione mantenuta</param>
+        /// <param name="release">Rilascio del tasto</param>
         [JSInvokable]
-        public void OnTerminalKey(int sessionId, string keyName, string character, bool shift, bool control, bool alt)
+        public void OnTerminalKey(int sessionId, string keyName, string character, bool shift, bool control, bool alt, bool meta, string code, bool repeat, bool release)
         {
             if (!this._isDisposed)
-                this._terminalRuntime.SendKey(this.GetClientToken(), sessionId, keyName, character, shift, control, alt);
+                this._terminalRuntime.SendKey(this.GetClientToken(), sessionId, keyName, character, shift, control, alt, meta, code, repeat, release);
         }
 
         /// <summary>
@@ -503,6 +563,19 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
+        /// Returns the adjacent OSC 133 prompt without changing terminal input
+        /// </summary>
+        /// <param name="sessionId">Session identifier</param>
+        /// <param name="fromRow">Current logical history/screen row</param>
+        /// <param name="previous">True to search backward</param>
+        /// <returns>Logical prompt row, or -1 when unavailable</returns>
+        [JSInvokable]
+        public long FindTerminalPrompt(int sessionId, long fromRow, bool previous)
+        {
+            return this._terminalRuntime.FindPrompt(sessionId, fromRow, previous);
+        }
+
+        /// <summary>
         /// Returns a new atomic handoff for complete resynchronization
         /// </summary>
         /// <param name="sessionId">Session identifier</param>
@@ -566,6 +639,7 @@ namespace Bivium.Components.Shared
             this.FinishRename(true);
             this._terminalRuntime.SetActiveSession(this.GetClientToken(), sessionId);
             this._activeSessionId = sessionId;
+            this._terminalRuntime.AcknowledgeAttention(this.GetClientToken(), sessionId);
             this.RefreshSessions();
             this.StateHasChanged();
             _ = this.FocusActiveSessionAsync();
@@ -735,7 +809,35 @@ namespace Bivium.Components.Shared
                 result += " exited";
             if (session.HasUnreadOutput && session.Id != this._activeSessionId)
                 result += " unread";
+            if (session.AttentionRequested)
+                result += " attention";
             return result;
+        }
+
+        /// <summary>
+        /// Returns the progress indicator text for one tab
+        /// </summary>
+        private string GetProgressText(TerminalSessionSnapshot session)
+        {
+            return session.ProgressState == TerminalProgressState.Indeterminate ? "↻" : session.ProgressValue + "%";
+        }
+
+        /// <summary>
+        /// Returns progress classes for one tab
+        /// </summary>
+        private string GetProgressCssClass(TerminalSessionSnapshot session)
+        {
+            return "terminal-tab-progress " + session.ProgressState.ToString().ToLowerInvariant();
+        }
+
+        /// <summary>
+        /// Returns an accessible description of tab progress
+        /// </summary>
+        private string GetProgressTitle(TerminalSessionSnapshot session)
+        {
+            return session.ProgressState == TerminalProgressState.Indeterminate
+                ? "Operation in progress"
+                : session.ProgressState + " progress: " + session.ProgressValue + "%";
         }
 
         #endregion
@@ -841,6 +943,11 @@ namespace Bivium.Components.Shared
                 }
 
                 bool renderRequired = runtimeEvent.SessionsChanged;
+                if (runtimeEvent.ClientEvents.Count > 0)
+                {
+                    this.HandleClientEvents(runtimeEvent.ClientEvents);
+                    renderRequired = true;
+                }
 
                 // Update the tab list first because the patch may reference a newly created session
                 if (runtimeEvent.SessionsChanged)
@@ -918,7 +1025,10 @@ namespace Bivium.Components.Shared
                 previous.WorkingDirectory != current.WorkingDirectory ||
                 previous.Running != current.Running ||
                 previous.Exited != current.Exited ||
-                previous.HasUnreadOutput != current.HasUnreadOutput;
+                previous.HasUnreadOutput != current.HasUnreadOutput ||
+                previous.ProgressState != current.ProgressState ||
+                previous.ProgressValue != current.ProgressValue ||
+                previous.AttentionRequested != current.AttentionRequested;
         }
 
         /// <summary>
@@ -937,7 +1047,8 @@ namespace Bivium.Components.Shared
                 {
                     SessionId = current.SessionId,
                     Revision = current.Revision,
-                    SessionsChanged = current.SessionsChanged
+                    SessionsChanged = current.SessionsChanged,
+                    ClientEvents = current.ClientEvents
                 };
             }
 
@@ -945,8 +1056,155 @@ namespace Bivium.Components.Shared
             {
                 SessionId = current.SessionId,
                 Revision = Math.Max(pending.Revision, current.Revision),
-                SessionsChanged = pending.SessionsChanged || current.SessionsChanged
+                SessionsChanged = pending.SessionsChanged || current.SessionsChanged,
+                ClientEvents = MergeClientEvents(pending.ClientEvents, current.ClientEvents)
             };
+        }
+
+        /// <summary>
+        /// Combines transient requests without allowing an unbounded browser queue
+        /// </summary>
+        private static IReadOnlyList<TerminalClientEvent> MergeClientEvents(IReadOnlyList<TerminalClientEvent> pending, IReadOnlyList<TerminalClientEvent> current)
+        {
+            List<TerminalClientEvent> result = new List<TerminalClientEvent>();
+            if (pending != null)
+                result.AddRange(pending);
+            if (current != null)
+                result.AddRange(current);
+            if (result.Count > 16)
+                result.RemoveRange(0, result.Count - 16);
+            return result.AsReadOnly();
+        }
+
+        /// <summary>
+        /// Routes transient terminal requests to the confirmed UI surfaces
+        /// </summary>
+        private void HandleClientEvents(IReadOnlyList<TerminalClientEvent> clientEvents)
+        {
+            for (int i = 0; i < clientEvents.Count; i++)
+            {
+                TerminalClientEvent clientEvent = clientEvents[i];
+                if (clientEvent.Type == TerminalClientEventType.ClipboardWrite)
+                {
+                    if (this._clipboardRequests.Count < 8)
+                        this._clipboardRequests.Enqueue(clientEvent);
+                }
+                else if (clientEvent.Type == TerminalClientEventType.Notification)
+                {
+                    this.AddToast(clientEvent);
+                    _ = this.ExpireToastAsync(clientEvent.Id);
+                }
+                else if (clientEvent.Type == TerminalClientEventType.Attention && this._isVisible && clientEvent.SessionId == this._activeSessionId)
+                {
+                    this._terminalRuntime.AcknowledgeAttention(this.GetClientToken(), clientEvent.SessionId);
+                }
+            }
+            this.ShowNextClipboardRequest();
+        }
+
+        /// <summary>
+        /// Shows one bounded clipboard preview at a time
+        /// </summary>
+        private void ShowNextClipboardRequest()
+        {
+            if (this._clipboardDialog == null || this._activeClipboardRequest != null || this._clipboardRequests.Count == 0)
+                return;
+            this._activeClipboardRequest = this._clipboardRequests.Dequeue();
+            string preview = this._activeClipboardRequest.Text;
+            if (preview.Length > 4096)
+                preview = preview.Substring(0, 4096) + "\n… preview truncated; the full text will be copied";
+            this._clipboardDialog.Show(this._activeClipboardRequest.Title, preview, "Copy", "Cancel");
+        }
+
+        /// <summary>
+        /// Commits a confirmed clipboard request through the browser gesture
+        /// </summary>
+        private async System.Threading.Tasks.Task HandleClipboardConfirmation(bool confirmed)
+        {
+            TerminalClientEvent request = this._activeClipboardRequest;
+            this._activeClipboardRequest = null;
+            if (confirmed && request != null)
+            {
+                try
+                {
+                    await this.EnsureJsModules();
+                    await this._jsModule.InvokeVoidAsync("writeClipboardText", request.Text);
+                }
+                catch (JSException)
+                {
+                    TerminalClientEvent failure = new TerminalClientEvent
+                    {
+                        Id = -request.Id,
+                        SessionId = request.SessionId,
+                        Type = TerminalClientEventType.Notification,
+                        Title = request.Title,
+                        Text = "The browser refused clipboard access."
+                    };
+                    this.AddToast(failure);
+                    _ = this.ExpireToastAsync(failure.Id);
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+            }
+            this.ShowNextClipboardRequest();
+        }
+
+        /// <summary>
+        /// Aggiunge un toast mantenendo il limite visuale confermato
+        /// </summary>
+        /// <param name="toast">Notifica testuale da mostrare</param>
+        private void AddToast(TerminalClientEvent toast)
+        {
+            this._toasts.Add(toast);
+            if (this._toasts.Count > 5)
+                this._toasts.RemoveAt(0);
+        }
+
+        /// <summary>
+        /// Removes a toast after the confirmed five-second lifetime
+        /// </summary>
+        private async System.Threading.Tasks.Task ExpireToastAsync(long id)
+        {
+            try
+            {
+                await System.Threading.Tasks.Task.Delay(5000, this._requestCancellation.Token);
+                await this.InvokeAsync(() =>
+                {
+                    this._toasts.RemoveAll(toast => toast.Id == id);
+                    this.StateHasChanged();
+                });
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+
+        /// <summary>
+        /// Opens and selects the session that produced a toast
+        /// </summary>
+        private void OpenToast(TerminalClientEvent toast)
+        {
+            this._toasts.RemoveAll(item => item.Id == toast.Id);
+            if (this._sessions.Exists(session => session.Id == toast.SessionId))
+            {
+                if (!this._isVisible)
+                    this.Restore();
+                this.SelectTab(toast.SessionId);
+            }
+            this.StateHasChanged();
+        }
+
+        /// <summary>
+        /// Clears attention for the tab made visible through F12
+        /// </summary>
+        private void AcknowledgeActiveAttention()
+        {
+            if (this._activeSessionId > 0)
+                this._terminalRuntime.AcknowledgeAttention(this.GetClientToken(), this._activeSessionId);
         }
 
         /// <summary>
@@ -1039,7 +1297,7 @@ namespace Bivium.Components.Shared
             if (this._dotNetRef == null)
                 this._dotNetRef = DotNetObjectReference.Create(this);
             if (this._jsModule == null)
-                this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/terminal.js?v=20260730-terminal-clipboard-v8");
+                this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/terminal.js?v=20260909-terminal-ux-v12");
             if (this._interopModule == null)
                 this._interopModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260725-window-geometry-v3");
             if (!this._windowDragInitialized)

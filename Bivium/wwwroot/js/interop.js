@@ -1,6 +1,8 @@
 // Bivium JS Interop
 // Handles: resize drag, floating window stacking, keyboard capture, theme switching
 
+import { invokeCircuitMethod, isCircuitConnected, registerCircuitParticipant } from './connection.js';
+
 const FLOATING_WINDOW_BASE_Z_INDEX = 2000;
 const FLOATING_WINDOW_FOCUS_SELECTOR = [
     '.terminal-ime-input',
@@ -39,18 +41,22 @@ export function startWorkspacePresence(dotNetReference) {
     const eventSignal = eventController.signal;
     let disconnected = false;
     let pageActive = true;
+    let heartbeatPending = false;
 
     function heartbeat() {
-        if (!pageActive) return;
+        if (!pageActive || !isCircuitConnected() || heartbeatPending) return;
         disconnected = false;
-        dotNetReference.invokeMethodAsync('OnWorkspaceHeartbeat').catch(function () { });
+        heartbeatPending = true;
+        invokeCircuitMethod(dotNetReference, 'OnWorkspaceHeartbeat').catch(function () { }).finally(function () {
+            heartbeatPending = false;
+        });
     }
 
     function disconnect() {
         if (disconnected) return;
         pageActive = false;
         disconnected = true;
-        dotNetReference.invokeMethodAsync('OnWorkspaceDisconnected').catch(function () { });
+        invokeCircuitMethod(dotNetReference, 'OnWorkspaceDisconnected').catch(function () { });
     }
 
     function reconnect() {
@@ -58,6 +64,16 @@ export function startWorkspacePresence(dotNetReference) {
         heartbeat();
     }
 
+    const unregisterConnection = registerCircuitParticipant({
+        phase: 'presence',
+        suspend: function () { heartbeatPending = false; },
+        recover: async function (isCurrent) {
+            if (!pageActive || !isCurrent()) return;
+            await dotNetReference.invokeMethodAsync('OnWorkspaceHeartbeat');
+            if (!pageActive || !isCurrent()) return;
+            disconnected = false;
+        }
+    });
     const interval = window.setInterval(heartbeat, 20000);
     window.addEventListener('pagehide', disconnect, { signal: eventSignal });
     window.addEventListener('pageshow', reconnect, { signal: eventSignal });
@@ -70,6 +86,7 @@ export function startWorkspacePresence(dotNetReference) {
         dispose: function () {
             window.clearInterval(interval);
             eventController.abort();
+            unregisterConnection();
         }
     };
     heartbeat();
@@ -246,7 +263,7 @@ export function captureKeyboard(dotNetRef) {
         if (key === 'F12') {
             e.preventDefault();
             e.stopPropagation();
-            dotNetRef.invokeMethodAsync('OnKeyDown', key, ctrl, shift, alt);
+            invokeCircuitMethod(dotNetRef, 'OnKeyDown', key, ctrl, shift, alt).catch(function () { });
             return;
         }
 
@@ -280,7 +297,7 @@ export function captureKeyboard(dotNetRef) {
                     e.preventDefault();
                 }
                 if (key === 'Escape') {
-                    dotNetRef.invokeMethodAsync('OnKeyDown', key, ctrl, shift, alt);
+                    invokeCircuitMethod(dotNetRef, 'OnKeyDown', key, ctrl, shift, alt).catch(function () { });
                 }
                 return;
             }
@@ -332,7 +349,7 @@ export function captureKeyboard(dotNetRef) {
         }
 
         // Send key event to .NET
-        dotNetRef.invokeMethodAsync('OnKeyDown', key, ctrl, shift, alt);
+        invokeCircuitMethod(dotNetRef, 'OnKeyDown', key, ctrl, shift, alt).catch(function () { });
     }, true);
 }
 
@@ -640,10 +657,12 @@ export function registerFilePanelScroll(panelId, dotNetReference) {
 
     const tracker = { scroller, dotNetReference, timer: 0, restoring: false, pageSize: 0 };
     tracker.measurePageSize = function () {
+        if (!isCircuitConnected()) return;
         const pageSize = computeFileListPageSize(scroller);
         if (pageSize < 1 || pageSize === tracker.pageSize) return;
-        tracker.pageSize = pageSize;
-        dotNetReference.invokeMethodAsync('OnFileListPageSizeChanged', pageSize).catch(function () { });
+        invokeCircuitMethod(dotNetReference, 'OnFileListPageSizeChanged', pageSize).then(function () {
+            tracker.pageSize = pageSize;
+        }).catch(function () { });
     };
     tracker.listener = function () {
         if (tracker.restoring) return;
@@ -653,7 +672,7 @@ export function registerFilePanelScroll(panelId, dotNetReference) {
             const rows = scroller.querySelectorAll('tr[data-entry-path]');
             for (const row of rows) {
                 if (row.getBoundingClientRect().bottom > top + 1) {
-                    dotNetReference.invokeMethodAsync('OnFileListScrollAnchorChanged', row.dataset.entryPath || '');
+                    invokeCircuitMethod(dotNetReference, 'OnFileListScrollAnchorChanged', row.dataset.entryPath || '').catch(function () { });
                     break;
                 }
             }
@@ -861,7 +880,7 @@ export function initWindowDrag(windowId, titlebarId, resizeHandleId, dotNetRefer
         const signature = [update.left, update.top, update.width, update.height, update.viewportWidth, update.viewportHeight, update.mruOrder, update.focusTarget].join('|');
         if (signature === lastNotifiedGeometry) return;
         lastNotifiedGeometry = signature;
-        dotNetReference.invokeMethodAsync('OnWindowGeometryChanged', update).catch(function () { });
+        invokeCircuitMethod(dotNetReference, 'OnWindowGeometryChanged', update).catch(function () { });
     }
 
     function scheduleGeometryNotification() {

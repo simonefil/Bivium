@@ -106,6 +106,74 @@
     box-shadow: inset 0 -1px 0 var(--foreground0);
 }
 
+.terminal-tab.attention {
+    box-shadow: inset 0 0 0 1px var(--foreground0);
+    animation: terminal-attention-blink 0.5s steps(1, end) 3;
+}
+
+.terminal-tab-progress {
+    display: inline-block;
+    min-width: 2ch;
+    color: var(--foreground0);
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.terminal-tab-progress.indeterminate {
+    animation: terminal-progress-spin 1s linear infinite;
+}
+
+.terminal-tab-progress.error {
+    color: #ff5f5f;
+}
+
+.terminal-tab-progress.warning {
+    color: #ffd75f;
+}
+
+.terminal-toast-stack {
+    position: fixed;
+    top: 2lh;
+    right: 2ch;
+    z-index: 3100;
+    display: flex;
+    width: min(48ch, calc(100vw - 4ch));
+    flex-direction: column;
+    gap: 1lh;
+}
+
+.terminal-toast {
+    display: flex;
+    padding: 0.5lh 1ch;
+    border: 1px solid var(--foreground0);
+    background: var(--background0);
+    color: var(--foreground0);
+    box-shadow: 2px 2px 0 var(--background3);
+    font-family: var(--font-family);
+    font-size: var(--font-size);
+    text-align: left;
+    cursor: pointer;
+    flex-direction: column;
+}
+
+.terminal-toast-title {
+    font-weight: bold;
+}
+
+.terminal-toast-body {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+@keyframes terminal-progress-spin {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes terminal-attention-blink {
+    50% { background-color: var(--foreground0); color: var(--background0); }
+}
+
 .terminal-tab.exited {
     color: var(--foreground2);
 }
@@ -251,8 +319,8 @@
 }
 
 .terminal-cell.cursor {
-    color: #000 !important;
-    background-color: #fff !important;
+    color: #000;
+    background-color: #fff;
 }
 
 .terminal-cell.selected {

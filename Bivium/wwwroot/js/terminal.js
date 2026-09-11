@@ -1,7 +1,14 @@
 // Bivium terminal renderer - remote paged history with bounded DOM
 
+import { invokeCircuitMethod, isCircuitConnected, registerCircuitParticipant } from './connection.js';
+
 const terminals = new Map();
+
+export async function writeClipboardText(text) {
+    await navigator.clipboard.writeText(text ?? '');
+}
 let terminalVisibilityRegistration = null;
+let terminalConnectionRegistration = null;
 let terminalPageVisible = typeof document === 'undefined' || document.visibilityState !== 'hidden';
 const PAGE_ROWS = 200;
 const MAX_CACHED_PAGES = 12;
@@ -19,6 +26,14 @@ const TERMINAL_COLOR_MODE = Object.freeze({
 const TERMINAL_PALETTE_SIZE = 256;
 const TERMINAL_DEFAULT_FOREGROUND = '#ffffff';
 const TERMINAL_DEFAULT_BACKGROUND = '#000000';
+const TERMINAL_UNDERLINE_STYLE = Object.freeze({
+    none: 0,
+    single: 1,
+    double: 2,
+    curly: 3,
+    dotted: 4,
+    dashed: 5
+});
 const TERMINAL_CELL_ATTRIBUTE = Object.freeze({
     bold: 1,
     dim: 2,
@@ -50,7 +65,7 @@ function notifyTerminalPageVisibility(visible) {
     for (const state of terminals.values()) {
         if (state.disposed || !state.dotNetRef || notifiedReferences.has(state.dotNetRef)) continue;
         notifiedReferences.add(state.dotNetRef);
-        state.dotNetRef.invokeMethodAsync('OnTerminalVisibilityChanged', visible).catch(function () { });
+        invokeCircuitMethod(state.dotNetRef, 'OnTerminalVisibilityChanged', visible).catch(function () { });
     }
 }
 
@@ -62,6 +77,7 @@ function handleTerminalPageVisibilityChange() {
     for (const state of terminals.values()) {
         state.lifecycleGeneration++;
         state.resyncRequest = 0;
+        state.pendingPages.clear();
         if (!visible) {
             state.followTailPending ||= isAtLiveTail(state);
             cancelScheduledRender(state);
@@ -82,10 +98,56 @@ function ensureTerminalVisibilityRegistration() {
     if (terminalVisibilityRegistration || typeof document === 'undefined') return;
     terminalPageVisible = document.visibilityState !== 'hidden';
     const eventController = new AbortController();
+    terminalConnectionRegistration = registerCircuitParticipant({
+        phase: 'terminal',
+        suspend: function () {
+            for (const state of terminals.values()) {
+                state.lifecycleGeneration++;
+                state.resyncRequest = 0;
+                state.pendingPages.clear();
+                state.pressedKeys.clear();
+                state.followTailPending ||= isAtLiveTail(state);
+                state.lastCols = 0;
+                state.lastRows = 0;
+                cancelScheduledRender(state);
+                stopSelectionAutoscroll(state);
+                if (state.resizeTimer) clearTimeout(state.resizeTimer);
+                state.resizeTimer = null;
+            }
+        },
+        recover: async function (isCurrent) {
+            const notifiedReferences = new Set();
+            for (const state of terminals.values()) {
+                if (!isCurrent()) return;
+                if (state.disposed || !state.dotNetRef) continue;
+                const reference = state.dotNetRef;
+                if (!notifiedReferences.has(reference)) {
+                    await reference.invokeMethodAsync('OnTerminalVisibilityChanged', terminalPageVisible);
+                    notifiedReferences.add(reference);
+                }
+                if (!isCurrent() || state.disposed) continue;
+                if (terminalPageVisible && isRendererVisible(state)) {
+                    const size = calculateSize(state);
+                    await reference.invokeMethodAsync('OnTerminalResize', state.sessionId, size[0], size[1]);
+                    if (!isCurrent() || state.disposed) continue;
+                    state.lastCols = size[0];
+                    state.lastRows = size[1];
+                }
+                const attach = await reference.invokeMethodAsync('GetTerminalAttach', state.sessionId);
+                if (!isCurrent() || state.disposed) continue;
+                if (!attach?.session) throw new Error('Terminal attachment unavailable');
+                applyTerminalAttach(state.sessionId, attach);
+                await reference.invokeMethodAsync('OnTerminalFocus', state.sessionId,
+                    terminalPageVisible && state.viewport.contains(document.activeElement));
+            }
+        }
+    });
     document.addEventListener('visibilitychange', handleTerminalPageVisibilityChange, { signal: eventController.signal });
     terminalVisibilityRegistration = {
         dispose: function () {
             eventController.abort();
+            terminalConnectionRegistration?.();
+            terminalConnectionRegistration = null;
             terminalVisibilityRegistration = null;
         }
     };
@@ -148,12 +210,15 @@ function calculateSize(state) {
 }
 
 function notifyResize(state) {
-    if (!state || state.disposed || !terminalPageVisible || !state.dotNetRef || !isRendererVisible(state)) return;
+    if (!isCircuitConnected() || !state || state.disposed || !terminalPageVisible || !state.dotNetRef || !isRendererVisible(state)) return;
     const size = calculateSize(state);
     if (size[0] === state.lastCols && size[1] === state.lastRows) return;
-    state.lastCols = size[0];
-    state.lastRows = size[1];
-    state.dotNetRef.invokeMethodAsync('OnTerminalResize', state.sessionId, size[0], size[1]).catch(function () { });
+    const lifecycleGeneration = state.lifecycleGeneration;
+    invokeCircuitMethod(state.dotNetRef, 'OnTerminalResize', state.sessionId, size[0], size[1]).then(function () {
+        if (state.disposed || lifecycleGeneration !== state.lifecycleGeneration) return;
+        state.lastCols = size[0];
+        state.lastRows = size[1];
+    }).catch(function () { });
 }
 
 function isAtLiveTail(state) {
@@ -191,6 +256,37 @@ function visualToHistoryIndex(state, visualIndex) {
     return state.snapshot.historyStart + visualIndex - getHistoryLayout(state).markerRows;
 }
 
+function visualToTimelineRow(state, visualIndex) {
+    const layout = getHistoryLayout(state);
+    if (visualIndex < layout.markerRows) return state.snapshot.historyStart;
+    if (visualIndex < layout.markerRows + layout.historyRows)
+        return visualToHistoryIndex(state, visualIndex);
+    return state.snapshot.historyEnd + visualIndex - layout.markerRows - layout.historyRows;
+}
+
+function timelineToVisualRow(state, timelineRow) {
+    const layout = getHistoryLayout(state);
+    if (timelineRow < state.snapshot.historyEnd)
+        return layout.markerRows + timelineRow - state.snapshot.historyStart;
+    return layout.markerRows + layout.historyRows + timelineRow - state.snapshot.historyEnd;
+}
+
+function navigatePrompt(state, previous) {
+    if (!isCircuitConnected() || !state.snapshot || state.snapshot.screen?.alternateBuffer || !state.snapshot.screen?.shellIntegrationAvailable) return;
+    const lifecycleGeneration = state.lifecycleGeneration;
+    const currentVisualRow = Math.floor(state.viewport.scrollTop / Math.max(1, state.lineHeight));
+    const fromRow = state.promptNavigationRow ?? (isAtLiveTail(state)
+        ? state.snapshot.historyEnd + (state.snapshot.screen?.lines?.length || 0)
+        : visualToTimelineRow(state, currentVisualRow));
+    invokeCircuitMethod(state.dotNetRef, 'FindTerminalPrompt', state.sessionId, fromRow, previous).then(function (target) {
+        if (state.disposed || lifecycleGeneration !== state.lifecycleGeneration || !Number.isFinite(target) || target < 0) return;
+        state.promptNavigationRow = target;
+        state.programmaticScrollTop = Math.max(0, timelineToVisualRow(state, target) * state.lineHeight);
+        state.viewport.scrollTop = state.programmaticScrollTop;
+        scheduleRender(state);
+    }).catch(function () { });
+}
+
 function cachePage(state, page) {
     if (!page || !Array.isArray(page.lines)) return;
     state.pageCache.delete(page.start);
@@ -224,28 +320,28 @@ function getHistoryLine(state, index) {
 }
 
 function requestHistoryPage(state, index) {
-    if (!terminalPageVisible || state.disposed || !state.dotNetRef || index < state.snapshot.historyStart || index >= state.snapshot.historyEnd) return;
+    if (!isCircuitConnected() || !terminalPageVisible || state.disposed || !state.dotNetRef || index < state.snapshot.historyStart || index >= state.snapshot.historyEnd) return;
     const pageRows = state.snapshot.historyPageRows || PAGE_ROWS;
     const start = Math.max(state.snapshot.historyStart, Math.floor(index / pageRows) * pageRows);
     if (state.pendingPages.has(start)) return;
     const lifecycleGeneration = state.lifecycleGeneration;
     state.pendingPages.add(start);
-    state.dotNetRef.invokeMethodAsync('GetTerminalHistoryPage', state.sessionId, start, pageRows).then(function (page) {
-        state.pendingPages.delete(start);
+    invokeCircuitMethod(state.dotNetRef, 'GetTerminalHistoryPage', state.sessionId, start, pageRows).then(function (page) {
+        if (lifecycleGeneration === state.lifecycleGeneration) state.pendingPages.delete(start);
         if (state.disposed || lifecycleGeneration !== state.lifecycleGeneration || !page || !state.snapshot || page.revision > state.snapshot.revision) return;
         cachePage(state, page);
         scheduleRender(state);
     }).catch(function () {
-        state.pendingPages.delete(start);
+        if (lifecycleGeneration === state.lifecycleGeneration) state.pendingPages.delete(start);
     });
 }
 
 function requestTerminalResync(state) {
-    if (!terminalPageVisible || state.disposed || !state.dotNetRef || state.resyncRequest) return;
+    if (!isCircuitConnected() || !terminalPageVisible || state.disposed || !state.dotNetRef || state.resyncRequest) return;
     const requestId = ++state.nextResyncRequest;
     const lifecycleGeneration = state.lifecycleGeneration;
     state.resyncRequest = requestId;
-    state.dotNetRef.invokeMethodAsync('GetTerminalAttach', state.sessionId).then(function (attach) {
+    invokeCircuitMethod(state.dotNetRef, 'GetTerminalAttach', state.sessionId).then(function (attach) {
         if (state.disposed || state.resyncRequest !== requestId || lifecycleGeneration !== state.lifecycleGeneration) return;
         if (!attach?.session) {
             scheduleRender(state, state.followTailPending);
@@ -264,27 +360,50 @@ function requestTerminalResync(state) {
     });
 }
 
-export function resolveTerminalColor(color, mode, isBackground) {
+function rgbColor(color) {
+    const red = (color >> 16) & 255;
+    const green = (color >> 8) & 255;
+    const blue = color & 255;
+    return `rgb(${red},${green},${blue})`;
+}
+
+export function resolveTerminalColor(color, mode, isBackground, screen = null) {
     if (mode === TERMINAL_COLOR_MODE.rgb) {
-        const red = (color >> 16) & 255;
-        const green = (color >> 8) & 255;
-        const blue = color & 255;
-        return `rgb(${red},${green},${blue})`;
+        return rgbColor(color);
     }
-    if (color < TERMINAL_PALETTE_SIZE) return paletteColor(color);
+    if (color < TERMINAL_PALETTE_SIZE) {
+        const paletteValue = screen?.palette?.[color];
+        return Number.isInteger(paletteValue) ? rgbColor(paletteValue) : paletteColor(color);
+    }
+    const defaultValue = isBackground ? screen?.defaultBackground : screen?.defaultForeground;
+    if (Number.isInteger(defaultValue)) return rgbColor(defaultValue);
     return isBackground ? TERMINAL_DEFAULT_BACKGROUND : TERMINAL_DEFAULT_FOREGROUND;
 }
 
-export function resolveTerminalCellColors(cell) {
+export function resolveTerminalCellColors(cell, screen = null) {
     const attributes = cell.attributes || 0;
-    let foreground = resolveTerminalColor(cell.foreground || 0, cell.foregroundMode || 0, false);
-    let background = resolveTerminalColor(cell.background || 0, cell.backgroundMode || 0, true);
+    let foreground = resolveTerminalColor(cell.foreground || 0, cell.foregroundMode || 0, false, screen);
+    let background = resolveTerminalColor(cell.background || 0, cell.backgroundMode || 0, true, screen);
     if ((attributes & TERMINAL_CELL_ATTRIBUTE.inverse) !== 0) {
         const swap = foreground;
         foreground = background;
         background = swap;
     }
     return { foreground, background };
+}
+
+export function resolveTerminalCellDecoration(cell, screen = null) {
+    const attributes = cell.attributes || 0;
+    const lines = [];
+    if ((attributes & TERMINAL_CELL_ATTRIBUTE.underline) !== 0) lines.push('underline');
+    if ((attributes & TERMINAL_CELL_ATTRIBUTE.strikethrough) !== 0) lines.push('line-through');
+    if ((attributes & TERMINAL_CELL_ATTRIBUTE.overline) !== 0) lines.push('overline');
+    const styles = ['solid', 'solid', 'double', 'wavy', 'dotted', 'dashed'];
+    return {
+        line: lines.join(' '),
+        style: styles[cell.underlineStyle || 0] || 'solid',
+        color: cell.hasUnderlineColor ? resolveTerminalColor(cell.underlineColor || 0, cell.underlineColorMode || 0, false, screen) : ''
+    };
 }
 
 function paletteColor(index) {
@@ -310,7 +429,7 @@ function paletteColor(index) {
     return '#ffffff';
 }
 
-function createCellNode(cell, cursor, selected) {
+function createCellNode(cell, cursor, selected, screen) {
     const hyperlink = normalizeTerminalHyperlink(cell.hyperlink, window.location.href);
     const span = document.createElement(hyperlink ? 'a' : 'span');
     span.className = 'terminal-cell';
@@ -326,18 +445,23 @@ function createCellNode(cell, cursor, selected) {
     if (cursor) span.classList.add('cursor');
     if (selected) span.classList.add('selected');
     const attributes = cell.attributes || 0;
-    const colors = resolveTerminalCellColors(cell);
+    const colors = resolveTerminalCellColors(cell, screen);
     span.style.color = colors.foreground;
     span.style.backgroundColor = colors.background;
+    if (cursor) {
+        span.style.color = resolveTerminalColor(257, TERMINAL_COLOR_MODE.indexedOrDefault, true, screen);
+        span.style.backgroundColor = Number.isInteger(screen?.cursorColor) ? rgbColor(screen.cursorColor) : TERMINAL_DEFAULT_FOREGROUND;
+    }
     if ((attributes & TERMINAL_CELL_ATTRIBUTE.bold) !== 0) span.style.fontWeight = 'bold';
     if ((attributes & TERMINAL_CELL_ATTRIBUTE.dim) !== 0) span.style.opacity = '0.65';
     if ((attributes & TERMINAL_CELL_ATTRIBUTE.italic) !== 0) span.style.fontStyle = 'italic';
     if ((attributes & TERMINAL_CELL_ATTRIBUTE.blink) !== 0) span.classList.add('blink');
-    const decorations = [];
-    if ((attributes & TERMINAL_CELL_ATTRIBUTE.underline) !== 0) decorations.push('underline');
-    if ((attributes & TERMINAL_CELL_ATTRIBUTE.strikethrough) !== 0) decorations.push('line-through');
-    if ((attributes & TERMINAL_CELL_ATTRIBUTE.overline) !== 0) decorations.push('overline');
-    if (decorations.length > 0) span.style.textDecoration = decorations.join(' ');
+    const decoration = resolveTerminalCellDecoration(cell, screen);
+    if (decoration.line) span.style.textDecorationLine = decoration.line;
+    if (cell.underlineStyle && cell.underlineStyle !== TERMINAL_UNDERLINE_STYLE.none) {
+        span.style.textDecorationStyle = decoration.style;
+        if (decoration.color) span.style.textDecorationColor = decoration.color;
+    }
     if ((attributes & TERMINAL_CELL_ATTRIBUTE.invisible) !== 0) span.style.visibility = 'hidden';
     return span;
 }
@@ -378,7 +502,7 @@ function createRowNode(state, visualIndex, line) {
     const cellCount = hasCursor ? Math.max(cells.length, state.snapshot.screen.cursorX + 1) : cells.length;
     for (let i = 0; i < cellCount; i++) {
         const cell = cells[i] || { content: ' ', width: 1, foreground: 0, background: 0, attributes: 0 };
-        row.appendChild(createCellNode(cell, hasCursor && i === state.snapshot.screen.cursorX, isCellSelected(state, visualIndex, i)));
+        row.appendChild(createCellNode(cell, hasCursor && i === state.snapshot.screen.cursorX, isCellSelected(state, visualIndex, i), state.snapshot.screen));
     }
     if (cellCount === 0) row.appendChild(document.createTextNode(' '));
     return row;
@@ -459,8 +583,9 @@ function scheduleRender(state, followTail = false) {
 function sendInput(state, data) {
     if (!data || !state.dotNetRef) return;
     // Typed text returns to the live tail like a real terminal
+    state.promptNavigationRow = null;
     scheduleRender(state, true);
-    state.dotNetRef.invokeMethodAsync('OnTerminalInput', state.sessionId, data).catch(function () { });
+    invokeCircuitMethod(state.dotNetRef, 'OnTerminalInput', state.sessionId, data).catch(function () { });
 }
 
 function positionTerminalInput(state) {
@@ -483,7 +608,7 @@ function sendMouse(state, event, eventType, button) {
     if (screenIndex < 0) return false;
     const bounds = state.viewport.getBoundingClientRect();
     const x = Math.max(0, Math.floor((event.clientX - bounds.left + state.viewport.scrollLeft) / state.charWidth));
-    state.dotNetRef.invokeMethodAsync('OnTerminalMouse', state.sessionId, button, x, screenIndex, eventType, event.shiftKey, event.ctrlKey, event.altKey).catch(function () { });
+    invokeCircuitMethod(state.dotNetRef, 'OnTerminalMouse', state.sessionId, button, x, screenIndex, eventType, event.shiftKey, event.ctrlKey, event.altKey).catch(function () { });
     return true;
 }
 
@@ -504,11 +629,14 @@ function appendPlainLine(result, line, hasPrevious, startColumn = 0, endColumn =
 }
 
 async function getHistoryLineAsync(state, historyIndex) {
+    if (!isCircuitConnected() || state.disposed) throw new Error('Terminal disconnected');
+    const lifecycleGeneration = state.lifecycleGeneration;
     let line = getHistoryLine(state, historyIndex);
     if (line) return line;
     const pageRows = state.snapshot.historyPageRows || PAGE_ROWS;
     const start = Math.max(state.snapshot.historyStart, Math.floor(historyIndex / pageRows) * pageRows);
-    const page = await state.dotNetRef.invokeMethodAsync('GetTerminalHistoryPage', state.sessionId, start, pageRows);
+    const page = await invokeCircuitMethod(state.dotNetRef, 'GetTerminalHistoryPage', state.sessionId, start, pageRows);
+    if (state.disposed || lifecycleGeneration !== state.lifecycleGeneration) throw new Error('Terminal attachment changed');
     cachePage(state, page);
     return getHistoryLine(state, historyIndex);
 }
@@ -576,6 +704,14 @@ function attachInputHandlers(state) {
     state.viewport.addEventListener('keydown', function (event) {
         positionTerminalInput(state);
         if (state.composing || event.isComposing || event.key === 'Process' || event.keyCode === 229) return;
+        const promptNavigation = event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey
+            && (event.key === 'ArrowUp' || event.key === 'ArrowDown')
+            && state.snapshot?.screen?.shellIntegrationAvailable === true && state.snapshot?.screen?.alternateBuffer !== true;
+        if (promptNavigation) {
+            event.preventDefault();
+            navigatePrompt(state, event.key === 'ArrowUp');
+            return;
+        }
         const clipboardAction = getTerminalClipboardAction(event.key, event.ctrlKey, event.shiftKey, event.metaKey, event.altKey);
         if (clipboardAction === 'copy') {
             if (window.getSelection()?.toString()) return;
@@ -593,31 +729,36 @@ function attachInputHandlers(state) {
             'F1', 'F2', 'F3', 'F4', 'F5', 'F6',
             'F7', 'F8', 'F9', 'F10', 'F11', 'F12'
         ];
+        const kitty = state.snapshot?.screen?.kittyKeyboardActive === true;
         const special = specialKeys.includes(event.key);
-        const printable = !event.metaKey && event.key.length === 1;
-        if (special || printable) {
+        const printable = (!event.metaKey || kitty) && event.key.length === 1;
+        const extended = kitty && (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'NumLock', 'ScrollLock', 'PrintScreen', 'Pause', 'ContextMenu'].includes(event.key) || /^F(1[3-9]|2[0-5])$/.test(event.key));
+        if (special || printable || extended) {
             event.preventDefault();
+            if (!isCircuitConnected()) return;
             // Like a real terminal, sending input drops the current selection and jumps back to the live tail
             state.selectionAnchor = null;
             state.selectionFocus = null;
+            state.promptNavigationRow = null;
             scheduleRender(state, true);
-            state.dotNetRef.invokeMethodAsync(
-                'OnTerminalKey',
-                state.sessionId,
-                event.key,
-                printable ? event.key : '',
-                event.shiftKey,
-                event.ctrlKey,
-                event.altKey
-            ).catch(function () { });
+            const input = [state.sessionId, event.key, printable ? event.key : '', event.shiftKey, event.ctrlKey, event.altKey, event.metaKey, event.code || '', event.repeat === true];
+            state.pressedKeys.set(event.code || event.key, input);
+            invokeCircuitMethod(state.dotNetRef, 'OnTerminalKey', ...input, false).catch(function () { });
         }
+    });
+    state.viewport.addEventListener('keyup', function (event) {
+        const identity = event.code || event.key;
+        if (!state.pressedKeys.has(identity)) return;
+        state.pressedKeys.delete(identity);
+        invokeCircuitMethod(state.dotNetRef, 'OnTerminalKey', state.sessionId, event.key, '', event.shiftKey, event.ctrlKey, event.altKey, event.metaKey, event.code || '', false, true).catch(function () { });
     });
     state.viewport.addEventListener('paste', function (event) {
         const text = event.clipboardData?.getData('text/plain') || '';
         if (text) {
             event.preventDefault();
+            state.promptNavigationRow = null;
             scheduleRender(state, true);
-            state.dotNetRef.invokeMethodAsync('OnTerminalPaste', state.sessionId, text).catch(function () { });
+            invokeCircuitMethod(state.dotNetRef, 'OnTerminalPaste', state.sessionId, text).catch(function () { });
         }
     });
     state.viewport.addEventListener('compositionstart', function () {
@@ -634,10 +775,13 @@ function attachInputHandlers(state) {
         }, 0);
     });
     state.viewport.addEventListener('focusin', function () {
-        state.dotNetRef.invokeMethodAsync('OnTerminalFocus', state.sessionId, true).catch(function () { });
+        invokeCircuitMethod(state.dotNetRef, 'OnTerminalFocus', state.sessionId, true).catch(function () { });
     });
     state.viewport.addEventListener('focusout', function () {
-        state.dotNetRef.invokeMethodAsync('OnTerminalFocus', state.sessionId, false).catch(function () { });
+        for (const input of state.pressedKeys.values())
+            invokeCircuitMethod(state.dotNetRef, 'OnTerminalKey', ...input, true).catch(function () { });
+        state.pressedKeys.clear();
+        invokeCircuitMethod(state.dotNetRef, 'OnTerminalFocus', state.sessionId, false).catch(function () { });
     });
     state.viewport.addEventListener('mousedown', function (event) {
         const hyperlink = event.target.closest?.('.terminal-hyperlink');
@@ -751,6 +895,7 @@ function createRenderer(sessionId, container, dotNetReference) {
         snapshot: null,
         pageCache: new Map(),
         pendingPages: new Set(),
+        pressedKeys: new Map(),
         resizeObserver: null,
         resizeTimer: null,
         renderAnimationFrame: 0,
@@ -767,6 +912,7 @@ function createRenderer(sessionId, container, dotNetReference) {
         lastRows: 0,
         renderedStart: 0,
         renderedEnd: 0,
+        promptNavigationRow: null,
         selectionAnchor: null,
         selectionFocus: null,
         selecting: false,
@@ -780,7 +926,7 @@ function createRenderer(sessionId, container, dotNetReference) {
         mouseButton: null
     };
     terminals.set(getKey(sessionId), state);
-    state.dotNetRef.invokeMethodAsync('OnTerminalVisibilityChanged', terminalPageVisible).catch(function () { });
+    invokeCircuitMethod(state.dotNetRef, 'OnTerminalVisibilityChanged', terminalPageVisible).catch(function () { });
     attachInputHandlers(state);
     positionTerminalInput(state);
     input.addEventListener('input', function () {
@@ -802,6 +948,7 @@ function createRenderer(sessionId, container, dotNetReference) {
             return;
         }
         state.programmaticScrollTop = null;
+        state.promptNavigationRow = null;
         scheduleRender(state);
     }, { passive: true });
     state.resizeObserver = new ResizeObserver(function () {
@@ -820,7 +967,6 @@ function createRenderer(sessionId, container, dotNetReference) {
 export function initTerminal(sessionId, containerId, dotNetReference) {
     const container = document.getElementById(containerId);
     if (!container) return [120, 30];
-    ensureTerminalVisibilityRegistration();
     let state = getState(sessionId);
     if (!state || state.container !== container) {
         disposeTerminal(sessionId);
@@ -828,6 +974,7 @@ export function initTerminal(sessionId, containerId, dotNetReference) {
     } else {
         state.dotNetRef = dotNetReference;
     }
+    ensureTerminalVisibilityRegistration();
     notifyResize(state);
     return calculateSize(state);
 }
@@ -837,11 +984,22 @@ export function applyTerminalSnapshot(sessionId, snapshot, followTailOverride = 
     if (!state || state.disposed || !snapshot) return;
     if (state.snapshot && snapshot.revision < state.snapshot.revision) return;
     const followTail = typeof followTailOverride === 'boolean' ? followTailOverride : isAtLiveTail(state) || !state.snapshot;
+    if (followTail) state.promptNavigationRow = null;
+    if (snapshot.screen && !snapshot.screen.colorsIncluded && state.snapshot?.screen) {
+        snapshot.screen.palette = state.snapshot.screen.palette;
+        snapshot.screen.defaultForeground = state.snapshot.screen.defaultForeground;
+        snapshot.screen.defaultBackground = state.snapshot.screen.defaultBackground;
+        snapshot.screen.cursorColor = state.snapshot.screen.cursorColor;
+    }
     const oldStart = state.snapshot?.historyStart;
     const oldMarkerRows = getHistoryLayout(state).markerRows;
     const oldAlternateBuffer = state.snapshot?.screen?.alternateBuffer;
     const oldScrollTop = state.viewport.scrollTop;
     state.snapshot = snapshot;
+    if (state.viewport && snapshot.screen) {
+        state.viewport.style.color = resolveTerminalColor(256, TERMINAL_COLOR_MODE.indexedOrDefault, false, snapshot.screen);
+        state.viewport.style.backgroundColor = resolveTerminalColor(257, TERMINAL_COLOR_MODE.indexedOrDefault, true, snapshot.screen);
+    }
     if (oldAlternateBuffer !== undefined && oldAlternateBuffer !== snapshot.screen?.alternateBuffer) {
         state.selectionAnchor = null;
         state.selectionFocus = null;
