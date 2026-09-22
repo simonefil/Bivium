@@ -59,6 +59,12 @@
     text-align: left;
 }
 
+/* Persisted colgroup ratios replace all legacy widths only as a complete set */
+.file-list-table.custom-columns th,
+.file-list-table.custom-columns td {
+    width: auto;
+}
+
 /* Header row */
 .file-list-table thead th {
     background-color: var(--background1);
@@ -75,6 +81,22 @@
 
 .file-list-table thead th:hover {
     background-color: var(--background2);
+}
+
+.column-resize-handle {
+    position: absolute;
+    top: 0;
+    right: -3px;
+    bottom: 0;
+    width: 7px;
+    cursor: col-resize;
+    touch-action: none;
+    z-index: 2;
+}
+
+.column-resize-handle:hover {
+    background-color: var(--foreground2);
+    opacity: 0.35;
 }
 
 /* Sort indicator */

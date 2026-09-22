@@ -1297,9 +1297,9 @@ namespace Bivium.Components.Shared
             if (this._dotNetRef == null)
                 this._dotNetRef = DotNetObjectReference.Create(this);
             if (this._jsModule == null)
-                this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/terminal.js?v=20260909-terminal-ux-v12");
+                this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/terminal.js?v=20260922-render-v13");
             if (this._interopModule == null)
-                this._interopModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260725-window-geometry-v3");
+                this._interopModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260922-file-columns-v1");
             if (!this._windowDragInitialized)
             {
                 await this._interopModule.InvokeVoidAsync("initWindowDrag", "terminal-window", "terminal-titlebar", "terminal-resize-handle", this._dotNetRef);

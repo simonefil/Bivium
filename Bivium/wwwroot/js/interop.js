@@ -644,6 +644,115 @@ export function scrollCursorIntoView(cursorIndex = -1) {
 }
 
 const filePanelScrollTrackers = new Map();
+const fileListColumnResizers = new Map();
+const MIN_FILE_COLUMN_WIDTH = 48;
+
+/**
+ * Registers pointer-driven adjacent column resizing for one file table.
+ * @param {string} tableId - Stable table DOM identifier.
+ * @param {object} dotNetReference - FilePanel callback owner.
+ */
+export function registerFileListColumnResizer(tableId, dotNetReference) {
+    unregisterFileListColumnResizer(tableId);
+    const table = document.getElementById(tableId);
+    if (!table || !dotNetReference) return;
+
+    const columns = Array.from(table.querySelectorAll(':scope > colgroup > col'));
+    const headers = Array.from(table.querySelectorAll(':scope > thead > tr > th'));
+    const handles = Array.from(table.querySelectorAll('[data-column-resizer]'));
+    if (columns.length !== 5 || headers.length !== 5 || handles.length !== 4) return;
+
+    const eventController = new AbortController();
+    const eventSignal = eventController.signal;
+    let drag = null;
+
+    function applyWidths(widths) {
+        const total = widths.reduce(function (sum, width) { return sum + width; }, 0);
+        if (!Number.isFinite(total) || total <= 0) return false;
+        if (!widths.every(function (width) { return Number.isFinite(width) && width > 0; })) return false;
+
+        table.classList.add('custom-columns');
+        for (let i = 0; i < columns.length; i++) {
+            columns[i].style.width = widths[i] / total * 100 + '%';
+        }
+        return true;
+    }
+
+    function finishDrag(event) {
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        const completed = drag;
+        drag = null;
+        if (!completed.changed) return;
+
+        const total = completed.widths.reduce(function (sum, width) { return sum + width; }, 0);
+        if (!Number.isFinite(total) || total <= 0) return;
+        const ratios = completed.widths.map(function (width) { return width / total; });
+        if (!ratios.every(function (ratio) { return Number.isFinite(ratio) && ratio > 0; })) return;
+        invokeCircuitMethod(dotNetReference, 'OnFileListColumnRatiosChanged', ratios).catch(function () { });
+    }
+
+    for (const handle of handles) {
+        handle.addEventListener('click', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+        }, { signal: eventSignal });
+        handle.addEventListener('pointerdown', function (event) {
+            if (event.button !== 0) return;
+            const index = Number(handle.dataset.columnResizer);
+            if (!Number.isInteger(index) || index < 0 || index >= headers.length - 1) return;
+
+            const widths = headers.map(function (header) { return header.getBoundingClientRect().width; });
+            const pairWidth = widths[index] + widths[index + 1];
+            if (!widths.every(function (width) { return Number.isFinite(width) && width > 0; }) || pairWidth < MIN_FILE_COLUMN_WIDTH * 2) return;
+
+            drag = {
+                pointerId: event.pointerId,
+                index: index,
+                startX: event.clientX,
+                startLeftWidth: widths[index],
+                pairWidth: pairWidth,
+                widths: widths,
+                changed: false
+            };
+            handle.setPointerCapture?.(event.pointerId);
+            event.preventDefault();
+            event.stopPropagation();
+        }, { signal: eventSignal });
+    }
+
+    document.addEventListener('pointermove', function (event) {
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        const leftWidth = Math.max(MIN_FILE_COLUMN_WIDTH, Math.min(drag.pairWidth - MIN_FILE_COLUMN_WIDTH, drag.startLeftWidth + event.clientX - drag.startX));
+        const rightWidth = drag.pairWidth - leftWidth;
+        if (Math.abs(leftWidth - drag.widths[drag.index]) < 0.01) return;
+
+        drag.widths[drag.index] = leftWidth;
+        drag.widths[drag.index + 1] = rightWidth;
+        drag.changed = true;
+        applyWidths(drag.widths);
+        event.preventDefault();
+    }, { signal: eventSignal });
+    document.addEventListener('pointerup', finishDrag, { signal: eventSignal });
+    document.addEventListener('pointercancel', finishDrag, { signal: eventSignal });
+
+    const registration = {
+        dispose: function () {
+            drag = null;
+            eventController.abort();
+            if (fileListColumnResizers.get(tableId) === registration) fileListColumnResizers.delete(tableId);
+        }
+    };
+    fileListColumnResizers.set(tableId, registration);
+}
+
+/**
+ * Removes column-resize listeners owned by one file table.
+ * @param {string} tableId - Stable table DOM identifier.
+ */
+export function unregisterFileListColumnResizer(tableId) {
+    const registration = fileListColumnResizers.get(tableId);
+    if (registration) registration.dispose();
+}
 
 /**
  * Tracks the first visible semantic file row for workspace persistence.

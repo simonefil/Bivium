@@ -79,7 +79,7 @@ function handleTerminalPageVisibilityChange() {
         state.resyncRequest = 0;
         state.pendingPages.clear();
         if (!visible) {
-            state.followTailPending ||= isAtLiveTail(state);
+            state.followTailPending ||= state.following;
             cancelScheduledRender(state);
             stopSelectionAutoscroll(state);
             if (state.resizeTimer) {
@@ -106,7 +106,7 @@ function ensureTerminalVisibilityRegistration() {
                 state.resyncRequest = 0;
                 state.pendingPages.clear();
                 state.pressedKeys.clear();
-                state.followTailPending ||= isAtLiveTail(state);
+                state.followTailPending ||= state.following;
                 state.lastCols = 0;
                 state.lastRows = 0;
                 cancelScheduledRender(state);
@@ -223,7 +223,19 @@ function notifyResize(state) {
 
 function isAtLiveTail(state) {
     if (!state || !state.viewport) return true;
-    return state.viewport.scrollHeight - state.viewport.scrollTop - state.viewport.clientHeight < state.lineHeight * 3;
+    return state.viewport.scrollHeight - state.viewport.scrollTop - state.viewport.clientHeight <= 1;
+}
+
+function disarmFollowTail(state) {
+    if (!state) return;
+    state.following = false;
+    state.followTailPending = false;
+    state.programmaticScrollTop = null;
+}
+
+function scrollProgrammatically(state, scrollTop) {
+    state.viewport.scrollTop = scrollTop;
+    state.programmaticScrollTop = state.viewport.scrollTop;
 }
 
 function getTotalRows(state) {
@@ -281,8 +293,8 @@ function navigatePrompt(state, previous) {
     invokeCircuitMethod(state.dotNetRef, 'FindTerminalPrompt', state.sessionId, fromRow, previous).then(function (target) {
         if (state.disposed || lifecycleGeneration !== state.lifecycleGeneration || !Number.isFinite(target) || target < 0) return;
         state.promptNavigationRow = target;
-        state.programmaticScrollTop = Math.max(0, timelineToVisualRow(state, target) * state.lineHeight);
-        state.viewport.scrollTop = state.programmaticScrollTop;
+        disarmFollowTail(state);
+        scrollProgrammatically(state, Math.max(0, timelineToVisualRow(state, target) * state.lineHeight));
         scheduleRender(state);
     }).catch(function () { });
 }
@@ -547,34 +559,99 @@ function getLineForVisualIndex(state, visualIndex) {
     return state.snapshot.screen?.lines?.[screenIndex] || null;
 }
 
+function getScreenVisualSignature(screen) {
+    return JSON.stringify([
+        screen?.palette || null,
+        screen?.defaultForeground ?? null,
+        screen?.defaultBackground ?? null,
+        screen?.cursorColor ?? null
+    ]);
+}
+
+function getRowVisualSignature(state, visualIndex, line, screenSignature) {
+    if (!line) return `${state.lineHeight}|${screenSignature}|loading`;
+    if (line.marker) return `${state.lineHeight}|${screenSignature}|marker`;
+    const cells = line.cells || [];
+    const screenIndex = getScreenIndex(state, visualIndex);
+    const hasCursor = screenIndex >= 0 && state.snapshot.screen?.cursorVisible && state.snapshot.screen.cursorY === screenIndex;
+    const cellCount = hasCursor ? Math.max(cells.length, state.snapshot.screen.cursorX + 1) : cells.length;
+    const visualCells = [];
+    for (let index = 0; index < cellCount; index++) {
+        const cell = cells[index] || { content: ' ', width: 1, foreground: 0, background: 0, attributes: 0 };
+        visualCells.push([
+            cell.content || '', cell.width ?? 1,
+            cell.foreground || 0, cell.foregroundMode || 0,
+            cell.background || 0, cell.backgroundMode || 0,
+            cell.attributes || 0,
+            cell.underlineStyle || 0,
+            !!cell.hasUnderlineColor,
+            cell.underlineColor || 0, cell.underlineColorMode || 0,
+            normalizeTerminalHyperlink(cell.hyperlink, window.location.href),
+            hasCursor && index === state.snapshot.screen.cursorX,
+            isCellSelected(state, visualIndex, index)
+        ]);
+    }
+    return JSON.stringify([
+        state.lineHeight,
+        screenSignature,
+        line.wrapped === true,
+        line.lineAttribute || TERMINAL_LINE_ATTRIBUTE.normal,
+        visualCells
+    ]);
+}
+
+function reconcileVisibleRows(state, entries) {
+    const desiredNodes = entries.map(entry => entry.node);
+    const desiredSet = new Set(desiredNodes);
+    for (let index = 0; index < desiredNodes.length; index++) {
+        const desired = desiredNodes[index];
+        const current = state.rowsLayer.children[index];
+        if (current === desired) continue;
+        if (current && !desiredSet.has(current)) state.rowsLayer.replaceChild(desired, current);
+        else state.rowsLayer.insertBefore(desired, current || null);
+    }
+    while (state.rowsLayer.children.length > desiredNodes.length)
+        state.rowsLayer.removeChild(state.rowsLayer.lastChild);
+}
+
 function renderVisibleRows(state, followTail) {
     if (!terminalPageVisible || state.disposed || !state.snapshot || !state.viewport || !state.rowsLayer) return;
     const totalRows = getTotalRows(state);
     state.spacer.style.height = Math.max(state.viewport.clientHeight, totalRows * state.lineHeight) + 'px';
     if (followTail) {
-        state.programmaticScrollTop = state.viewport.scrollHeight;
-        state.viewport.scrollTop = state.programmaticScrollTop;
+        scrollProgrammatically(state, state.viewport.scrollHeight);
     }
     const range = computeVirtualRange(totalRows, state.viewport.scrollTop, state.viewport.clientHeight, state.lineHeight);
     const top = range.start;
     const bottom = range.end;
-    const fragment = document.createDocumentFragment();
+    const screenSignature = getScreenVisualSignature(state.snapshot.screen);
+    const entries = [];
+    const nextRowCache = new Map();
     for (let index = top; index < bottom; index++) {
-        fragment.appendChild(createRowNode(state, index, getLineForVisualIndex(state, index)));
+        const line = getLineForVisualIndex(state, index);
+        const signature = getRowVisualSignature(state, index, line, screenSignature);
+        const cached = state.renderedRows.get(index);
+        const entry = cached?.signature === signature
+            ? cached
+            : { signature, node: createRowNode(state, index, line) };
+        entries.push(entry);
+        nextRowCache.set(index, entry);
     }
-    state.rowsLayer.replaceChildren(fragment);
+    reconcileVisibleRows(state, entries);
+    state.renderedRows = nextRowCache;
     state.renderedStart = top;
     state.renderedEnd = bottom;
 }
 
 function scheduleRender(state, followTail = false) {
     if (!state || state.disposed) return;
-    state.followTailPending ||= followTail;
+    if (followTail) state.following = true;
+    state.followTailPending ||= followTail && state.following;
     if (!terminalPageVisible || state.renderAnimationFrame) return;
     state.renderAnimationFrame = requestAnimationFrame(function () {
         state.renderAnimationFrame = 0;
         if (state.disposed || !terminalPageVisible) return;
-        const renderAtTail = state.followTailPending;
+        const renderAtTail = state.followTailPending && state.following;
         state.followTailPending = false;
         renderVisibleRows(state, renderAtTail);
     });
@@ -837,6 +914,7 @@ function attachInputHandlers(state) {
         }
     });
     state.viewport.addEventListener('wheel', function (event) {
+        if (event.deltaY < 0) disarmFollowTail(state);
         const button = event.deltaY < 0 ? 64 : 65;
         const eventType = event.deltaY < 0 ? 'wheel-up' : 'wheel-down';
         if (!event.shiftKey && sendMouse(state, event, eventType, button)) event.preventDefault();
@@ -900,6 +978,7 @@ function createRenderer(sessionId, container, dotNetReference) {
         resizeTimer: null,
         renderAnimationFrame: 0,
         followTailPending: false,
+        following: true,
         programmaticScrollTop: null,
         lifecycleGeneration: 0,
         nextResyncRequest: 0,
@@ -912,6 +991,7 @@ function createRenderer(sessionId, container, dotNetReference) {
         lastRows: 0,
         renderedStart: 0,
         renderedEnd: 0,
+        renderedRows: new Map(),
         promptNavigationRow: null,
         selectionAnchor: null,
         selectionFocus: null,
@@ -949,6 +1029,8 @@ function createRenderer(sessionId, container, dotNetReference) {
         }
         state.programmaticScrollTop = null;
         state.promptNavigationRow = null;
+        if (isAtLiveTail(state)) state.following = true;
+        else disarmFollowTail(state);
         scheduleRender(state);
     }, { passive: true });
     state.resizeObserver = new ResizeObserver(function () {
@@ -983,7 +1065,8 @@ export function applyTerminalSnapshot(sessionId, snapshot, followTailOverride = 
     const state = getState(sessionId);
     if (!state || state.disposed || !snapshot) return;
     if (state.snapshot && snapshot.revision < state.snapshot.revision) return;
-    const followTail = typeof followTailOverride === 'boolean' ? followTailOverride : isAtLiveTail(state) || !state.snapshot;
+    const followTail = typeof followTailOverride === 'boolean' ? followTailOverride : state.following || !state.snapshot;
+    if (typeof followTailOverride === 'boolean') state.following = followTailOverride;
     if (followTail) state.promptNavigationRow = null;
     if (snapshot.screen && !snapshot.screen.colorsIncluded && state.snapshot?.screen) {
         snapshot.screen.palette = state.snapshot.screen.palette;
@@ -1009,7 +1092,7 @@ export function applyTerminalSnapshot(sessionId, snapshot, followTailOverride = 
             if (start + page.lines.length <= snapshot.historyStart) state.pageCache.delete(start);
         }
         if (!followTail && snapshot.historyStart > oldStart)
-            state.viewport.scrollTop = Math.max(0, oldScrollTop - (snapshot.historyStart - oldStart) * state.lineHeight);
+            scrollProgrammatically(state, Math.max(0, oldScrollTop - (snapshot.historyStart - oldStart) * state.lineHeight));
         if (snapshot.historyStart > oldStart && state.selectionAnchor && state.selectionFocus) {
             const visualShift = computeHistoryLayout(snapshot).markerRows - oldMarkerRows - (snapshot.historyStart - oldStart);
             state.selectionAnchor = { row: Math.max(0, state.selectionAnchor.row + visualShift), column: state.selectionAnchor.column };
@@ -1026,9 +1109,10 @@ export function applyTerminalAttach(sessionId, attach) {
         scheduleRender(state, state.followTailPending);
         return;
     }
-    const followTail = state.followTailPending || !state.snapshot || isAtLiveTail(state);
+    const followTail = state.followTailPending || state.following || !state.snapshot;
     state.pageCache.clear();
     state.pendingPages.clear();
+    state.renderedRows.clear();
     if (attach.historyTail) cachePage(state, attach.historyTail);
     applyTerminalSnapshot(sessionId, attach.session, followTail);
 }
@@ -1099,6 +1183,7 @@ export function disposeTerminal(sessionId) {
     state.dotNetRef = null;
     state.pageCache.clear();
     state.pendingPages.clear();
+    state.renderedRows.clear();
     terminals.delete(key);
     releaseTerminalVisibilityRegistration();
 }

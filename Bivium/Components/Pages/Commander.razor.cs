@@ -718,6 +718,11 @@ namespace Bivium.Components.Pages
             {
                 result.CurrentSort = new SortColumn(snapshot.SortField, snapshot.SortDirection);
                 result.ScrollAnchorPath = snapshot.ScrollAnchorPath;
+                result.NameColumnRatio = snapshot.NameColumnRatio;
+                result.SizeColumnRatio = snapshot.SizeColumnRatio;
+                result.DateColumnRatio = snapshot.DateColumnRatio;
+                result.AttributesColumnRatio = snapshot.AttributesColumnRatio;
+                result.OwnerColumnRatio = snapshot.OwnerColumnRatio;
                 for (int i = 0; i < snapshot.ExpandedDirectoryPaths.Count; i++)
                 {
                     if (this.IsRestorableDirectory(snapshot.ExpandedDirectoryPaths[i]))
@@ -760,6 +765,8 @@ namespace Bivium.Components.Pages
                 cursorIndex = Math.Clamp(snapshot.CursorIndex, 0, result.Entries.Count - 1);
 
             result.CursorIndex = cursorIndex < 0 ? 0 : cursorIndex;
+            if (result.Entries.Count > 0)
+                result.SelectionAnchorPath = result.Entries[result.CursorIndex].FullPath;
             if (!availablePaths.Contains(result.ScrollAnchorPath))
                 result.ScrollAnchorPath = result.Entries.Count == 0 ? "" : result.Entries[result.CursorIndex].FullPath;
             return result;
@@ -826,7 +833,7 @@ namespace Bivium.Components.Pages
 
             List<string> expandedPaths = new List<string>(panel.ExpandedDirectoryPaths);
             expandedPaths.Sort(StringComparer.Ordinal);
-            return new WorkspacePanelSnapshot(panel.CurrentPath, cursorPath, panel.CursorIndex, panel.SelectedPaths, panel.CurrentSort.Field, panel.CurrentSort.Direction, panel.ScrollAnchorPath, expandedPaths);
+            return new WorkspacePanelSnapshot(panel.CurrentPath, cursorPath, panel.CursorIndex, panel.SelectedPaths, panel.CurrentSort.Field, panel.CurrentSort.Direction, panel.ScrollAnchorPath, expandedPaths, panel.NameColumnRatio, panel.SizeColumnRatio, panel.DateColumnRatio, panel.AttributesColumnRatio, panel.OwnerColumnRatio);
         }
 
         /// <summary>
@@ -902,6 +909,7 @@ namespace Bivium.Components.Pages
             active.CurrentPath = path;
             active.CursorIndex = 0;
             active.SelectedPaths.Clear();
+            active.SelectionAnchorPath = "";
             this.LoadPanelContents(active);
         }
 
@@ -915,6 +923,7 @@ namespace Bivium.Components.Pages
             this._leftPanel.CursorIndex = 0;
             this._leftPanel.ScrollAnchorPath = "";
             this._leftPanel.SelectedPaths.Clear();
+            this._leftPanel.SelectionAnchorPath = "";
             this.LoadPanelContents(this._leftPanel);
         }
 
@@ -928,6 +937,7 @@ namespace Bivium.Components.Pages
             this._rightPanel.CursorIndex = 0;
             this._rightPanel.ScrollAnchorPath = "";
             this._rightPanel.SelectedPaths.Clear();
+            this._rightPanel.SelectionAnchorPath = "";
             this.LoadPanelContents(this._rightPanel);
         }
 
@@ -985,6 +995,72 @@ namespace Bivium.Components.Pages
         private void HandleRightCursorChanged(int index)
         {
             this._rightPanel.CursorIndex = index;
+        }
+
+        /// <summary>
+        /// Stores the semantic selection anchor of the left panel
+        /// </summary>
+        /// <param name="path">Anchor full path</param>
+        private void HandleLeftSelectionAnchorChanged(string path)
+        {
+            this._leftPanel.SelectionAnchorPath = path ?? "";
+        }
+
+        /// <summary>
+        /// Stores the semantic selection anchor of the right panel
+        /// </summary>
+        /// <param name="path">Anchor full path</param>
+        private void HandleRightSelectionAnchorChanged(string path)
+        {
+            this._rightPanel.SelectionAnchorPath = path ?? "";
+        }
+
+        /// <summary>
+        /// Accepts a completed left-panel column resize while this circuit owns the lease
+        /// </summary>
+        /// <param name="ratios">Five normalized column widths</param>
+        private void HandleLeftColumnRatiosChanged(double[] ratios)
+        {
+            if (this.CanMutateWorkspace())
+                this.ApplyColumnRatios(this._leftPanel, ratios);
+        }
+
+        /// <summary>
+        /// Accepts a completed right-panel column resize while this circuit owns the lease
+        /// </summary>
+        /// <param name="ratios">Five normalized column widths</param>
+        private void HandleRightColumnRatiosChanged(double[] ratios)
+        {
+            if (this.CanMutateWorkspace())
+                this.ApplyColumnRatios(this._rightPanel, ratios);
+        }
+
+        /// <summary>
+        /// Validates and stores one complete normalized column configuration
+        /// </summary>
+        /// <param name="panel">Target panel</param>
+        /// <param name="ratios">Five positive finite widths</param>
+        private void ApplyColumnRatios(PanelState panel, double[] ratios)
+        {
+            if (ratios == null || ratios.Length != 5)
+                return;
+
+            double total = 0;
+            for (int i = 0; i < ratios.Length; i++)
+            {
+                if (!double.IsFinite(ratios[i]) || ratios[i] <= 0)
+                    return;
+                total += ratios[i];
+            }
+
+            if (!double.IsFinite(total) || total <= 0)
+                return;
+
+            panel.NameColumnRatio = ratios[0] / total;
+            panel.SizeColumnRatio = ratios[1] / total;
+            panel.DateColumnRatio = ratios[2] / total;
+            panel.AttributesColumnRatio = ratios[3] / total;
+            panel.OwnerColumnRatio = ratios[4] / total;
         }
 
         /// <summary>
@@ -1050,8 +1126,9 @@ namespace Bivium.Components.Pages
         /// <param name="panel">Panel to load</param>
         private void LoadPanelContents(PanelState panel)
         {
+            string cursorPath = panel.CursorIndex >= 0 && panel.CursorIndex < panel.Entries.Count ? panel.Entries[panel.CursorIndex].FullPath : "";
             panel.Entries = this._fileSystemService.GetDirectoryContents(panel.CurrentPath);
-            this.SortEntries(panel);
+            this.SortEntries(panel, cursorPath);
         }
 
         /// <summary>
@@ -1068,12 +1145,14 @@ namespace Bivium.Components.Pages
             if (this._leftPanel.CurrentPath == this._rightPanel.CurrentPath)
             {
                 List<FileSystemEntry> entries = this._fileSystemService.GetDirectoryContents(this._leftPanel.CurrentPath);
+                string leftCursorPath = this._leftPanel.CursorIndex >= 0 && this._leftPanel.CursorIndex < this._leftPanel.Entries.Count ? this._leftPanel.Entries[this._leftPanel.CursorIndex].FullPath : "";
+                string rightCursorPath = this._rightPanel.CursorIndex >= 0 && this._rightPanel.CursorIndex < this._rightPanel.Entries.Count ? this._rightPanel.Entries[this._rightPanel.CursorIndex].FullPath : "";
 
                 this._leftPanel.Entries = new List<FileSystemEntry>(entries);
-                this.SortEntries(this._leftPanel);
+                this.SortEntries(this._leftPanel, leftCursorPath);
 
                 this._rightPanel.Entries = new List<FileSystemEntry>(entries);
-                this.SortEntries(this._rightPanel);
+                this.SortEntries(this._rightPanel, rightCursorPath);
             }
             else
             {
@@ -1120,8 +1199,10 @@ namespace Bivium.Components.Pages
         /// Sorts entries in a panel according to its sort configuration
         /// </summary>
         /// <param name="panel">Panel to sort</param>
-        private void SortEntries(PanelState panel)
+        private void SortEntries(PanelState panel, string preservedCursorPath = null)
         {
+            string cursorPath = preservedCursorPath ?? (panel.CursorIndex >= 0 && panel.CursorIndex < panel.Entries.Count ? panel.Entries[panel.CursorIndex].FullPath : "");
+
             // Always keep directories first
             List<FileSystemEntry> dirs = new List<FileSystemEntry>();
             List<FileSystemEntry> files = new List<FileSystemEntry>();
@@ -1145,6 +1226,44 @@ namespace Bivium.Components.Pages
             panel.Entries.Clear();
             panel.Entries.AddRange(dirs);
             panel.Entries.AddRange(files);
+
+            StringComparer pathComparer = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+            HashSet<string> availablePaths = new HashSet<string>(pathComparer);
+            for (int i = 0; i < panel.Entries.Count; i++)
+                availablePaths.Add(panel.Entries[i].FullPath);
+
+            panel.SelectedPaths.RemoveAll(path => !availablePaths.Contains(path));
+            if (!string.IsNullOrEmpty(panel.SelectionAnchorPath) && !availablePaths.Contains(panel.SelectionAnchorPath))
+                panel.SelectionAnchorPath = "";
+
+            int cursorIndex = this.FindPanelEntryIndex(panel, cursorPath);
+            if (cursorIndex >= 0)
+                panel.CursorIndex = cursorIndex;
+            else if (panel.Entries.Count == 0)
+                panel.CursorIndex = 0;
+            else
+                panel.CursorIndex = Math.Clamp(panel.CursorIndex, 0, panel.Entries.Count - 1);
+        }
+
+        /// <summary>
+        /// Finds a path in the current ordered entries of a panel
+        /// </summary>
+        /// <param name="panel">Panel to search</param>
+        /// <param name="path">Semantic full path</param>
+        /// <returns>Current entry index, or -1 when absent</returns>
+        private int FindPanelEntryIndex(PanelState panel, string path)
+        {
+            if (string.IsNullOrEmpty(path))
+                return -1;
+
+            StringComparison comparison = this.GetPathComparison();
+            for (int i = 0; i < panel.Entries.Count; i++)
+            {
+                if (string.Equals(panel.Entries[i].FullPath, path, comparison))
+                    return i;
+            }
+
+            return -1;
         }
 
         /// <summary>
@@ -1914,7 +2033,7 @@ namespace Bivium.Components.Pages
         {
             if (this._jsModule == null)
             {
-                this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js");
+                this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260922-file-columns-v1");
             }
 
             bool success = await this._jsModule.InvokeAsync<bool>("postJson", "/api/Auth/logout", "{}");
@@ -2818,7 +2937,7 @@ namespace Bivium.Components.Pages
         private async System.Threading.Tasks.Task InitializeKeyboardCaptureAsync()
         {
             this._dotNetRef = DotNetObjectReference.Create(this);
-            this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260718-workspace-presence-v2");
+            this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260922-file-columns-v1");
             await this._jsModule.InvokeVoidAsync("captureKeyboard", this._dotNetRef);
             await this._jsModule.InvokeVoidAsync("initLongPress");
             await this._jsModule.InvokeVoidAsync("startWorkspacePresence", this._dotNetRef);
@@ -2998,21 +3117,10 @@ namespace Bivium.Components.Pages
             if (key == "ArrowUp" && !ctrl && !alt)
             {
                 PanelState active = this.GetActivePanel();
-                if (active.CursorIndex > 0)
+                if (active.Entries.Count > 0)
                 {
-                    active.CursorIndex--;
-                    if (!shift)
-                    {
-                        active.SelectedPaths.Clear();
-                    }
-                    if (active.CursorIndex < active.Entries.Count)
-                    {
-                        string path = active.Entries[active.CursorIndex].FullPath;
-                        if (!active.SelectedPaths.Contains(path))
-                        {
-                            active.SelectedPaths.Add(path);
-                        }
-                    }
+                    int targetIndex = Math.Max(0, active.CursorIndex - 1);
+                    this.MoveSelectionFocus(active, targetIndex, shift);
                     this.StateHasChangedAndScroll();
                 }
                 return;
@@ -3022,50 +3130,31 @@ namespace Bivium.Components.Pages
             if (key == "ArrowDown" && !ctrl && !alt)
             {
                 PanelState active = this.GetActivePanel();
-                if (active.CursorIndex < active.Entries.Count - 1)
+                if (active.Entries.Count > 0)
                 {
-                    active.CursorIndex++;
-                    if (!shift)
-                    {
-                        active.SelectedPaths.Clear();
-                    }
-                    if (active.CursorIndex < active.Entries.Count)
-                    {
-                        string path = active.Entries[active.CursorIndex].FullPath;
-                        if (!active.SelectedPaths.Contains(path))
-                        {
-                            active.SelectedPaths.Add(path);
-                        }
-                    }
+                    int targetIndex = Math.Min(active.Entries.Count - 1, active.CursorIndex + 1);
+                    this.MoveSelectionFocus(active, targetIndex, shift);
                     this.StateHasChangedAndScroll();
                 }
                 return;
             }
 
             // Home: cursor to first entry
-            if (key == "Home" && !ctrl && !shift && !alt)
+            if (key == "Home" && !ctrl && !alt)
             {
                 PanelState active = this.GetActivePanel();
-                active.CursorIndex = 0;
-                active.SelectedPaths.Clear();
                 if (active.Entries.Count > 0)
-                {
-                    active.SelectedPaths.Add(active.Entries[0].FullPath);
-                }
+                    this.MoveSelectionFocus(active, 0, shift);
                 this.StateHasChangedAndScroll();
                 return;
             }
 
             // End: cursor to last entry
-            if (key == "End" && !ctrl && !shift && !alt)
+            if (key == "End" && !ctrl && !alt)
             {
                 PanelState active = this.GetActivePanel();
                 if (active.Entries.Count > 0)
-                {
-                    active.CursorIndex = active.Entries.Count - 1;
-                    active.SelectedPaths.Clear();
-                    active.SelectedPaths.Add(active.Entries[active.CursorIndex].FullPath);
-                }
+                    this.MoveSelectionFocus(active, active.Entries.Count - 1, shift);
                 this.StateHasChangedAndScroll();
                 return;
             }
@@ -3107,19 +3196,8 @@ namespace Bivium.Components.Pages
             {
                 PanelState active = this.GetActivePanel();
                 int pageSize = this.GetActivePageSize();
-                active.CursorIndex = Math.Max(0, active.CursorIndex - pageSize);
-                if (!shift)
-                {
-                    active.SelectedPaths.Clear();
-                }
-                if (active.CursorIndex < active.Entries.Count)
-                {
-                    string path = active.Entries[active.CursorIndex].FullPath;
-                    if (!active.SelectedPaths.Contains(path))
-                    {
-                        active.SelectedPaths.Add(path);
-                    }
-                }
+                if (active.Entries.Count > 0)
+                    this.MoveSelectionFocus(active, Math.Max(0, active.CursorIndex - pageSize), shift);
                 this.StateHasChangedAndScroll();
                 return;
             }
@@ -3129,19 +3207,8 @@ namespace Bivium.Components.Pages
             {
                 PanelState active = this.GetActivePanel();
                 int pageSize = this.GetActivePageSize();
-                active.CursorIndex = Math.Min(active.Entries.Count - 1, active.CursorIndex + pageSize);
-                if (!shift)
-                {
-                    active.SelectedPaths.Clear();
-                }
-                if (active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count)
-                {
-                    string path = active.Entries[active.CursorIndex].FullPath;
-                    if (!active.SelectedPaths.Contains(path))
-                    {
-                        active.SelectedPaths.Add(path);
-                    }
-                }
+                if (active.Entries.Count > 0)
+                    this.MoveSelectionFocus(active, Math.Min(active.Entries.Count - 1, active.CursorIndex + pageSize), shift);
                 this.StateHasChangedAndScroll();
                 return;
             }
@@ -3175,6 +3242,7 @@ namespace Bivium.Components.Pages
                             active.CursorIndex = i;
                             active.SelectedPaths.Clear();
                             active.SelectedPaths.Add(active.Entries[i].FullPath);
+                            active.SelectionAnchorPath = active.Entries[i].FullPath;
                             matched = true;
                             this.StateHasChangedAndScroll();
                             break;
@@ -3188,6 +3256,41 @@ namespace Bivium.Components.Pages
                     return;
                 }
             }
+        }
+
+        /// <summary>
+        /// Moves focus and applies either a single selection or the exact anchor-to-focus range
+        /// </summary>
+        /// <param name="panel">Panel receiving the keyboard movement</param>
+        /// <param name="targetIndex">New focus index</param>
+        /// <param name="extendRange">Whether the stable anchor must be retained</param>
+        private void MoveSelectionFocus(PanelState panel, int targetIndex, bool extendRange)
+        {
+            if (targetIndex < 0 || targetIndex >= panel.Entries.Count)
+                return;
+
+            if (!extendRange)
+            {
+                panel.CursorIndex = targetIndex;
+                panel.SelectionAnchorPath = panel.Entries[targetIndex].FullPath;
+                panel.SelectedPaths.Clear();
+                panel.SelectedPaths.Add(panel.SelectionAnchorPath);
+                return;
+            }
+
+            int anchorIndex = this.FindPanelEntryIndex(panel, panel.SelectionAnchorPath);
+            if (anchorIndex < 0)
+            {
+                anchorIndex = panel.CursorIndex >= 0 && panel.CursorIndex < panel.Entries.Count ? panel.CursorIndex : targetIndex;
+                panel.SelectionAnchorPath = panel.Entries[anchorIndex].FullPath;
+            }
+
+            panel.CursorIndex = targetIndex;
+            panel.SelectedPaths.Clear();
+            int start = Math.Min(anchorIndex, targetIndex);
+            int end = Math.Max(anchorIndex, targetIndex);
+            for (int i = start; i <= end; i++)
+                panel.SelectedPaths.Add(panel.Entries[i].FullPath);
         }
 
         /// <summary>

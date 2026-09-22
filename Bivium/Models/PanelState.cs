@@ -23,6 +23,11 @@ namespace Bivium.Models
         public List<string> SelectedPaths { get; set; } = new List<string>();
 
         /// <summary>
+        /// Full path used as the stable selection range anchor
+        /// </summary>
+        public string SelectionAnchorPath { get; set; } = "";
+
+        /// <summary>
         /// Current sort configuration
         /// </summary>
         public SortColumn CurrentSort { get; set; } = new SortColumn();
@@ -41,6 +46,31 @@ namespace Bivium.Models
         /// Semantic full paths of expanded directory-tree nodes
         /// </summary>
         public HashSet<string> ExpandedDirectoryPaths { get; set; } = new HashSet<string>();
+
+        /// <summary>
+        /// Normalized width ratio of the name column, or null for the legacy layout
+        /// </summary>
+        public double? NameColumnRatio { get; set; }
+
+        /// <summary>
+        /// Normalized width ratio of the size column, or null for the legacy layout
+        /// </summary>
+        public double? SizeColumnRatio { get; set; }
+
+        /// <summary>
+        /// Normalized width ratio of the date column, or null for the legacy layout
+        /// </summary>
+        public double? DateColumnRatio { get; set; }
+
+        /// <summary>
+        /// Normalized width ratio of the attributes column, or null for the legacy layout
+        /// </summary>
+        public double? AttributesColumnRatio { get; set; }
+
+        /// <summary>
+        /// Normalized width ratio of the owner column, or null for the legacy layout
+        /// </summary>
+        public double? OwnerColumnRatio { get; set; }
 
         #endregion
 

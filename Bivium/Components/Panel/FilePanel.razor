@@ -54,15 +54,23 @@
          @oncontextmenu="this.HandlePanelContextMenu"
          @oncontextmenu:preventDefault="true">
         <Bivium.Components.FileList.FileListTable
+            TableId="@(this.PanelId + "-file-table")"
             Entries="@this.State.Entries"
             CurrentSort="@this.State.CurrentSort"
             SelectedPaths="@this.State.SelectedPaths"
             CursorIndex="@this.State.CursorIndex"
+            SelectionAnchorPath="@this.State.SelectionAnchorPath"
+            NameColumnRatio="@this.State.NameColumnRatio"
+            SizeColumnRatio="@this.State.SizeColumnRatio"
+            DateColumnRatio="@this.State.DateColumnRatio"
+            AttributesColumnRatio="@this.State.AttributesColumnRatio"
+            OwnerColumnRatio="@this.State.OwnerColumnRatio"
             CurrentPath="@this.State.CurrentPath"
             OnSortChanged="this.HandleSortChanged"
             OnSelectionChanged="this.HandleSelectionChanged"
             OnNavigate="this.HandleFileListNavigation"
             OnCursorChanged="this.HandleCursorChanged"
+            OnSelectionAnchorChanged="this.HandleSelectionAnchorChanged"
             OnContextMenu="this.HandleContextMenu" />
     </div>
 </div>

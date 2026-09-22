@@ -101,6 +101,18 @@ namespace Bivium.Components.Panel
         [Parameter]
         public EventCallback<int> OnPageSizeChanged { get; set; }
 
+        /// <summary>
+        /// Callback when the semantic selection anchor changes
+        /// </summary>
+        [Parameter]
+        public EventCallback<string> OnSelectionAnchorChanged { get; set; }
+
+        /// <summary>
+        /// Callback when all five normalized column ratios change
+        /// </summary>
+        [Parameter]
+        public EventCallback<double[]> OnColumnRatiosChanged { get; set; }
+
         #endregion
 
         #region Class Variables
@@ -157,9 +169,10 @@ namespace Bivium.Components.Panel
         {
             if (firstRender)
             {
-                this._jsModule = await this._jsRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js");
+                this._jsModule = await this._jsRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260922-file-columns-v1");
                 this._dotNetReference = DotNetObjectReference.Create(this);
                 await this._jsModule.InvokeVoidAsync("registerFilePanelScroll", this.PanelId, this._dotNetReference);
+                await this._jsModule.InvokeVoidAsync("registerFileListColumnResizer", this.PanelId + "-file-table", this._dotNetReference);
             }
 
             if (this._jsModule != null && !string.IsNullOrEmpty(this.State.ScrollAnchorPath) && this.State.ScrollAnchorPath != this._restoredScrollAnchorPath)
@@ -202,6 +215,34 @@ namespace Bivium.Components.Panel
             {
                 await this.OnPageSizeChanged.InvokeAsync(pageSize);
             }
+        }
+
+        /// <summary>
+        /// Receives one completed column-resize gesture from JavaScript
+        /// </summary>
+        /// <param name="ratios">Five normalized positive column widths</param>
+        /// <returns>Asynchronous callback task</returns>
+        [JSInvokable]
+        public async System.Threading.Tasks.Task OnFileListColumnRatiosChanged(double[] ratios)
+        {
+            if (ratios == null || ratios.Length != 5)
+                return;
+
+            double total = 0;
+            for (int i = 0; i < ratios.Length; i++)
+            {
+                if (!double.IsFinite(ratios[i]) || ratios[i] <= 0)
+                    return;
+                total += ratios[i];
+            }
+
+            if (!double.IsFinite(total) || total <= 0)
+                return;
+
+            double[] normalized = new double[5];
+            for (int i = 0; i < ratios.Length; i++)
+                normalized[i] = ratios[i] / total;
+            await this.OnColumnRatiosChanged.InvokeAsync(normalized);
         }
 
         #endregion
@@ -499,6 +540,15 @@ namespace Bivium.Components.Panel
         }
 
         /// <summary>
+        /// Handles a semantic selection-anchor change from the file list
+        /// </summary>
+        /// <param name="path">Anchor full path</param>
+        private async System.Threading.Tasks.Task HandleSelectionAnchorChanged(string path)
+        {
+            await this.OnSelectionAnchorChanged.InvokeAsync(path);
+        }
+
+        /// <summary>
         /// Handles context menu request from file list
         /// </summary>
         /// <param name="args">Context menu event data</param>
@@ -532,6 +582,7 @@ namespace Bivium.Components.Panel
                 if (this._jsModule != null)
                 {
                     await this._jsModule.InvokeVoidAsync("unregisterFilePanelScroll", this.PanelId);
+                    await this._jsModule.InvokeVoidAsync("unregisterFileListColumnResizer", this.PanelId + "-file-table");
                     await this._jsModule.DisposeAsync();
                 }
             }

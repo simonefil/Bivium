@@ -380,7 +380,12 @@ namespace Bivium.Models
         /// <param name="sortDirection">Sort direction</param>
         /// <param name="scrollAnchorPath">Path of the visible item used as scroll anchor</param>
         /// <param name="expandedDirectoryPaths">Paths of expanded directories in the tree</param>
-        public WorkspacePanelSnapshot(string currentPath, string cursorPath, int cursorIndex, IEnumerable<string> selectedPaths, SortField sortField, SortDirection sortDirection, string scrollAnchorPath = "", IEnumerable<string> expandedDirectoryPaths = null)
+        /// <param name="nameColumnRatio">Normalized name-column width</param>
+        /// <param name="sizeColumnRatio">Normalized size-column width</param>
+        /// <param name="dateColumnRatio">Normalized date-column width</param>
+        /// <param name="attributesColumnRatio">Normalized attributes-column width</param>
+        /// <param name="ownerColumnRatio">Normalized owner-column width</param>
+        public WorkspacePanelSnapshot(string currentPath, string cursorPath, int cursorIndex, IEnumerable<string> selectedPaths, SortField sortField, SortDirection sortDirection, string scrollAnchorPath = "", IEnumerable<string> expandedDirectoryPaths = null, double? nameColumnRatio = null, double? sizeColumnRatio = null, double? dateColumnRatio = null, double? attributesColumnRatio = null, double? ownerColumnRatio = null)
         {
             List<string> selectedPathCopy = selectedPaths == null ? new List<string>() : new List<string>(selectedPaths);
             List<string> expandedPathCopy = expandedDirectoryPaths == null ? new List<string>() : new List<string>(expandedDirectoryPaths);
@@ -392,6 +397,7 @@ namespace Bivium.Models
             this.SortDirection = sortDirection;
             this.ScrollAnchorPath = scrollAnchorPath ?? "";
             this.ExpandedDirectoryPaths = new ReadOnlyCollection<string>(expandedPathCopy);
+            this.SetColumnRatios(nameColumnRatio, sizeColumnRatio, dateColumnRatio, attributesColumnRatio, ownerColumnRatio);
         }
 
         #endregion
@@ -405,7 +411,7 @@ namespace Bivium.Models
         /// <returns>True when both snapshots represent the same state</returns>
         public bool Equals(WorkspacePanelSnapshot other)
         {
-            if (other == null || this.CurrentPath != other.CurrentPath || this.CursorPath != other.CursorPath || this.CursorIndex != other.CursorIndex || this.SortField != other.SortField || this.SortDirection != other.SortDirection || this.ScrollAnchorPath != other.ScrollAnchorPath)
+            if (other == null || this.CurrentPath != other.CurrentPath || this.CursorPath != other.CursorPath || this.CursorIndex != other.CursorIndex || this.SortField != other.SortField || this.SortDirection != other.SortDirection || this.ScrollAnchorPath != other.ScrollAnchorPath || this.NameColumnRatio != other.NameColumnRatio || this.SizeColumnRatio != other.SizeColumnRatio || this.DateColumnRatio != other.DateColumnRatio || this.AttributesColumnRatio != other.AttributesColumnRatio || this.OwnerColumnRatio != other.OwnerColumnRatio)
                 return false;
 
             return PathsEqual(this.SelectedPaths, other.SelectedPaths) && PathsEqual(this.ExpandedDirectoryPaths, other.ExpandedDirectoryPaths);
@@ -424,6 +430,11 @@ namespace Bivium.Models
             hash.Add(this.SortField);
             hash.Add(this.SortDirection);
             hash.Add(this.ScrollAnchorPath);
+            hash.Add(this.NameColumnRatio);
+            hash.Add(this.SizeColumnRatio);
+            hash.Add(this.DateColumnRatio);
+            hash.Add(this.AttributesColumnRatio);
+            hash.Add(this.OwnerColumnRatio);
             for (int i = 0; i < this.SelectedPaths.Count; i++)
                 hash.Add(this.SelectedPaths[i]);
             for (int i = 0; i < this.ExpandedDirectoryPaths.Count; i++)
@@ -434,6 +445,33 @@ namespace Bivium.Models
         #endregion
 
         #region Private Methods
+
+        /// <summary>
+        /// Accepts and normalizes only a complete positive finite column configuration
+        /// </summary>
+        private void SetColumnRatios(double? name, double? size, double? date, double? attributes, double? owner)
+        {
+            if (!name.HasValue || !size.HasValue || !date.HasValue || !attributes.HasValue || !owner.HasValue || !double.IsFinite(name.Value) || !double.IsFinite(size.Value) || !double.IsFinite(date.Value) || !double.IsFinite(attributes.Value) || !double.IsFinite(owner.Value) || name.Value <= 0 || size.Value <= 0 || date.Value <= 0 || attributes.Value <= 0 || owner.Value <= 0)
+                return;
+
+            double total = name.Value + size.Value + date.Value + attributes.Value + owner.Value;
+            if (!double.IsFinite(total) || total <= 0)
+                return;
+
+            double normalizedName = Math.Round(name.Value / total, 12);
+            double normalizedSize = Math.Round(size.Value / total, 12);
+            double normalizedDate = Math.Round(date.Value / total, 12);
+            double normalizedAttributes = Math.Round(attributes.Value / total, 12);
+            double normalizedOwner = 1 - normalizedName - normalizedSize - normalizedDate - normalizedAttributes;
+            if (normalizedName <= 0 || normalizedSize <= 0 || normalizedDate <= 0 || normalizedAttributes <= 0 || normalizedOwner <= 0)
+                return;
+
+            this.NameColumnRatio = normalizedName;
+            this.SizeColumnRatio = normalizedSize;
+            this.DateColumnRatio = normalizedDate;
+            this.AttributesColumnRatio = normalizedAttributes;
+            this.OwnerColumnRatio = normalizedOwner;
+        }
 
         /// <summary>
         /// Compares two ordered path sequences
@@ -500,6 +538,31 @@ namespace Bivium.Models
         /// Semantic paths of expanded directories in the tree
         /// </summary>
         public IReadOnlyList<string> ExpandedDirectoryPaths { get; }
+
+        /// <summary>
+        /// Normalized name-column width, or null for the legacy layout
+        /// </summary>
+        public double? NameColumnRatio { get; private set; }
+
+        /// <summary>
+        /// Normalized size-column width, or null for the legacy layout
+        /// </summary>
+        public double? SizeColumnRatio { get; private set; }
+
+        /// <summary>
+        /// Normalized date-column width, or null for the legacy layout
+        /// </summary>
+        public double? DateColumnRatio { get; private set; }
+
+        /// <summary>
+        /// Normalized attributes-column width, or null for the legacy layout
+        /// </summary>
+        public double? AttributesColumnRatio { get; private set; }
+
+        /// <summary>
+        /// Normalized owner-column width, or null for the legacy layout
+        /// </summary>
+        public double? OwnerColumnRatio { get; private set; }
 
         #endregion
     }

@@ -1,17 +1,28 @@
-<table class="file-list-table">
+<table id="@this.TableId" class="file-list-table @(this.HasValidColumnRatios() ? "custom-columns" : "")">
+    <colgroup>
+        <col style="@this.GetColumnStyle(this.NameColumnRatio)" />
+        <col style="@this.GetColumnStyle(this.SizeColumnRatio)" />
+        <col style="@this.GetColumnStyle(this.DateColumnRatio)" />
+        <col style="@this.GetColumnStyle(this.AttributesColumnRatio)" />
+        <col style="@this.GetColumnStyle(this.OwnerColumnRatio)" />
+    </colgroup>
     <thead>
         <tr>
             <th @onclick="() => this.ToggleSort(SortField.Name)">
                 Name @this.GetSortIndicator(SortField.Name)
+                <span class="column-resize-handle" data-column-resizer="0" title="Resize columns"></span>
             </th>
             <th @onclick="() => this.ToggleSort(SortField.Size)">
                 Size @this.GetSortIndicator(SortField.Size)
+                <span class="column-resize-handle" data-column-resizer="1" title="Resize columns"></span>
             </th>
             <th @onclick="() => this.ToggleSort(SortField.Date)">
                 Date @this.GetSortIndicator(SortField.Date)
+                <span class="column-resize-handle" data-column-resizer="2" title="Resize columns"></span>
             </th>
             <th @onclick="() => this.ToggleSort(SortField.Attributes)">
                 Attr @this.GetSortIndicator(SortField.Attributes)
+                <span class="column-resize-handle" data-column-resizer="3" title="Resize columns"></span>
             </th>
             <th @onclick="() => this.ToggleSort(SortField.Owner)">
                 Owner @this.GetSortIndicator(SortField.Owner)
