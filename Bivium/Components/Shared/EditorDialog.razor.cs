@@ -8,7 +8,7 @@ namespace Bivium.Components.Shared
     /// <summary>
     /// Floating editor window with Monaco Editor for editing text files
     /// </summary>
-    public partial class EditorDialog : ComponentBase, IDisposable
+    public partial class EditorDialog : ComponentBase, IAsyncDisposable
     {
         #region Injected Services
 
@@ -85,6 +85,11 @@ namespace Bivium.Components.Shared
         private bool _jsInitialized = false;
 
         /// <summary>
+        /// Whether component-owned callbacks have been released
+        /// </summary>
+        private bool _isDisposed;
+
+        /// <summary>
         /// Status bar text (file size, encoding info)
         /// </summary>
         private string _statusText = "";
@@ -150,6 +155,8 @@ namespace Bivium.Components.Shared
         {
             // Wait for the DOM to be ready
             await System.Threading.Tasks.Task.Delay(100);
+            if (this._isDisposed)
+                return;
 
             // Import JS modules
             if (this._jsModule == null)
@@ -161,6 +168,8 @@ namespace Bivium.Components.Shared
             {
                 this._interopModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260716-window-manager");
             }
+            if (this._isDisposed)
+                return;
 
             // Determine language from file extension
             string extension = System.IO.Path.GetExtension(this._filePath).ToLowerInvariant();
@@ -276,22 +285,69 @@ namespace Bivium.Components.Shared
 
         #endregion
 
-        #region IDisposable
+        #region IAsyncDisposable
 
         /// <summary>
         /// Cleanup Monaco editor and JS references
         /// </summary>
-        public void Dispose()
+        public async ValueTask DisposeAsync()
         {
-            if (this._jsModule != null && this._jsInitialized)
-            {
-                _ = this._jsModule.InvokeVoidAsync("disposeEditor");
-            }
+            if (this._isDisposed)
+                return;
+            this._isDisposed = true;
 
-            if (this._dotNetRef != null)
+            try
             {
-                this._dotNetRef.Dispose();
-                this._dotNetRef = null;
+                try
+                {
+                    try
+                    {
+                        if (this._jsModule != null && this._jsInitialized)
+                            await this._jsModule.InvokeVoidAsync("disposeEditor");
+                    }
+                    catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException)
+                    {
+                    }
+                    finally
+                    {
+                        try
+                        {
+                            if (this._jsModule != null)
+                                await this._jsModule.DisposeAsync();
+                        }
+                        catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException)
+                        {
+                        }
+                    }
+                }
+                finally
+                {
+                    if (this._interopModule != null)
+                    {
+                        try
+                        {
+                            try
+                            {
+                                await this._interopModule.InvokeVoidAsync("disposeWindowDrag", "editor-window");
+                            }
+                            finally
+                            {
+                                await this._interopModule.DisposeAsync();
+                            }
+                        }
+                        catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException)
+                        {
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                if (this._dotNetRef != null)
+                {
+                    this._dotNetRef.Dispose();
+                    this._dotNetRef = null;
+                }
             }
         }
 

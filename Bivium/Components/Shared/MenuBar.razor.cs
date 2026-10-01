@@ -1,12 +1,14 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
+using System;
+using System.Collections.Generic;
 
 namespace Bivium.Components.Shared
 {
     /// <summary>
     /// Top menu bar with dropdown menus (File, Edit, View, Settings, Help)
     /// </summary>
-    public partial class MenuBar : ComponentBase
+    public partial class MenuBar : ComponentBase, IAsyncDisposable
     {
         #region Injected Services
 
@@ -110,6 +112,13 @@ namespace Bivium.Components.Shared
         [Parameter]
         public EventCallback OnTerminal { get; set; }
 
+        /// <summary>Visibilità controllata dal Commander, senza duplicare lo stato terminale</summary>
+        [Parameter] public bool TerminalVisible { get; set; }
+        /// <summary>Minimizzazione controllata dal Commander</summary>
+        [Parameter] public bool TerminalMinimized { get; set; }
+        /// <summary>Richiesta di attenzione controllata dal terminale</summary>
+        [Parameter] public bool TerminalNeedsAttention { get; set; }
+
         /// <summary>
         /// Callback for Editor Extensions action
         /// </summary>
@@ -159,6 +168,30 @@ namespace Bivium.Components.Shared
         public EventCallback OnToggleSinglePanel { get; set; }
 
         /// <summary>
+        /// Temi controllati dal Commander nella variante Radzen
+        /// </summary>
+        [Parameter]
+        public IReadOnlyList<string> ThemeOptions { get; set; } = Array.Empty<string>();
+
+        /// <summary>
+        /// Tema controllato dal Commander nella variante Radzen
+        /// </summary>
+        [Parameter]
+        public string CurrentTheme { get; set; } = "software-dark";
+
+        /// <summary>
+        /// Callback controllato dal Commander per il cambio tema Radzen
+        /// </summary>
+        [Parameter]
+        public EventCallback<string> OnThemeChanged { get; set; }
+
+        /// <summary>
+        /// Rivalida l'autorità prima di eseguire un comando Radzen
+        /// </summary>
+        [Parameter]
+        public Func<bool> CanInvoke { get; set; }
+
+        /// <summary>
         /// Whether single panel mode is active
         /// </summary>
         [Parameter]
@@ -204,14 +237,17 @@ namespace Bivium.Components.Shared
         private string _activeMenu = "";
 
         /// <summary>
-        /// JS module reference for theme switching
+        /// Host del menu Radzen usato dall'adapter hover
         /// </summary>
-        private IJSObjectReference _jsThemeModule;
+        private ElementReference _radzenMenuHost;
 
         /// <summary>
-        /// Current theme name
+        /// Modulo dell'adapter menu Radzen
         /// </summary>
-        private string _currentTheme = "dark";
+        private IJSObjectReference _jsRadzenModule;
+
+        /// <summary>Impedisce registrazioni dopo il rilascio del menu</summary>
+        private bool _isDisposed;
 
         #endregion
 
@@ -220,12 +256,10 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Load saved theme on first render
         /// </summary>
-        protected override void OnAfterRender(bool firstRender)
+        protected override async System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender)
         {
-            if (firstRender)
-            {
-                _ = this.LoadSavedTheme();
-            }
+            if (firstRender && !this._isDisposed)
+                await this.InitializeRadzenMenuAsync();
         }
 
         #endregion
@@ -233,33 +267,98 @@ namespace Bivium.Components.Shared
         #region Private Methods
 
         /// <summary>
-        /// Loads the saved theme from localStorage via JS interop
+        /// Collega il passaggio hover tra menu dopo la prima apertura a click
         /// </summary>
-        private async System.Threading.Tasks.Task LoadSavedTheme()
+        private async System.Threading.Tasks.Task InitializeRadzenMenuAsync()
         {
-            this._jsThemeModule = await this._jsRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js");
-            string saved = await this._jsThemeModule.InvokeAsync<string>("loadSavedTheme");
-
-            if (!string.IsNullOrEmpty(saved))
+            this._jsRadzenModule = await this._jsRuntime.InvokeAsync<IJSObjectReference>("import", "./js/radzen-startup.js");
+            if (this._isDisposed)
             {
-                this._currentTheme = saved;
-                this.StateHasChanged();
+                await this._jsRadzenModule.DisposeAsync();
+                this._jsRadzenModule = null;
+                return;
             }
+            await this._jsRadzenModule.InvokeVoidAsync("initializeRadzenMenuHover", this._radzenMenuHost);
+        }
+
+        /// <summary>Rilascia listener hover e modulo posseduti dall'istanza</summary>
+        /// <returns>Operazione asincrona di rilascio</returns>
+        public async System.Threading.Tasks.ValueTask DisposeAsync()
+        {
+            if (this._isDisposed)
+                return;
+            this._isDisposed = true;
+            if (this._jsRadzenModule == null)
+                return;
+
+            try
+            {
+                try
+                {
+                    await this._jsRadzenModule.InvokeVoidAsync("disposeRadzenMenuHover", this._radzenMenuHost);
+                }
+                finally
+                {
+                    await this._jsRadzenModule.DisposeAsync();
+                }
+            }
+            catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException)
+            {
+            }
+            this._jsRadzenModule = null;
         }
 
         /// <summary>
         /// Handles theme dropdown change
         /// </summary>
         /// <param name="args">Change event args</param>
-        private void HandleThemeChange(ChangeEventArgs args)
+        private async System.Threading.Tasks.Task HandleThemeChange(ChangeEventArgs args)
         {
-            string theme = args.Value.ToString();
-            this._currentTheme = theme;
+            if (this.CanInvoke != null && !this.CanInvoke())
+                return;
 
-            if (this._jsThemeModule != null)
+            string theme = args.Value?.ToString() ?? "";
+            await this.OnThemeChanged.InvokeAsync(theme);
+        }
+
+        /// <summary>
+        /// Restituisce il tema selezionato per la variante compilata
+        /// </summary>
+        /// <returns>Nome tema corrente</returns>
+        private string GetCurrentTheme()
+        {
+            return this.CurrentTheme;
+        }
+
+        /// <summary>
+        /// Restituisce i temi disponibili per la variante compilata
+        /// </summary>
+        /// <returns>Elenco temi</returns>
+        private IReadOnlyList<string> GetThemeOptions()
+        {
+            return this.ThemeOptions;
+        }
+
+        /// <summary>
+        /// Formatta un nome tema kebab-case per il menu
+        /// </summary>
+        /// <param name="theme">Nome tecnico del tema</param>
+        /// <returns>Etichetta leggibile</returns>
+        private string FormatThemeName(string theme)
+        {
+            if (string.IsNullOrEmpty(theme))
+                return "";
+
+            string[] words = theme.Split('-', StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; i < words.Length; i++)
             {
-                _ = this._jsThemeModule.InvokeVoidAsync("setTheme", theme);
+                if (string.Equals(words[i], "dos", StringComparison.OrdinalIgnoreCase))
+                    words[i] = "DOS";
+                else
+                    words[i] = char.ToUpperInvariant(words[i][0]) + words[i].Substring(1);
             }
+
+            return string.Join(" ", words);
         }
 
         /// <summary>
@@ -490,6 +589,8 @@ namespace Bivium.Components.Shared
         /// <param name="callback">Action callback</param>
         private async System.Threading.Tasks.Task HandleAction(EventCallback callback)
         {
+            if (this.CanInvoke == null || !this.CanInvoke())
+                return;
             this._activeMenu = "";
             await callback.InvokeAsync();
         }

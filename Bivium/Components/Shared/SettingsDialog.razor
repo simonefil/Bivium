@@ -1,34 +1,22 @@
+@namespace Bivium.Components.Shared
 @inject IJSRuntime JSRuntime
 
 @if (this._isVisible)
 {
-    <div class="context-menu-overlay" @onclick="this.HandleCancel">
-        <div class="context-menu" style="position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 40ch;"
-             @onclick:stopPropagation="true">
-            <div style="background-color: var(--background1); padding: 0 1ch; border-bottom: 1px solid var(--foreground2);">
-                Editor Extensions
-            </div>
-            <div style="padding: 1lh 1ch;">
-                <div style="margin-bottom: 0.5lh; color: var(--foreground2);">
-                    One extension per line, including the dot (e.g. .txt)
-                </div>
-                <textarea @ref="this._textareaElement"
-                          @bind="this._extensionsText"
-                          rows="12"
-                          style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2); padding: 0.5ch; font-family: monospace; resize: vertical;">
-                </textarea>
-
+    <PersistentModalShell Label="Editor Extensions" OnCancel="this.HandleCancel" CanClose="@(!this._isSaving)" OnContentRendered="this.HandleContentRenderedAsync">
+        <RadzenStack class="bivium-radzen-modal" Gap="1rem" Style="width:100%;max-height:calc(100dvh - 9rem);box-sizing:border-box;">
+                <RadzenText TextStyle="TextStyle.Body1" Text="One extension per line, including the dot (e.g. .txt)" />
+                <RadzenFormField Text="File extensions" Component="editor-extensions-textarea" Style="width:100%;">
+                    <RadzenTextArea id="editor-extensions-textarea" Name="editor-extensions-textarea" @ref="this._textareaElement" @bind-Value="this._extensionsText" Immediate="true" Disabled="@this._isSaving" Rows="12" Style="width:100%;resize:vertical;" />
+                </RadzenFormField>
                 @if (!string.IsNullOrEmpty(this._statusText))
                 {
-                    <div style="color: var(--foreground2); margin-top: 0.5lh;">
-                        @this._statusText
-                    </div>
+                    <RadzenAlert AlertStyle="AlertStyle.Danger" Shade="Shade.Lighter">@this._statusText</RadzenAlert>
                 }
-            </div>
-            <div style="display: flex; justify-content: flex-end; gap: 2ch; padding: 0 1ch 1lh 1ch;">
-                <button @onclick="this.HandleCancel">Cancel</button>
-                <button @onclick="this.HandleSave">Save</button>
-            </div>
-        </div>
-    </div>
+                <div class="bivium-radzen-dialog-actions">
+                    <RadzenButton Text="Cancel" Disabled="@this._isSaving" ButtonStyle="ButtonStyle.Light" Click="this.HandleCancel" />
+                    <RadzenButton Text="Save" Icon="save" IsBusy="@this._isSaving" ButtonStyle="ButtonStyle.Primary" Click="this.HandleSaveAsync" />
+                </div>
+        </RadzenStack>
+    </PersistentModalShell>
 }

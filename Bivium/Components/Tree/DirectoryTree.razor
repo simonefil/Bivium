@@ -1,17 +1,212 @@
+@namespace Bivium.Components.Tree
 @inject Bivium.Services.IFileSystemService FileSystemService
 
-<div class="dir-tree">
-    @if (this._roots != null)
+<RadzenTree class="bivium-directory-tree" Value="@this.CurrentPath" AriaLabel="Directory tree"
+            Expand="this.HandleExpand" Collapse="this.HandleCollapse" Change="this.HandleChange">
+    @foreach (DirectoryTreeItem root in this._roots)
     {
-        @foreach (FileSystemEntry root in this._roots)
+        <RadzenTreeItem Text="@root.Name" Value="@root.FullPath" HasChildren="@root.IsDirectory"
+                        Expanded="@this.IsExpanded(root)" Selected="@this.IsSelected(root)" Template="@this.DirectoryTemplate" />
+    }
+</RadzenTree>
+
+@code {
+    /// <summary>
+    /// Percorso usato per individuare le radici disponibili
+    /// </summary>
+    [Parameter]
+    public string RootPath { get; set; } = "";
+
+    /// <summary>
+    /// Percorso attualmente aperto nel pannello
+    /// </summary>
+    [Parameter]
+    public string CurrentPath { get; set; } = "";
+
+    /// <summary>
+    /// Percorsi semantici dei nodi espansi
+    /// </summary>
+    [Parameter]
+    public HashSet<string> ExpandedDirectoryPaths { get; set; } = new HashSet<string>();
+
+    /// <summary>
+    /// Notifica una richiesta di navigazione
+    /// </summary>
+    [Parameter]
+    public EventCallback<string> OnDirectorySelected { get; set; }
+
+    /// <summary>
+    /// Notifica una modifica dello stato di espansione
+    /// </summary>
+    [Parameter]
+    public EventCallback<DirectoryTreeExpansionChange> OnExpansionChanged { get; set; }
+
+    /// <summary>
+    /// Radici filesystem visualizzate dal tree
+    /// </summary>
+    private List<DirectoryTreeItem> _roots = new List<DirectoryTreeItem>();
+
+    /// <summary>
+    /// Radice osservata nell'ultimo caricamento
+    /// </summary>
+    private string _previousRootPath = "";
+
+    /// <summary>
+    /// Proietta l'icona directory e il percorso completo lasciando a Radzen gli eventi del nodo
+    /// </summary>
+    private RenderFragment<RadzenTreeItem> DirectoryTemplate => item => @<span class="bivium-tree-name" title="@item.Value">
+        <RadzenIcon Icon="folder" aria-hidden="true" /><span>@item.Text</span>
+    </span>;
+
+    /// <summary>
+    /// Carica le radici iniziali
+    /// </summary>
+    protected override void OnInitialized()
+    {
+        this.LoadRoots();
+    }
+
+    /// <summary>
+    /// Ricarica le radici soltanto quando cambia il volume
+    /// </summary>
+    protected override void OnParametersSet()
+    {
+        string currentRoot = Path.GetPathRoot(this.RootPath);
+        string previousRoot = Path.GetPathRoot(this._previousRootPath);
+        if (!string.Equals(currentRoot, previousRoot, StringComparison.OrdinalIgnoreCase))
+            this.LoadRoots();
+        this._previousRootPath = this.RootPath;
+    }
+
+    /// <summary>
+    /// Materializza i figli del nodo espanso usando il payload lazy Radzen
+    /// </summary>
+    /// <param name="args">Nodo richiesto da Radzen</param>
+    private async System.Threading.Tasks.Task HandleExpand(TreeExpandEventArgs args)
+    {
+        string path = args.Value?.ToString() ?? "";
+        List<DirectoryTreeItem> children = string.IsNullOrEmpty(path) ? new List<DirectoryTreeItem>() : this.FileSystemService.GetSubDirectories(path).Select(entry => new DirectoryTreeItem(entry)).ToList();
+        args.Children = new TreeItemSettings
         {
-            <Bivium.Components.Tree.DirectoryTreeNode
-                Entry="@root"
-                CurrentPath="@this.CurrentPath"
-                ExpandedDirectoryPaths="@this.ExpandedDirectoryPaths"
-                OnExpansionChanged="this.OnExpansionChanged"
-                OnDirectorySelected="this.HandleDirectorySelected"
-                Depth="0" />
+            Data = children,
+            TextProperty = nameof(DirectoryTreeItem.Name),
+            Template = this.DirectoryTemplate,
+            HasChildren = this.HasChildren,
+            Expanded = this.IsExpanded,
+            Selected = this.IsSelected
+        };
+
+        if (!string.IsNullOrEmpty(path) && !this.ExpandedDirectoryPaths.Contains(path))
+            await this.OnExpansionChanged.InvokeAsync(new DirectoryTreeExpansionChange { Path = path, Expanded = true });
+    }
+
+    /// <summary>
+    /// Inoltra al proprietario la compressione di un nodo
+    /// </summary>
+    /// <param name="args">Nodo compresso da Radzen</param>
+    private async System.Threading.Tasks.Task HandleCollapse(TreeEventArgs args)
+    {
+        string path = args.Value?.ToString() ?? "";
+        if (!string.IsNullOrEmpty(path) && this.ExpandedDirectoryPaths.Contains(path))
+            await this.OnExpansionChanged.InvokeAsync(new DirectoryTreeExpansionChange { Path = path, Expanded = false });
+    }
+
+    /// <summary>
+    /// Inoltra la selezione del nodo come navigazione semantica
+    /// </summary>
+    /// <param name="args">Nodo selezionato</param>
+    private async System.Threading.Tasks.Task HandleChange(TreeEventArgs args)
+    {
+        string path = args.Value?.ToString() ?? "";
+        if (!string.IsNullOrEmpty(path))
+            await this.OnDirectorySelected.InvokeAsync(path);
+    }
+
+    /// <summary>
+    /// Indica a Radzen che una directory può essere espansa senza anticiparne la lettura
+    /// </summary>
+    /// <param name="item">Entry associata al nodo</param>
+    /// <returns>True per le directory</returns>
+    private bool HasChildren(object item)
+    {
+        return item is DirectoryTreeItem entry && entry.IsDirectory;
+    }
+
+    /// <summary>
+    /// Ripristina lo stato espanso in base al percorso completo
+    /// </summary>
+    /// <param name="item">Entry associata al nodo</param>
+    /// <returns>True quando il percorso è nello snapshot semantico</returns>
+    private bool IsExpanded(object item)
+    {
+        return item is DirectoryTreeItem entry && this.ExpandedDirectoryPaths.Contains(entry.FullPath);
+    }
+
+    /// <summary>
+    /// Evidenzia il nodo che corrisponde al percorso corrente
+    /// </summary>
+    /// <param name="item">Entry associata al nodo</param>
+    /// <returns>True quando il percorso coincide con quello corrente</returns>
+    private bool IsSelected(object item)
+    {
+        return item is DirectoryTreeItem entry && string.Equals(entry.FullPath, this.CurrentPath, this.GetPathComparison());
+    }
+
+    /// <summary>
+    /// Restituisce il confronto percorso della piattaforma
+    /// </summary>
+    /// <returns>Confronto case-aware del filesystem</returns>
+    private StringComparison GetPathComparison()
+    {
+        return OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+    }
+
+    /// <summary>
+    /// Legge le radici filesystem tramite il servizio esistente
+    /// </summary>
+    private void LoadRoots()
+    {
+        this._roots = this.FileSystemService.GetDriveRoots().Select(entry => new DirectoryTreeItem(entry)).ToList();
+    }
+
+    /// <summary>
+    /// Adatta un'entry filesystem al valore semantico richiesto dal tree Radzen
+    /// </summary>
+    private sealed class DirectoryTreeItem
+    {
+        /// <summary>
+        /// Crea un nodo lazy dal modello filesystem esistente
+        /// </summary>
+        /// <param name="entry">Directory sorgente</param>
+        public DirectoryTreeItem(FileSystemEntry entry)
+        {
+            this.Name = entry.Name;
+            this.FullPath = entry.FullPath;
+            this.IsDirectory = entry.IsDirectory;
+        }
+
+        /// <summary>
+        /// Nome visualizzato
+        /// </summary>
+        public string Name { get; }
+
+        /// <summary>
+        /// Percorso completo usato come identità semantica
+        /// </summary>
+        public string FullPath { get; }
+
+        /// <summary>
+        /// Indica se il nodo può essere espanso
+        /// </summary>
+        public bool IsDirectory { get; }
+
+        /// <summary>
+        /// Espone FullPath agli eventi Radzen che restituiscono il data item come Value
+        /// </summary>
+        /// <returns>Percorso completo</returns>
+        public override string ToString()
+        {
+            return this.FullPath;
         }
     }
-</div>
+}

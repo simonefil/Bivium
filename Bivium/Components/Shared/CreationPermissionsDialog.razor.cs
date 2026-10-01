@@ -30,6 +30,12 @@ namespace Bivium.Components.Shared
         [Parameter]
         public long LeaseGeneration { get; set; }
 
+        /// <summary>
+        /// Rivalida l'autorità del browser prima e dopo il salvataggio asincrono
+        /// </summary>
+        [Parameter]
+        public Func<bool> CanInvoke { get; set; }
+
         #endregion
 
         #region Class Variables
@@ -67,7 +73,10 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Dialog element used for keyboard focus
         /// </summary>
-        private ElementReference _dialogElement;
+        private Radzen.Blazor.RadzenButton _cancelButton;
+
+        /// <summary>Protegge il commit asincrono non cancellabile</summary>
+        private bool _isSaving;
 
         #endregion
 
@@ -85,7 +94,6 @@ namespace Bivium.Components.Shared
             this._statusText = "";
             this._isVisible = true;
             this.StateHasChanged();
-            _ = this.FocusDialogAsync();
         }
 
         #endregion
@@ -95,10 +103,11 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Focuses the dialog after rendering
         /// </summary>
-        private async System.Threading.Tasks.Task FocusDialogAsync()
+        /// <param name="firstRender">Primo mount reale del contenuto</param>
+        private async System.Threading.Tasks.Task HandleContentRenderedAsync(bool firstRender)
         {
-            await System.Threading.Tasks.Task.Delay(50);
-            await this._dialogElement.FocusAsync();
+            if (firstRender && this._isVisible)
+                await this._cancelButton.Element.FocusAsync();
         }
 
         /// <summary>
@@ -117,10 +126,16 @@ namespace Bivium.Components.Shared
         /// </summary>
         private async System.Threading.Tasks.Task HandleSave()
         {
+            if (this.CanInvoke != null && !this.CanInvoke())
+                return;
+
             this._model.Enabled = !this._useSystemDefaults;
             string json = JsonSerializer.Serialize(this._model);
             await this.EnsureJsModule();
             JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("putJsonResult", "/api/Settings/default-creation-permissions", json, this.AttachmentId, this.LeaseGeneration);
+
+            if (this.CanInvoke != null && !this.CanInvoke())
+                return;
 
             if (response.Ok)
             {
@@ -133,11 +148,31 @@ namespace Bivium.Components.Shared
             }
         }
 
+        /// <summary>Blocca chiusura e doppi salvataggi fino al termine della richiesta</summary>
+        private async System.Threading.Tasks.Task HandleSaveAsync()
+        {
+            if (this._isSaving)
+                return;
+
+            this._isSaving = true;
+            this.StateHasChanged();
+            try
+            {
+                await this.HandleSave();
+            }
+            finally
+            {
+                this._isSaving = false;
+            }
+        }
+
         /// <summary>
         /// Closes the dialog without saving
         /// </summary>
         private async System.Threading.Tasks.Task HandleCancel()
         {
+            if (this._isSaving)
+                return;
             this._isVisible = false;
             await this.OnClose.InvokeAsync();
         }

@@ -12,6 +12,10 @@ let _filesButton = null;
 let _directoriesButton = null;
 let _dragDepth = 0;
 let _uploadInProgress = false;
+let _uploadController = null;
+
+const LEASE_REVOKED_MESSAGE = 'Workspace lease revoked';
+const USER_CANCEL_REASON = 'Upload cancelled by user';
 
 /**
  * Store the .NET callback reference and initialize the drop area.
@@ -92,6 +96,7 @@ export async function clearUploadSelection() {
 export function uploadSelection(destinationDir, attachmentId, leaseGeneration) {
     runUploadSelection(destinationDir, attachmentId, leaseGeneration).catch(async function (error) {
         _uploadInProgress = false;
+        _uploadController = null;
         await reportComplete(false, error.message || 'Upload failed');
     });
 }
@@ -108,12 +113,15 @@ async function runUploadSelection(destinationDir, attachmentId, leaseGeneration)
     }
 
     _uploadInProgress = true;
+    const uploadController = new AbortController();
+    _uploadController = uploadController;
     const createdDirectories = [];
     let uploadError = '';
+    let leaseRevoked = false;
     try {
         for (const relativePath of directories) {
             await reportProgress(0, 'Preparing ' + relativePath, 0, files.length);
-            const directoryResult = await requestUploadDirectory(destinationDir, relativePath, false, attachmentId, leaseGeneration);
+            const directoryResult = await requestUploadDirectory(destinationDir, relativePath, false, attachmentId, leaseGeneration, uploadController.signal);
             if (directoryResult.created) createdDirectories.push(relativePath);
         }
 
@@ -121,7 +129,7 @@ async function runUploadSelection(destinationDir, attachmentId, leaseGeneration)
         let completedBytes = 0;
         for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
             const item = files[fileIndex];
-            await uploadOneFile(destinationDir, item, attachmentId, leaseGeneration, function (uploadedFileBytes) {
+            await uploadOneFile(destinationDir, item, attachmentId, leaseGeneration, uploadController.signal, function (uploadedFileBytes) {
                 let percent;
                 if (totalBytes > 0) {
                     percent = Math.round(((completedBytes + uploadedFileBytes) / totalBytes) * 100);
@@ -135,24 +143,49 @@ async function runUploadSelection(destinationDir, attachmentId, leaseGeneration)
         }
     } catch (error) {
         uploadError = error.message || 'Upload failed';
+        leaseRevoked = error instanceof UploadLeaseRevokedError || uploadController.signal.aborted;
     }
 
-    try {
-        createdDirectories.sort(comparePathsChildFirst);
-        for (const relativePath of createdDirectories) {
-            await requestUploadDirectory(destinationDir, relativePath, true, attachmentId, leaseGeneration);
+    if (!leaseRevoked) {
+        try {
+            createdDirectories.sort(comparePathsChildFirst);
+            for (const relativePath of createdDirectories) {
+                await requestUploadDirectory(destinationDir, relativePath, true, attachmentId, leaseGeneration, uploadController.signal);
+            }
+        } catch (error) {
+            if (!uploadError) uploadError = error.message || 'Could not finalize uploaded folders';
         }
-    } catch (error) {
-        if (!uploadError) uploadError = error.message || 'Could not finalize uploaded folders';
     }
 
-    if (uploadError) {
-        await reportComplete(false, uploadError);
-    } else {
-        await reportProgress(100, '', files.length, files.length);
-        await reportComplete(true, '');
+    const cancelledByUser = uploadController.signal.aborted && uploadController.signal.reason === USER_CANCEL_REASON;
+    if (!cancelledByUser) {
+        if (uploadError) {
+            await reportComplete(false, uploadError);
+        } else {
+            await reportProgress(100, '', files.length, files.length);
+            await reportComplete(true, '');
+        }
     }
-    _uploadInProgress = false;
+    if (_uploadController === uploadController) {
+        _uploadInProgress = false;
+        _uploadController = null;
+    }
+}
+
+/**
+ * Cancels the active browser request without changing already committed server entries.
+ * @returns {boolean} True when an active upload was cancelled.
+ */
+export function cancelUpload() {
+    const uploadController = _uploadController;
+    if (!uploadController || uploadController.signal.aborted) return false;
+
+    uploadController.abort(USER_CANCEL_REASON);
+    if (_uploadController === uploadController) {
+        _uploadController = null;
+        _uploadInProgress = false;
+    }
+    return true;
 }
 
 /**
@@ -188,7 +221,7 @@ export function getParentDirectories(relativePath) {
     return result;
 }
 
-async function uploadOneFile(destinationDir, item, attachmentId, leaseGeneration, onProgress) {
+async function uploadOneFile(destinationDir, item, attachmentId, leaseGeneration, signal, onProgress) {
     const fileSize = item.file.size;
     const totalChunks = Math.max(1, Math.ceil(fileSize / CHUNK_SIZE));
     const uploadId = createUploadId();
@@ -205,14 +238,18 @@ async function uploadOneFile(destinationDir, item, attachmentId, leaseGeneration
                 const response = await fetch('/api/FileTransfer/upload', {
                     method: 'POST',
                     headers: buildUploadHeaders(destinationDir, item.file.name, item.relativePath, chunkIndex, totalChunks, uploadId, attachmentId, leaseGeneration),
-                    body: chunk
+                    body: chunk,
+                    signal: signal
                 });
                 if (response.ok) {
                     success = true;
                     break;
                 }
-                lastError = 'HTTP ' + response.status + ': ' + await response.text();
+                const responseText = await response.text();
+                lastError = 'HTTP ' + response.status + ': ' + responseText;
+                if (isLeaseRevokedResponse(response.status, responseText)) throw new UploadLeaseRevokedError(lastError);
             } catch (error) {
+                if (error instanceof UploadLeaseRevokedError || signal.aborted) throw error;
                 lastError = error.message || 'Network error';
             }
         }
@@ -220,6 +257,13 @@ async function uploadOneFile(destinationDir, item, attachmentId, leaseGeneration
         if (!success) throw new Error('Chunk ' + chunkIndex + ' of ' + item.relativePath + ' failed: ' + lastError);
         await onProgress(end);
     }
+}
+
+function isLeaseRevokedResponse(status, responseText) {
+    return status === 409 && String(responseText || '').trim() === LEASE_REVOKED_MESSAGE;
+}
+
+class UploadLeaseRevokedError extends Error {
 }
 
 function buildUploadHeaders(destinationDir, fileName, relativePath, chunkIndex, totalChunks, uploadId, attachmentId, leaseGeneration) {
@@ -235,7 +279,7 @@ function buildUploadHeaders(destinationDir, fileName, relativePath, chunkIndex, 
     };
 }
 
-async function requestUploadDirectory(destinationDir, relativePath, finalize, attachmentId, leaseGeneration) {
+async function requestUploadDirectory(destinationDir, relativePath, finalize, attachmentId, leaseGeneration, signal) {
     let lastError = '';
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
         try {
@@ -247,11 +291,15 @@ async function requestUploadDirectory(destinationDir, relativePath, finalize, at
                     'X-Finalize': String(finalize),
                     'X-Bivium-Attachment': attachmentId,
                     'X-Bivium-Lease-Generation': String(leaseGeneration)
-                }
+                },
+                signal: signal
             });
             if (response.ok) return await response.json();
-            lastError = 'HTTP ' + response.status + ': ' + await response.text();
+            const responseText = await response.text();
+            lastError = 'HTTP ' + response.status + ': ' + responseText;
+            if (isLeaseRevokedResponse(response.status, responseText)) throw new UploadLeaseRevokedError(lastError);
         } catch (error) {
+            if (error instanceof UploadLeaseRevokedError || signal.aborted) throw error;
             lastError = error.message || 'Network error';
         }
     }
@@ -425,9 +473,11 @@ function detachPickerButtons() {
  * Disposes callbacks and DOM handlers.
  */
 export function dispose() {
+    _dotNetRef = null;
+    _uploadController?.abort();
+    _uploadController = null;
     detachDropZone();
     detachPickerButtons();
-    _dotNetRef = null;
     _selectedFiles.clear();
     _selectedDirectories.clear();
     _uploadInProgress = false;

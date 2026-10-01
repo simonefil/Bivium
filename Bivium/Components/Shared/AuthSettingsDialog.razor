@@ -1,142 +1,59 @@
+@namespace Bivium.Components.Shared
 @inject IJSRuntime JSRuntime
 
 @if (this._isVisible)
 {
-    <div class="context-menu-overlay" @onclick="this.HandleCancel">
-        <div class="context-menu" style="position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 78ch; max-width: min(96vw, 100ch);"
-             @onclick:stopPropagation="true">
-            <div style="background-color: var(--background1); padding: 0 1ch; border-bottom: 1px solid var(--foreground2);">
-                Authentication
-            </div>
-            <div style="padding: 1lh 1ch;">
-                <table style="width: 100%;">
-                    <tr>
-                        <td style="width: 22ch; white-space: nowrap; color: var(--foreground2);">Enabled:</td>
-                        <td><input type="checkbox" @bind="this._enabled" disabled="@this._disabled" /></td>
-                    </tr>
-                    <tr>
-                        <td style="white-space: nowrap; color: var(--foreground2);">Username:</td>
-                        <td><input @bind="this._username" disabled="@(this._hasUser || !this._enabled || this._disabled)" style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /></td>
-                    </tr>
-                    @if (this._hasUser)
-                    {
-                        <tr>
-                            <td style="white-space: nowrap; color: var(--foreground2);">Disabled:</td>
-                            <td>@this._disabledLabel</td>
-                        </tr>
-                        <tr>
-                            <td style="white-space: nowrap; color: var(--foreground2);">2FA:</td>
-                            <td>@this._twoFactorLabel</td>
-                        </tr>
-                    }
-                </table>
-
+    <PersistentModalShell Label="Authentication" OnCancel="this.HandleCancel" CanClose="@(!this._isSaving)">
+        <RadzenStack class="bivium-radzen-modal" Gap="1rem" Style="width:100%;max-height:calc(100dvh - 9rem);box-sizing:border-box;">
+            <fieldset disabled="@this._isSaving" inert="@this._isSaving" style="border:0;margin:0;padding:0;min-width:0;">
+            <RadzenStack Gap="1rem">
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem"><RadzenCheckBox Name="auth-enabled" AriaLabel="Enabled" @bind-Value="this._enabled" Disabled="@(this._disabled || this._isSaving)" /><RadzenLabel Component="auth-enabled" Text="Enabled" /></RadzenStack>
+                <RadzenFormField Text="Username" Component="auth-username" Style="width:100%;"><RadzenTextBox id="auth-username" Name="auth-username" @bind-Value="this._username" Immediate="true" Disabled="@(this._hasUser || !this._enabled || this._disabled)" Style="width:100%;" /></RadzenFormField>
+                @if (this._hasUser)
+                {
+                    <RadzenText TextStyle="TextStyle.Body1" Text="@("Disabled: " + this._disabledLabel)" /><RadzenText TextStyle="TextStyle.Body1" Text="@("2FA: " + this._twoFactorLabel)" />
+                }
                 @if (!this._hasUser && this._enabled && !this._disabled)
                 {
-                    <div style="border-top: 1px solid var(--foreground2); margin-top: 1lh; padding-top: 1lh;">
-                        <div style="color: var(--foreground2); margin-bottom: 0.5lh;">Create administrator</div>
-                        <table style="width: 100%;">
-                            <tr>
-                                <td style="width: 22ch; white-space: nowrap; color: var(--foreground2);">Password:</td>
-                                <td><input type="password" @bind="this._newPassword" style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /></td>
-                            </tr>
-                            <tr>
-                                <td style="white-space: nowrap; color: var(--foreground2);">Retype password:</td>
-                                <td><input type="password" @bind="this._confirmPassword" style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /></td>
-                            </tr>
-                        </table>
-                    </div>
+                    <RadzenFieldset Text="Create administrator">
+                        <RadzenStack Gap="0.75rem"><RadzenFormField Text="Password" Component="auth-new-password"><RadzenPassword id="auth-new-password" Name="auth-new-password" @bind-Value="this._newPassword" Immediate="true" Style="width:100%;" /></RadzenFormField><RadzenFormField Text="Retype password" Component="auth-confirm-password"><RadzenPassword id="auth-confirm-password" Name="auth-confirm-password" @bind-Value="this._confirmPassword" Immediate="true" Style="width:100%;" /></RadzenFormField></RadzenStack>
+                    </RadzenFieldset>
                 }
-
                 @if (this._hasUser && this._enabled && !this._disabled)
                 {
-                    <div style="display: flex; gap: 2ch; margin-top: 1lh;">
-                        <button @onclick="this.HandleToggleMfaPanel">MFA</button>
-                        <button @onclick="this.HandleTogglePasswordPanel">Change password</button>
-                    </div>
+                    <RadzenStack Orientation="Orientation.Horizontal" Wrap="FlexWrap.Wrap" Gap="0.5rem"><RadzenButton Text="MFA" Icon="password" ButtonStyle="ButtonStyle.Secondary" Click="this.HandleToggleMfaPanel" /><RadzenButton Text="Change password" Icon="key" ButtonStyle="ButtonStyle.Secondary" Click="this.HandleTogglePasswordPanel" /></RadzenStack>
                 }
-
                 @if (this._mfaPanelVisible)
                 {
-                    <div style="border-top: 1px solid var(--foreground2); margin-top: 1lh; padding-top: 1lh;">
-                        <table style="width: 100%;">
-                            <tr>
-                                <td style="width: 22ch; white-space: nowrap; color: var(--foreground2);">Password:</td>
-                                <td><input type="password" @bind="this._mfaPassword" style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /></td>
-                            </tr>
-                        </table>
-
-                        @if (!this._twoFactorEnabled && string.IsNullOrEmpty(this._qrCodeDataUrl))
-                        {
-                            <div style="display: flex; gap: 2ch; margin-top: 1lh;">
-                                <button @onclick="this.HandleStartTwoFactorSetup">Generate QR</button>
-                            </div>
-                        }
-
-                        @if (this._twoFactorEnabled)
-                        {
-                            <div style="display: flex; gap: 2ch; margin-top: 1lh;">
-                                <button @onclick="this.HandleDisableTwoFactor">Disable 2FA</button>
-                            </div>
-                        }
-                    </div>
+                    <RadzenFieldset Text="Multi-factor authentication">
+                        <RadzenStack Gap="0.75rem">
+                            <RadzenFormField Text="Password" Component="auth-mfa-password"><RadzenPassword id="auth-mfa-password" Name="auth-mfa-password" @bind-Value="this._mfaPassword" Immediate="true" Style="width:100%;" /></RadzenFormField>
+                            @if (!this._twoFactorEnabled && string.IsNullOrEmpty(this._qrCodeDataUrl))
+                            {
+                                <RadzenButton Text="Generate QR" Icon="qr_code" ButtonStyle="ButtonStyle.Secondary" Click="@(() => this.ExecuteMutationAsync(this.HandleStartTwoFactorSetup))" />
+                            }
+                            @if (this._twoFactorEnabled)
+                            {
+                                <RadzenButton Text="Disable 2FA" ButtonStyle="ButtonStyle.Danger" Click="@(() => this.ExecuteMutationAsync(this.HandleDisableTwoFactor))" />
+                            }
+                        </RadzenStack>
+                    </RadzenFieldset>
                 }
-
                 @if (!string.IsNullOrEmpty(this._qrCodeDataUrl))
                 {
-                    <div style="border-top: 1px solid var(--foreground2); margin-top: 1lh; padding-top: 1lh;">
-                        <div style="color: var(--foreground2); margin-bottom: 0.5lh;">Scan QR, copy/save the secret, enter current code, then enable.</div>
-                        <img src="@this._qrCodeDataUrl" alt="2FA QR code" style="background: white; padding: 1ch; width: 160px; height: 160px;" />
-                        <table style="width: 100%; margin-top: 0.5lh;">
-                            <tr>
-                                <td style="width: 22ch; white-space: nowrap; color: var(--foreground2);">Secret:</td>
-                                <td style="display: flex; gap: 1ch;"><input readonly value="@this._twoFactorSecret" style="flex: 1; min-width: 0; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /><button @onclick="this.HandleCopyTwoFactorSecret">Copy</button></td>
-                            </tr>
-                            <tr>
-                                <td style="white-space: nowrap; color: var(--foreground2);">2FA code:</td>
-                                <td><input @bind="this._twoFactorCode" style="width: 16ch; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /></td>
-                            </tr>
-                        </table>
-                        <div style="display: flex; gap: 2ch; margin-top: 1lh;">
-                            <button @onclick="this.HandleEnableTwoFactor">Enable 2FA</button>
-                        </div>
-                    </div>
+                    <RadzenFieldset Text="Enable 2FA"><RadzenStack Gap="0.75rem"><RadzenText TextStyle="TextStyle.Body1" Text="Scan the QR code, then enter the current authenticator code." /><img src="@this._qrCodeDataUrl" alt="2FA QR code" width="160" height="160" /><RadzenFormField Text="Secret" Component="auth-secret"><RadzenTextBox id="auth-secret" Name="auth-secret" Value="@this._twoFactorSecret" ReadOnly="true" Style="width:100%;" /></RadzenFormField><RadzenButton Text="Copy secret" Icon="content_copy" ButtonStyle="ButtonStyle.Light" Click="this.HandleCopyTwoFactorSecret" /><RadzenFormField Text="2FA code" Component="auth-token"><RadzenTextBox id="auth-token" Name="auth-token" @bind-Value="this._twoFactorCode" Immediate="true" Style="width:100%;" autocomplete="one-time-code" inputmode="numeric" /></RadzenFormField><RadzenButton Text="Enable 2FA" ButtonStyle="ButtonStyle.Primary" Click="@(() => this.ExecuteMutationAsync(this.HandleEnableTwoFactor))" /></RadzenStack></RadzenFieldset>
                 }
-
                 @if (this._passwordPanelVisible)
                 {
-                    <div style="border-top: 1px solid var(--foreground2); margin-top: 1lh; padding-top: 1lh;">
-                        <table style="width: 100%;">
-                            <tr>
-                                <td style="width: 22ch; white-space: nowrap; color: var(--foreground2);">Old password:</td>
-                                <td><input type="password" @bind="this._changeCurrentPassword" style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /></td>
-                            </tr>
-                            <tr>
-                                <td style="white-space: nowrap; color: var(--foreground2);">New password:</td>
-                                <td><input type="password" @bind="this._changeNewPassword" style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /></td>
-                            </tr>
-                            <tr>
-                                <td style="white-space: nowrap; color: var(--foreground2);">Retype new password:</td>
-                                <td><input type="password" @bind="this._changeConfirmPassword" style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2);" /></td>
-                            </tr>
-                        </table>
-                        <div style="display: flex; gap: 2ch; margin-top: 1lh;">
-                            <button @onclick="this.HandleChangePassword">Change password</button>
-                        </div>
-                    </div>
+                    <RadzenFieldset Text="Change password"><RadzenStack Gap="0.75rem"><RadzenFormField Text="Old password" Component="auth-current-password"><RadzenPassword id="auth-current-password" Name="auth-current-password" @bind-Value="this._changeCurrentPassword" Immediate="true" Style="width:100%;" /></RadzenFormField><RadzenFormField Text="New password" Component="auth-change-password"><RadzenPassword id="auth-change-password" Name="auth-change-password" @bind-Value="this._changeNewPassword" Immediate="true" Style="width:100%;" /></RadzenFormField><RadzenFormField Text="Retype new password" Component="auth-change-confirm"><RadzenPassword id="auth-change-confirm" Name="auth-change-confirm" @bind-Value="this._changeConfirmPassword" Immediate="true" Style="width:100%;" /></RadzenFormField><RadzenButton Text="Change password" ButtonStyle="ButtonStyle.Primary" Click="@(() => this.ExecuteMutationAsync(this.HandleChangePassword))" /></RadzenStack></RadzenFieldset>
                 }
-
                 @if (!string.IsNullOrEmpty(this._statusText))
                 {
-                    <div style="color: var(--foreground2); margin-top: 0.5lh;">
-                        @this._statusText
-                    </div>
+                    <RadzenAlert AlertStyle="AlertStyle.Info">@this._statusText</RadzenAlert>
                 }
-            </div>
-            <div style="display: flex; justify-content: flex-end; gap: 2ch; padding: 0 1ch 1lh 1ch;">
-                <button @onclick="this.HandleCancel">Cancel</button>
-                <button @onclick="this.HandleSave" disabled="@this._disabled">Save</button>
-            </div>
-        </div>
-    </div>
+                <div class="bivium-radzen-dialog-actions"><RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Disabled="@this._isSaving" Click="this.HandleCancel" /><RadzenButton Text="Save" Icon="save" Disabled="@this._disabled" IsBusy="@this._isSaving" ButtonStyle="ButtonStyle.Primary" Click="@(() => this.ExecuteMutationAsync(this.HandleSave))" /></div>
+            </RadzenStack>
+            </fieldset>
+        </RadzenStack>
+    </PersistentModalShell>
 }

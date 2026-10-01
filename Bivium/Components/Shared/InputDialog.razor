@@ -1,26 +1,142 @@
-@inject IJSRuntime JSRuntime
+@namespace Bivium.Components.Shared
+@implements IDisposable
+@inject DialogService DialogService
+@inject ILogger<InputDialog> Logger
 
-@if (this._isVisible)
-{
-    <div class="context-menu-overlay" @onclick="this.HandleCancel">
-        <div class="context-menu" style="position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 40ch;"
-             @onclick:stopPropagation="true">
-            <div style="background-color: var(--background1); padding: 0 1ch; border-bottom: 1px solid var(--foreground2);">
-                @this._title
-            </div>
-            <div style="padding: 1lh 1ch;">
-                <label>@this._label</label>
-                <input type="text"
-                       @ref="this._inputElement"
-                       @bind="this._inputValue"
-                       @bind:event="oninput"
-                       @onkeydown="this.HandleKeyDown"
-                       style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2); padding: 0 0.5ch;" />
-            </div>
-            <div style="display: flex; justify-content: flex-end; gap: 2ch; padding: 0 1ch 1lh 1ch;">
-                <button @onclick="this.HandleCancel">Cancel</button>
-                <button @onclick="this.HandleConfirm">OK</button>
-            </div>
-        </div>
-    </div>
+@code {
+    /// <summary>
+    /// Callback che riceve il testo oppure stringa vuota in annullamento
+    /// </summary>
+    [Parameter]
+    public EventCallback<string> OnClose { get; set; }
+
+    /// <summary>
+    /// Versione dell'apertura corrente
+    /// </summary>
+    private int _generation;
+
+    /// <summary>
+    /// Valore modificato nel campo di input
+    /// </summary>
+    private string _inputValue = "";
+
+    /// <summary>
+    /// Tracker dell'apertura posseduta
+    /// </summary>
+    private RadzenDialogLifetime _lifetime;
+
+    /// <summary>
+    /// Inizializza il tracker del dialog
+    /// </summary>
+    protected override void OnInitialized()
+    {
+        this._lifetime = new RadzenDialogLifetime(this.DialogService);
+    }
+
+    /// <summary>
+    /// Apre il dialog di input mantenendo il contratto sincrono legacy
+    /// </summary>
+    /// <param name="title">Titolo del dialog</param>
+    /// <param name="label">Etichetta del campo</param>
+    /// <param name="defaultValue">Valore iniziale</param>
+    /// <param name="selectionLength">Numero di caratteri iniziali da selezionare</param>
+    public void Show(string title, string label, string defaultValue, int selectionLength = -1)
+    {
+        if (this._lifetime.IsDisposed || this._lifetime.IsOpen())
+            return;
+
+        int generation = ++this._generation;
+        this._inputValue = defaultValue ?? "";
+        _ = this.ObserveTaskAsync(this.ShowAsync(generation, title, label, selectionLength), "apertura input");
+    }
+
+    /// <summary>
+    /// Nasconde soltanto l'apertura posseduta quando è in cima allo stack
+    /// </summary>
+    public void Hide()
+    {
+        this._generation++;
+        this._lifetime.RequestClose();
+    }
+
+    /// <summary>
+    /// Apre e attende il risultato del dialog Radzen
+    /// </summary>
+    /// <param name="generation">Versione dell'apertura</param>
+    /// <param name="title">Titolo del dialog</param>
+    /// <param name="label">Etichetta del campo</param>
+    /// <param name="selectionLength">Numero di caratteri da selezionare</param>
+    private async System.Threading.Tasks.Task ShowAsync(int generation, string title, string label, int selectionLength)
+    {
+        DialogOptions options = new DialogOptions
+        {
+            Width = "min(92vw, 36rem)",
+            ShowClose = false,
+            CloseDialogOnEsc = true,
+            CloseDialogOnOverlayClick = true,
+            AutoFocusFirstElement = true,
+            CssClass = "bivium-radzen-service-dialog",
+            WrapperCssClass = "bivium-modal-layer"
+        };
+        this._lifetime.Begin(options);
+        object result;
+        try
+        {
+            result = await this.DialogService.OpenAsync(title, service => @<div>
+                <RadzenStack Gap="0.75rem">
+                    <RadzenLabel Text="@label" Component="bivium-dialog-input" />
+                    <RadzenTextBox Name="bivium-dialog-input" @bind-Value="this._inputValue" Immediate="true" autofocus="autofocus" data-bivium-selection-length="@selectionLength" Style="width: 100%;" @onkeydown="@(args => this.HandleInputKey(args, service))" />
+                    <div class="bivium-radzen-dialog-actions">
+                        <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="@(() => service.Close(""))" />
+                        <RadzenButton Text="OK" ButtonStyle="ButtonStyle.Primary" Click="@(() => service.Close(this._inputValue))" />
+                    </div>
+                </RadzenStack>
+            </div>, options);
+        }
+        finally
+        {
+            this._lifetime.Complete(options);
+        }
+        if (generation != this._generation)
+            return;
+
+        await this.OnClose.InvokeAsync(result as string ?? "");
+    }
+
+    /// <summary>
+    /// Conferma il valore con Invio
+    /// </summary>
+    /// <param name="args">Evento tastiera</param>
+    /// <param name="service">Servizio associato al dialog aperto</param>
+    private void HandleInputKey(KeyboardEventArgs args, DialogService service)
+    {
+        if (args.Key == "Enter" && this._lifetime.CanClose())
+            service.Close(this._inputValue);
+    }
+
+    /// <summary>
+    /// Osserva e registra le eccezioni del task avviato da <see cref="Show"/>
+    /// </summary>
+    /// <param name="task">Task da osservare</param>
+    /// <param name="operation">Descrizione usata nel log</param>
+    private async System.Threading.Tasks.Task ObserveTaskAsync(System.Threading.Tasks.Task task, string operation)
+    {
+        try
+        {
+            await task;
+        }
+        catch (Exception ex)
+        {
+            this.Logger.LogError(ex, "Errore durante {Operation} Radzen", operation);
+        }
+    }
+
+    /// <summary>
+    /// Rilascia il tracker senza chiudere dialog altrui
+    /// </summary>
+    public void Dispose()
+    {
+        this._generation++;
+        this._lifetime?.Dispose();
+    }
 }

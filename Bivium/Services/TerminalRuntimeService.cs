@@ -556,6 +556,12 @@ namespace Bivium.Services
                     if (session.Cols == safeCols && session.Rows == safeRows)
                         return;
 
+                    if (!session.Terminal.SynchronizedOutput)
+                    {
+                        this.BeginAlternateRedraw(session);
+                        session.AlternateFrameReconciler.Reset();
+                    }
+
                     foreach (KeyValuePair<BufferLine, TerminalLineSnapshot> checkpoint in session.DeactivatedNormalLines)
                         if (AreLineSnapshotsEquivalent(SerializeLine(checkpoint.Key, -1), checkpoint.Value))
                             TerminalHistoryRowState.Get(checkpoint.Key).Commit();
@@ -1042,6 +1048,7 @@ namespace Bivium.Services
                     return;
 
                 session.Terminal.Write(data.Span);
+                this.ReconcileAlternateAfterWrite(session);
                 session.LastOutputUtc = DateTime.UtcNow;
                 this.AdvanceSessionRevisionLocked(session);
                 if (session.PaletteChangePending)
@@ -1319,8 +1326,45 @@ namespace Bivium.Services
         /// </summary>
         private void HandleBufferChanged(TerminalSessionRuntime session, TerminalEvents.BufferChangedEventArgs args)
         {
+            session.AlternateFrameReconciler.Reset();
             if (args.Buffer == BufferType.Alternate)
                 session.AlternateBuffer = session.Terminal.Buffer;
+        }
+
+        /// <summary>
+        /// Congela il frame alternate a un potenziale boundary di redraw
+        /// </summary>
+        private void HandleViewportRedrawStarting(TerminalSessionRuntime session)
+        {
+            if (!session.Terminal.SynchronizedOutput)
+                this.BeginAlternateRedraw(session);
+        }
+
+        /// <summary>
+        /// Congela un boundary del buffer alternate prima delle modifiche
+        /// </summary>
+        private void BeginAlternateRedraw(TerminalSessionRuntime session)
+        {
+            if (!session.Terminal.IsAlternateBufferActive)
+                return;
+
+            session.AlternateFrameReconciler.BeforeRedraw(session.Terminal.Buffer, session.Rows, line => SerializeLine(line, -1), session.History.Append);
+        }
+
+        /// <summary>
+        /// Riconcilia il redraw solo quando il boundary precedente lo richiede
+        /// </summary>
+        /// <param name="session">Sessione sotto il proprio lock</param>
+        /// <param name="complete">True alla fine di un aggiornamento atomico</param>
+        private void ReconcileAlternateAfterWrite(TerminalSessionRuntime session, bool complete = false)
+        {
+            if (!session.Terminal.IsAlternateBufferActive || session.Terminal.SynchronizedOutput || !session.AlternateFrameReconciler.Pending)
+                return;
+
+            if (complete)
+                session.AlternateFrameReconciler.CompleteWrite(session.Terminal.Buffer, session.Rows, line => SerializeLine(line, -1), session.History.Append);
+            else
+                session.AlternateFrameReconciler.AfterWrite(session.Terminal.Buffer, session.Rows, line => SerializeLine(line, -1), session.History.Append);
         }
 
         /// <summary>
@@ -1503,8 +1547,13 @@ namespace Bivium.Services
             session.SynchronizedSnapshot = null;
             if (active)
             {
+                this.BeginAlternateRedraw(session);
                 session.SynchronizedSnapshot = this.CreateSessionSnapshot(session);
                 session.SynchronizedStartedAt = Environment.TickCount64;
+            }
+            else
+            {
+                this.ReconcileAlternateAfterWrite(session, true);
             }
         }
 
@@ -1898,6 +1947,7 @@ namespace Bivium.Services
                 this.NormalBuffer = this.Terminal.Buffer;
                 this.Shell = new ShellService();
                 this.Terminal.LineExitedViewport += (sender, args) => this._owner.CaptureExitedLine(this, args);
+                this.Terminal.ViewportRedrawStarting += (sender, args) => this._owner.HandleViewportRedrawStarting(this);
                 this.Terminal.BufferChanged += (sender, args) => this._owner.HandleBufferChanged(this, args);
                 this.Terminal.SynchronizedOutputChanged += (sender, args) => this._owner.HandleSynchronizedOutputChanged(this, args.Active);
                 this.Terminal.Colors.ColorChanged += (sender, args) => this._owner.HandleColorChanged(this);
@@ -2061,6 +2111,11 @@ namespace Bivium.Services
             /// Segmented history archive
             /// </summary>
             public TerminalHistoryArchive History { get; }
+
+            /// <summary>
+            /// Candidato bounded usato soltanto per i frame del buffer alternate
+            /// </summary>
+            public TerminalAlternateFrameReconciler AlternateFrameReconciler { get; } = new TerminalAlternateFrameReconciler();
 
             /// <summary>
             /// Checkpoint delle righe normali interamente archiviate, inclusi i rientri dopo resize

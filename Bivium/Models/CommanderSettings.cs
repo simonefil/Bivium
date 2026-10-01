@@ -13,9 +13,9 @@ namespace Bivium.Models
         public AuthenticationSettings Authentication { get; set; } = new AuthenticationSettings();
 
         /// <summary>
-        /// Default WebTUI theme name
+        /// Default theme name
         /// </summary>
-        public string DefaultTheme { get; set; } = "dark";
+        public string DefaultTheme { get; set; } = "software-dark";
 
         /// <summary>
         /// File extensions that can be opened in the editor

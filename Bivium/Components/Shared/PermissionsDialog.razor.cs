@@ -96,7 +96,7 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Reference to the dialog element for focus
         /// </summary>
-        private ElementReference _dialogElement;
+        private Radzen.Blazor.RadzenButton _cancelButton;
 
         #endregion
 
@@ -134,17 +134,16 @@ namespace Bivium.Components.Shared
             this._isVisible = true;
             this.StateHasChanged();
 
-            // Focus the dialog after render
-            _ = this.FocusDialogAsync();
         }
 
         /// <summary>
         /// Focuses the dialog element after render
         /// </summary>
-        private async System.Threading.Tasks.Task FocusDialogAsync()
+        /// <param name="firstRender">Primo mount reale del contenuto</param>
+        private async System.Threading.Tasks.Task HandleContentRenderedAsync(bool firstRender)
         {
-            await System.Threading.Tasks.Task.Delay(50);
-            await this._dialogElement.FocusAsync();
+            if (firstRender && this._isVisible)
+                await this._cancelButton.Element.FocusAsync();
         }
 
         /// <summary>

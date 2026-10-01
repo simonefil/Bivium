@@ -1,37 +1,19 @@
+@namespace Bivium.Components.Shared
+
 @if (this._isVisible)
 {
-    <div class="context-menu-overlay" @onclick="this.HandleCancel">
-        <div class="context-menu" style="position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 45ch;"
-             @onclick:stopPropagation="true">
-            <div style="background-color: var(--background1); padding: 0 1ch; border-bottom: 1px solid var(--foreground2);">
-                Compress
-            </div>
-            <div style="padding: 1lh 1ch;">
-                <div style="margin-bottom: 1lh;">
-                    <label>Format:</label>
-                    <select @onchange="this.HandleFormatChange"
-                            style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2); font-size: inherit; font-family: inherit;">
-                        <option value="Zip" selected="@(this._selectedFormat == Bivium.Models.ArchiveFormat.Zip)">ZIP (.zip)</option>
-                        <option value="TarGz" selected="@(this._selectedFormat == Bivium.Models.ArchiveFormat.TarGz)">TAR.GZ (.tar.gz)</option>
-                        <option value="TarBz2" selected="@(this._selectedFormat == Bivium.Models.ArchiveFormat.TarBz2)">TAR.BZ2 (.tar.bz2)</option>
-                        <option value="TarXz" selected="@(this._selectedFormat == Bivium.Models.ArchiveFormat.TarXz)">TAR.XZ (.tar.xz)</option>
-                        <option value="TarZst" selected="@(this._selectedFormat == Bivium.Models.ArchiveFormat.TarZst)">TAR.ZST (.tar.zst)</option>
-                        <option value="Tar" selected="@(this._selectedFormat == Bivium.Models.ArchiveFormat.Tar)">TAR (.tar)</option>
-                    </select>
+    <PersistentModalShell Label="Compress" OnCancel="this.HandleCancel" OnContentRendered="this.HandleContentRenderedAsync">
+        <RadzenStack class="bivium-radzen-modal" Gap="1rem" Style="width:100%;max-height:calc(100dvh - 9rem);box-sizing:border-box;">
+                <RadzenFormField Text="Format" Component="compress-format" Style="width:100%;">
+                    <RadzenDropDown TValue="Bivium.Models.ArchiveFormat" id="compress-format" Name="compress-format" Data="this._formats" TextProperty="Value" ValueProperty="Key" @bind-Value="this._selectedFormat" Change="this.HandleFormatChange" Style="width:100%;" />
+                </RadzenFormField>
+                <RadzenFormField Text="Output file name" Component="compress-output" Style="width:100%;">
+                    <div @onkeydown="this.HandleKeyDown" @onkeydown:stopPropagation="true"><RadzenTextBox id="compress-output" Name="compress-output" @ref="this._outputNameElement" @bind-Value="this._outputName" Immediate="true" Style="width:100%;" /></div>
+                </RadzenFormField>
+                <div class="bivium-radzen-dialog-actions">
+                    <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="this.HandleCancel" />
+                    <RadzenButton Text="OK" ButtonStyle="ButtonStyle.Primary" Click="this.HandleConfirm" />
                 </div>
-                <div>
-                    <label>Output file name:</label>
-                    <input type="text"
-                           @ref="this._outputNameElement"
-                           @bind="this._outputName"
-                           @onkeydown="this.HandleKeyDown"
-                           style="width: 100%; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2); padding: 0 0.5ch;" />
-                </div>
-            </div>
-            <div style="display: flex; justify-content: flex-end; gap: 2ch; padding: 0 1ch 1lh 1ch;">
-                <button @onclick="this.HandleCancel">Cancel</button>
-                <button @onclick="this.HandleConfirm">OK</button>
-            </div>
-        </div>
-    </div>
+        </RadzenStack>
+    </PersistentModalShell>
 }

@@ -48,6 +48,26 @@ namespace Bivium.Services
         FileOperationResult MoveEntriesWithProgress(List<string> sourcePaths, string destinationDir, Action<int, int, string> onProgress, List<string> overwritePaths = null, CancellationToken cancellationToken = default);
 
         /// <summary>
+        /// Resolves the Explorer-style default mode from the physical source and destination volumes
+        /// </summary>
+        /// <param name="sourcePath">Existing server-side source path</param>
+        /// <param name="destinationDir">Existing server-side destination directory</param>
+        /// <returns>Move on the same physical volume; Copy otherwise</returns>
+        FileTransferMode ResolveDefaultTransferMode(string sourcePath, string destinationDir);
+
+        /// <summary>
+        /// Transfers mixed entries using per-entry modes, an optional override, or volume-based defaults
+        /// </summary>
+        /// <param name="entries">Server-side source entries</param>
+        /// <param name="destinationDir">Existing destination directory</param>
+        /// <param name="onProgress">Callback invoked after each completed entry</param>
+        /// <param name="modeOverride">Mode forced for every entry, or null to use each entry/default</param>
+        /// <param name="overwritePaths">Source paths approved for overwrite</param>
+        /// <param name="cancellationToken">Cancellation token for lease revocation</param>
+        /// <returns>Aggregated operation result</returns>
+        FileOperationResult TransferEntriesWithProgress(List<FileTransferEntry> entries, string destinationDir, Action<int, int, string> onProgress, FileTransferMode? modeOverride = null, List<string> overwritePaths = null, CancellationToken cancellationToken = default);
+
+        /// <summary>
         /// Deletes files and directories
         /// </summary>
         /// <param name="paths">List of paths to delete</param>

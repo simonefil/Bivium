@@ -1,244 +1,125 @@
+@namespace Bivium.Components.Shared
 @inject IJSRuntime JSRuntime
 
-<div id="renamer-window" class="renamer-window @(this._isVisible ? "visible" : "")">
+<RadzenCard id="renamer-window" class="@("renamer-window bivium-radzen-renamer-window " + (this._isVisible ? "visible" : ""))">
+    <RadzenStack class="renamer-titlebar rz-p-2" Gap="0.5rem" id="renamer-titlebar" Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween">
+        <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0" Text="Advanced Rename" />
+        <RadzenButton Icon="close" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" Size="ButtonSize.Small" Click="this.HandleClose" title="Close" aria-label="Close renamer" />
+    </RadzenStack>
 
-    <!-- Title bar (draggable) -->
-    <div class="renamer-titlebar" id="renamer-titlebar">
-        <span>Advanced Rename</span>
-        <button class="renamer-close" @onclick="this.HandleClose" title="Close">X</button>
-    </div>
-
-    <!-- Body: two-column layout -->
     <div class="renamer-body">
-
-        <!-- Left: file list preview -->
-        <div class="renamer-file-list">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Original Name</th>
-                        <th>New Name</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @for (int idx = 0; idx < this._previewItems.Count; idx++)
-                    {
-                        Bivium.Models.RenamePreviewItem item = this._previewItems[idx];
-                        string rowClass = "";
-                        if (item.HasConflict)
-                        {
-                            rowClass = "conflict";
-                        }
-                        else if (item.HasError)
-                        {
-                            rowClass = "error";
-                        }
-                        else if (item.OriginalName != item.NewName)
-                        {
-                            rowClass = "changed";
-                        }
-                        <tr class="@rowClass">
-                            <td title="@item.OriginalName">@item.OriginalName</td>
-                            <td title="@item.NewName">@item.NewName</td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
+        <div class="renamer-file-list bivium-radzen-renamer-preview">
+            <RadzenDataGrid Data="@this._previewItems" TItem="Bivium.Models.RenamePreviewItem" AllowSorting="false" AllowPaging="false"
+                            AllowFiltering="false" Density="Density.Compact" EmptyText="No files">
+                <Columns>
+                    <RadzenDataGridColumn TItem="Bivium.Models.RenamePreviewItem" Property="OriginalName" Title="Original Name" />
+                    <RadzenDataGridColumn TItem="Bivium.Models.RenamePreviewItem" Property="NewName" Title="New Name">
+                        <Template Context="item">
+                            <span>@item.NewName</span>
+                            @if (item.HasConflict)
+                            {
+                                <RadzenBadge BadgeStyle="BadgeStyle.Danger" Text="Conflict" />
+                            }
+                            else if (item.HasError)
+                            {
+                                <RadzenBadge BadgeStyle="BadgeStyle.Warning" Text="Invalid name" />
+                            }
+                            else if (item.OriginalName != item.NewName)
+                            {
+                                <RadzenBadge BadgeStyle="BadgeStyle.Info" Text="Changed" />
+                            }
+                        </Template>
+                    </RadzenDataGridColumn>
+                </Columns>
+            </RadzenDataGrid>
         </div>
 
-        <!-- Right: method configuration -->
-        <div class="renamer-config">
-
-            <!-- Method selector row -->
+        <div class="renamer-config bivium-radzen-renamer-config rz-p-3">
             <div class="renamer-method-selector">
-                <span>Method:</span>
-                <select @bind="this._selectedMethodType" @bind:after="this.HandleMethodTypeChanged">
-                    <option value="Replace">Replace</option>
-                    <option value="Add">Add</option>
-                    <option value="Remove">Remove</option>
-                    <option value="NewCase">New Case</option>
-                    <option value="NewName">New Name</option>
-                    <option value="Trim">Trim</option>
-                </select>
-                <button class="renamer-add-btn" @onclick="this.HandleAddMethod">Add</button>
+                <RadzenLabel Text="Method" Component="renamer-method" />
+                <RadzenDropDown TValue="Bivium.Models.RenameMethodType" Data="@(Enum.GetValues<Bivium.Models.RenameMethodType>())"
+                                Name="renamer-method" @bind-Value="this._selectedMethodType" @bind-Value:after="this.HandleMethodTypeChanged" />
+                <RadzenButton Text="Add" Icon="add" Size="ButtonSize.Small" Click="this.HandleAddMethod" />
             </div>
 
-            <!-- Method parameters area -->
             <div class="renamer-params">
-
                 @if (!string.IsNullOrEmpty(this._paramsError))
                 {
-                    <div class="renamer-params-error">@this._paramsError</div>
+                    <RadzenAlert AlertStyle="AlertStyle.Danger">@this._paramsError</RadzenAlert>
                 }
 
                 @if (this._selectedMethodType == Bivium.Models.RenameMethodType.Replace)
                 {
-                    <label>
-                        <span>Search:</span>
-                        <input type="text" @bind="this._editingMethod.SearchText" @bind:event="oninput" @bind:after="this.RecalculatePreview" />
-                    </label>
-                    <label>
-                        <span>Replace:</span>
-                        <input type="text" @bind="this._editingMethod.ReplaceText" @bind:event="oninput" @bind:after="this.RecalculatePreview" />
-                    </label>
-                    <label>
-                        <input type="checkbox" @bind="this._editingMethod.CaseSensitive" @bind:after="this.RecalculatePreview" />
-                        <span>Case sensitive</span>
-                    </label>
-                    <label>
-                        <input type="checkbox" @bind="this._editingMethod.UseRegex" @bind:after="this.RecalculatePreview" />
-                        <span>Use regex</span>
-                    </label>
+                    <RadzenFormField Text="Search"><RadzenTextBox Name="renamer-search" @bind-Value="this._editingMethod.SearchText" @bind-Value:after="this.RecalculatePreview" Immediate="true" /></RadzenFormField>
+                    <RadzenFormField Text="Replace"><RadzenTextBox Name="renamer-replace" @bind-Value="this._editingMethod.ReplaceText" @bind-Value:after="this.RecalculatePreview" Immediate="true" /></RadzenFormField>
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem"><RadzenCheckBox Name="renamer-case-sensitive" TValue="bool" @bind-Value="this._editingMethod.CaseSensitive" @bind-Value:after="this.RecalculatePreview" /><RadzenLabel Text="Case sensitive" Component="renamer-case-sensitive" /></RadzenStack>
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem"><RadzenCheckBox Name="renamer-use-regex" TValue="bool" @bind-Value="this._editingMethod.UseRegex" @bind-Value:after="this.RecalculatePreview" /><RadzenLabel Text="Use regex" Component="renamer-use-regex" /></RadzenStack>
                 }
                 else if (this._selectedMethodType == Bivium.Models.RenameMethodType.Add)
                 {
-                    <label>
-                        <span>Text:</span>
-                        <input type="text" @bind="this._editingMethod.InsertText" @bind:event="oninput" @bind:after="this.RecalculatePreview" />
-                    </label>
-                    <label>
-                        <span>Position:</span>
-                        <input type="number" @bind="this._editingMethod.InsertPosition" @bind:after="this.RecalculatePreview" />
-                    </label>
-                    <label>
-                        <input type="checkbox" @bind="this._editingMethod.FromEnd" @bind:after="this.RecalculatePreview" />
-                        <span>From end</span>
-                    </label>
+                    <RadzenFormField Text="Text"><RadzenTextBox Name="renamer-insert-text" @bind-Value="this._editingMethod.InsertText" @bind-Value:after="this.RecalculatePreview" Immediate="true" /></RadzenFormField>
+                    <RadzenFormField Text="Position"><RadzenNumeric Name="renamer-insert-position" TValue="int" @bind-Value="this._editingMethod.InsertPosition" @bind-Value:after="this.RecalculatePreview" /></RadzenFormField>
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem"><RadzenCheckBox Name="renamer-from-end" TValue="bool" @bind-Value="this._editingMethod.FromEnd" @bind-Value:after="this.RecalculatePreview" /><RadzenLabel Text="From end" Component="renamer-from-end" /></RadzenStack>
                 }
                 else if (this._selectedMethodType == Bivium.Models.RenameMethodType.Remove)
                 {
-                    <label>
-                        <span>Mode:</span>
-                        <select @bind="this._editingMethod.RemoveByPattern" @bind:after="this.RecalculatePreview">
-                            <option value="false">By position</option>
-                            <option value="true">By pattern</option>
-                        </select>
-                    </label>
-
+                    <RadzenFormField Text="Mode"><RadzenDropDown Name="renamer-remove-mode" TValue="bool" Data="@this.GetRemoveModes()" TextProperty="Value" ValueProperty="Key" @bind-Value="this._editingMethod.RemoveByPattern" @bind-Value:after="this.RecalculatePreview" /></RadzenFormField>
                     @if (!this._editingMethod.RemoveByPattern)
                     {
-                        <label>
-                            <span>Start:</span>
-                            <input type="number" @bind="this._editingMethod.RemoveStartIndex" @bind:after="this.RecalculatePreview" />
-                        </label>
-                        <label>
-                            <span>Count:</span>
-                            <input type="number" @bind="this._editingMethod.RemoveCount" @bind:after="this.RecalculatePreview" />
-                        </label>
-                        <label>
-                            <input type="checkbox" @bind="this._editingMethod.RemoveFromEnd" @bind:after="this.RecalculatePreview" />
-                            <span>From end</span>
-                        </label>
+                        <RadzenFormField Text="Start"><RadzenNumeric Name="renamer-remove-start" TValue="int" @bind-Value="this._editingMethod.RemoveStartIndex" @bind-Value:after="this.RecalculatePreview" /></RadzenFormField>
+                        <RadzenFormField Text="Count"><RadzenNumeric Name="renamer-remove-count" TValue="int" @bind-Value="this._editingMethod.RemoveCount" @bind-Value:after="this.RecalculatePreview" /></RadzenFormField>
+                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem"><RadzenCheckBox Name="renamer-remove-from-end" TValue="bool" @bind-Value="this._editingMethod.RemoveFromEnd" @bind-Value:after="this.RecalculatePreview" /><RadzenLabel Text="From end" Component="renamer-remove-from-end" /></RadzenStack>
                     }
                     else
                     {
-                        <label>
-                            <span>Pattern:</span>
-                            <input type="text" @bind="this._editingMethod.RemovePattern" @bind:event="oninput" @bind:after="this.RecalculatePreview" />
-                        </label>
-                        <label>
-                            <input type="checkbox" @bind="this._editingMethod.RemovePatternCaseSensitive" @bind:after="this.RecalculatePreview" />
-                            <span>Case sensitive</span>
-                        </label>
-                        <label>
-                            <input type="checkbox" @bind="this._editingMethod.RemovePatternUseRegex" @bind:after="this.RecalculatePreview" />
-                            <span>Use regex</span>
-                        </label>
+                        <RadzenFormField Text="Pattern"><RadzenTextBox Name="renamer-remove-pattern" @bind-Value="this._editingMethod.RemovePattern" @bind-Value:after="this.RecalculatePreview" Immediate="true" /></RadzenFormField>
+                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem"><RadzenCheckBox Name="renamer-pattern-case" TValue="bool" @bind-Value="this._editingMethod.RemovePatternCaseSensitive" @bind-Value:after="this.RecalculatePreview" /><RadzenLabel Text="Case sensitive" Component="renamer-pattern-case" /></RadzenStack>
+                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem"><RadzenCheckBox Name="renamer-pattern-regex" TValue="bool" @bind-Value="this._editingMethod.RemovePatternUseRegex" @bind-Value:after="this.RecalculatePreview" /><RadzenLabel Text="Use regex" Component="renamer-pattern-regex" /></RadzenStack>
                     }
                 }
                 else if (this._selectedMethodType == Bivium.Models.RenameMethodType.NewCase)
                 {
-                    <label>
-                        <span>Mode:</span>
-                        <select @bind="this._editingMethod.CaseMode" @bind:after="this.RecalculatePreview">
-                            <option value="0">lowercase</option>
-                            <option value="1">UPPERCASE</option>
-                            <option value="2">Title Case</option>
-                        </select>
-                    </label>
-                    <label>
-                        <span>Scope:</span>
-                        <select @bind="this._editingMethod.CaseScope" @bind:after="this.RecalculatePreview">
-                            <option value="0">Name only</option>
-                            <option value="1">Extension only</option>
-                            <option value="2">Full name</option>
-                        </select>
-                    </label>
+                    <RadzenFormField Text="Mode"><RadzenDropDown Name="renamer-case-mode" TValue="int" Data="@this.GetCaseModes()" TextProperty="Value" ValueProperty="Key" @bind-Value="this._editingMethod.CaseMode" @bind-Value:after="this.RecalculatePreview" /></RadzenFormField>
+                    <RadzenFormField Text="Scope"><RadzenDropDown Name="renamer-case-scope" TValue="int" Data="@this.GetNameScopes()" TextProperty="Value" ValueProperty="Key" @bind-Value="this._editingMethod.CaseScope" @bind-Value:after="this.RecalculatePreview" /></RadzenFormField>
                 }
                 else if (this._selectedMethodType == Bivium.Models.RenameMethodType.NewName)
                 {
-                    <label>
-                        <span>Pattern:</span>
-                        <input type="text" @bind="this._editingMethod.NamePattern" @bind:event="oninput" @bind:after="this.RecalculatePreview" />
-                    </label>
-                    <div class="renamer-tag-help">
-                        Tags: &lt;Name&gt; &lt;Ext&gt; &lt;Folder&gt;
-                        &lt;Inc:start:step:pad&gt;
-                        &lt;Date:format&gt;
-                        &lt;Rand:min:max&gt;
-                    </div>
+                    <RadzenFormField Text="Pattern"><RadzenTextBox Name="renamer-name-pattern" @bind-Value="this._editingMethod.NamePattern" @bind-Value:after="this.RecalculatePreview" Immediate="true" /></RadzenFormField>
+                    <RadzenText TextStyle="TextStyle.Caption" class="rz-m-0">Tags: &lt;Name&gt; &lt;Ext&gt; &lt;Folder&gt; &lt;Inc:start:step:pad&gt; &lt;Date:format&gt; &lt;Rand:min:max&gt;</RadzenText>
                 }
                 else if (this._selectedMethodType == Bivium.Models.RenameMethodType.Trim)
                 {
-                    <label>
-                        <span>Chars:</span>
-                        <input type="text" @bind="this._editingMethod.TrimCharacters" @bind:event="oninput" @bind:after="this.RecalculatePreview" />
-                    </label>
-                    <label>
-                        <span>Location:</span>
-                        <select @bind="this._editingMethod.TrimLocation" @bind:after="this.RecalculatePreview">
-                            <option value="0">Start</option>
-                            <option value="1">End</option>
-                            <option value="2">Both</option>
-                        </select>
-                    </label>
-                    <label>
-                        <span>Scope:</span>
-                        <select @bind="this._editingMethod.TrimScope" @bind:after="this.RecalculatePreview">
-                            <option value="0">Name only</option>
-                            <option value="1">Extension only</option>
-                            <option value="2">Full name</option>
-                        </select>
-                    </label>
+                    <RadzenFormField Text="Chars"><RadzenTextBox Name="renamer-trim-chars" @bind-Value="this._editingMethod.TrimCharacters" @bind-Value:after="this.RecalculatePreview" Immediate="true" /></RadzenFormField>
+                    <RadzenFormField Text="Location"><RadzenDropDown Name="renamer-trim-location" TValue="int" Data="@this.GetTrimLocations()" TextProperty="Value" ValueProperty="Key" @bind-Value="this._editingMethod.TrimLocation" @bind-Value:after="this.RecalculatePreview" /></RadzenFormField>
+                    <RadzenFormField Text="Scope"><RadzenDropDown Name="renamer-trim-scope" TValue="int" Data="@this.GetNameScopes()" TextProperty="Value" ValueProperty="Key" @bind-Value="this._editingMethod.TrimScope" @bind-Value:after="this.RecalculatePreview" /></RadzenFormField>
                 }
             </div>
 
-            <!-- Method stack section -->
-            <div class="renamer-stack-header">Methods (@this._methodStack.Count):</div>
-
-            <div class="renamer-stack">
+            <RadzenText TextStyle="TextStyle.Subtitle2" class="renamer-stack-header rz-m-0">Methods (@this._methodStack.Count):</RadzenText>
+            <RadzenCard Variant="Variant.Outlined" class="renamer-stack">
                 @for (int idx = 0; idx < this._methodStack.Count; idx++)
                 {
                     int i = idx;
-                    Bivium.Models.RenameMethod m = this._methodStack[i];
-                    <div class="renamer-stack-item">
-                        <span class="renamer-stack-item-name" title="@m.GetDisplayName()">@m.GetDisplayName()</span>
+                    Bivium.Models.RenameMethod method = this._methodStack[i];
+                    <div class="renamer-stack-item rz-p-1">
+                        <RadzenText TagName="TagName.Span" TextStyle="TextStyle.Body2" class="renamer-stack-item-name rz-m-0" title="@method.GetDisplayName()" Text="@method.GetDisplayName()" />
                         <div class="renamer-stack-item-actions">
-                            @if (i > 0)
-                            {
-                                <button @onclick="() => this.HandleMoveUp(i)" title="Move up">^</button>
-                            }
-                            @if (i < this._methodStack.Count - 1)
-                            {
-                                <button @onclick="() => this.HandleMoveDown(i)" title="Move down">v</button>
-                            }
-                            <button @onclick="() => this.HandleRemoveMethod(i)" title="Remove">x</button>
+                            @if (i > 0) { <RadzenButton Icon="arrow_upward" Size="ButtonSize.ExtraSmall" Click="@(() => this.HandleMoveUp(i))" title="Move up" aria-label="Move method up" /> }
+                            @if (i < this._methodStack.Count - 1) { <RadzenButton Icon="arrow_downward" Size="ButtonSize.ExtraSmall" Click="@(() => this.HandleMoveDown(i))" title="Move down" aria-label="Move method down" /> }
+                            <RadzenButton Icon="delete" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.ExtraSmall" Click="@(() => this.HandleRemoveMethod(i))" title="Remove" aria-label="Remove method" />
                         </div>
                     </div>
                 }
-            </div>
+            </RadzenCard>
         </div>
     </div>
 
-    <!-- Status bar -->
-    <div class="renamer-statusbar">
-        <span>@this._statusText</span>
+    <div class="renamer-statusbar bivium-radzen-renamer-statusbar rz-p-2">
+        <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0" Text="@this._statusText" />
         <div class="renamer-statusbar-actions">
-            <button @onclick="this.HandleRename" disabled="@(!this.CanRename())">Rename</button>
-            <button @onclick="this.HandleClose">Cancel</button>
+            <RadzenButton Text="Rename" Icon="drive_file_rename_outline" ButtonStyle="ButtonStyle.Primary" Click="this.HandleRename" Disabled="@(!this.CanRename())" />
+            <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="this.HandleClose" />
         </div>
     </div>
-
-    <!-- Resize handle -->
-    <div class="renamer-resize-handle" id="renamer-resize-handle">/</div>
-</div>
+     <div class="renamer-resize-handle" id="renamer-resize-handle"><RadzenIcon Icon="drag_handle" class="resize-grip-icon" aria-hidden="true" /></div>
+</RadzenCard>

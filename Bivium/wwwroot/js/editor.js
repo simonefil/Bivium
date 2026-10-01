@@ -121,20 +121,9 @@ function configureAndCreateEditor(container, content, language, resolve) {
 
     // Configure worker URLs to use local path
     window.MonacoEnvironment = {
-        getWorkerUrl: function (moduleId, label) {
-            if (label === 'json') {
-                return './lib/monaco-editor/min/vs/language/json/jsonWorker.js';
-            }
-            if (label === 'css' || label === 'scss' || label === 'less') {
-                return './lib/monaco-editor/min/vs/language/css/cssWorker.js';
-            }
-            if (label === 'html' || label === 'handlebars' || label === 'razor') {
-                return './lib/monaco-editor/min/vs/language/html/htmlWorker.js';
-            }
-            if (label === 'typescript' || label === 'javascript') {
-                return './lib/monaco-editor/min/vs/language/typescript/tsWorker.js';
-            }
-            return './lib/monaco-editor/min/vs/editor/editor.worker.js';
+        getWorkerUrl: function () {
+            // The bundled AMD distribution loads each language through its shared worker bootstrap.
+            return new URL('./lib/monaco-editor/min/vs/base/worker/workerMain.js', document.baseURI).href;
         }
     };
 

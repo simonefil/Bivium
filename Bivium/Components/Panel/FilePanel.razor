@@ -1,76 +1,610 @@
-@using Bivium.Components.Shared
+@namespace Bivium.Components.Panel
+@implements IAsyncDisposable
+@inject Bivium.Services.IFileSystemService FileSystemService
+@inject IJSRuntime JSRuntime
+@using System.Globalization
 
-<div class="file-panel @(this.IsActive ? "active" : "")" @onclick="this.OnPanelClick">
-    <!-- Panel header with editable path bar -->
-    <div class="panel-header">
+<RadzenCard Variant="@(this.IsActive ? Variant.Outlined : Variant.Flat)" class="@("radzen-file-panel " + (this.IsActive ? "active" : ""))" @onclick="this.ActivateAsync">
+    <div class="radzen-panel-toolbar rz-p-1">
+        <RadzenButton Icon="arrow_upward" ButtonStyle="ButtonStyle.Base" Variant="Variant.Text" Size="ButtonSize.Small" Disabled="@(!this.CanNavigateUp())"
+                      Click="this.NavigateUpAsync" aria-label="Up one directory" title="Up one directory" />
         @if (this._isEditingPath)
         {
-            <div class="path-bar-edit">
-                <input type="text"
-                       id="@(this.PanelId + "-path-input")"
-                       class="path-bar-input"
-                       value="@this._editPath"
-                       @oninput="this.HandlePathInput"
-                       @onkeydown="this.HandlePathKeyDown"
-                       @onblur="this.HandlePathBlur" />
-                @if (this._autocompleteMatches.Count > 1)
-                {
-                    <div class="path-autocomplete">
-                        @for (int i = 0; i < this._autocompleteMatches.Count; i++)
-                        {
-                            int idx = i;
-                            <div class="path-autocomplete-item @(idx == this._autocompleteIndex ? "active" : "")"
-                                 @onmousedown="() => this.SelectAutocompleteItem(idx)">
-                                @this._autocompleteMatches[idx]
-                            </div>
-                        }
-                    </div>
-                }
+            <div id="@(this.PanelId + "-path-host")" class="radzen-path-editor" @onkeydown="this.HandlePathKeyDownAsync" @onfocusout="this.HandlePathBlur">
+                <RadzenAutoComplete Data="@this._autocompleteCandidates" Value="@this._editPath" ValueChanged="this.HandlePathValueChanged"
+                                    FilterOperator="StringFilterOperator.StartsWith" MinLength="0" OpenOnFocus="false"
+                                    Placeholder="Directory path" Style="width:100%" aria-label="Directory path" />
             </div>
         }
         else
         {
-            <div class="path-bar-display" @onclick="this.StartPathEdit">@this.State.CurrentPath</div>
+            <div class="radzen-path-breadcrumb" title="@this.State.CurrentPath">
+                <RadzenBreadCrumb AriaLabel="Current directory">
+                    @foreach (PathCrumb crumb in this.GetPathCrumbs())
+                    {
+                        <RadzenBreadCrumbItem Text="@crumb.Text">
+                            <RadzenButton Text="@crumb.Text" ButtonStyle="ButtonStyle.Base" Variant="Variant.Text" Size="ButtonSize.Small" class="radzen-crumb-button" Click="() => this.NavigateCrumbAsync(crumb.Path)" @onclick:stopPropagation="true" />
+                        </RadzenBreadCrumbItem>
+                    }
+                </RadzenBreadCrumb>
+            </div>
+            <RadzenButton Icon="edit" ButtonStyle="ButtonStyle.Base" Variant="Variant.Text" Size="ButtonSize.Small" Click="this.StartPathEdit"
+                          aria-label="Edit path" title="Edit path" />
         }
     </div>
 
-    <!-- Tree section -->
-    <div class="panel-tree">
-        <Bivium.Components.Tree.DirectoryTree
-            RootPath="@this.State.CurrentPath"
-            CurrentPath="@this.State.CurrentPath"
-            ExpandedDirectoryPaths="@this.State.ExpandedDirectoryPaths"
-            OnExpansionChanged="this.HandleTreeExpansionChanged"
-            OnDirectorySelected="this.HandleTreeNavigation" />
+    <div id="@(this.PanelId + "-inner-splitter-host")" class="radzen-inner-splitter-host">
+        <RadzenSplitter Orientation="Orientation.Vertical" Style="height:100%" Resize="this.HandleTreeResizeAsync"
+                        Collapse="this.HandleTreeCollapseAsync" Expand="this.HandleTreeExpandAsync">
+            <RadzenSplitterPane Size="@(this.State.TreeSizePercent.ToString("0.##", CultureInfo.InvariantCulture) + "%")"
+                                Min="15%" Max="85%" Collapsible="true" Collapsed="@this.State.TreeCollapsed"
+                                ResizeAriaLabel="Resize directory tree" CollapseAriaLabel="Collapse directory tree" ExpandAriaLabel="Expand directory tree">
+                <div class="radzen-panel-tree">
+                    <Bivium.Components.Tree.DirectoryTree RootPath="@this.State.CurrentPath" CurrentPath="@this.State.CurrentPath"
+                        ExpandedDirectoryPaths="@this.State.ExpandedDirectoryPaths" OnExpansionChanged="this.HandleTreeExpansionAsync"
+                        OnDirectorySelected="this.NavigateAsync" />
+                </div>
+            </RadzenSplitterPane>
+            <RadzenSplitterPane Min="15%">
+                <div id="@(this.PanelId + "-filelist")" class="radzen-panel-filelist"
+                     @oncontextmenu="this.HandlePanelContextMenuAsync" @oncontextmenu:preventDefault="true">
+                    <Bivium.Components.FileList.FileListTable HostId="@(this.PanelId + "-file-grid")" PanelId="@this.PanelId" State="@this.State" ParentPath="@this.FileSystemService.GetParentPath(this.State.CurrentPath)"
+                        OnNavigate="this.NavigateAsync" OnSortChanged="this.OnSortChanged" OnContextMenu="this.OnContextMenu"
+                        OnStateChanged="this.OnStateChanged" />
+                </div>
+            </RadzenSplitterPane>
+        </RadzenSplitter>
     </div>
+</RadzenCard>
 
-    <!-- Horizontal splitter between tree and file list -->
-    <ResizableSplitter Direction="horizontal"
-                       SplitterId="@(this.PanelId + "-hsplit")"
-                       CssVariable="--tree-height" />
+@code {
+    /// <summary>
+    /// Stato autoritativo del pannello
+    /// </summary>
+    [Parameter]
+    public PanelState State { get; set; }
 
-    <!-- File list section -->
-    <div class="panel-filelist" id="@(this.PanelId + "-filelist")"
-         @oncontextmenu="this.HandlePanelContextMenu"
-         @oncontextmenu:preventDefault="true">
-        <Bivium.Components.FileList.FileListTable
-            TableId="@(this.PanelId + "-file-table")"
-            Entries="@this.State.Entries"
-            CurrentSort="@this.State.CurrentSort"
-            SelectedPaths="@this.State.SelectedPaths"
-            CursorIndex="@this.State.CursorIndex"
-            SelectionAnchorPath="@this.State.SelectionAnchorPath"
-            NameColumnRatio="@this.State.NameColumnRatio"
-            SizeColumnRatio="@this.State.SizeColumnRatio"
-            DateColumnRatio="@this.State.DateColumnRatio"
-            AttributesColumnRatio="@this.State.AttributesColumnRatio"
-            OwnerColumnRatio="@this.State.OwnerColumnRatio"
-            CurrentPath="@this.State.CurrentPath"
-            OnSortChanged="this.HandleSortChanged"
-            OnSelectionChanged="this.HandleSelectionChanged"
-            OnNavigate="this.HandleFileListNavigation"
-            OnCursorChanged="this.HandleCursorChanged"
-            OnSelectionAnchorChanged="this.HandleSelectionAnchorChanged"
-            OnContextMenu="this.HandleContextMenu" />
-    </div>
-</div>
+    /// <summary>
+    /// Indica se il pannello riceve i comandi globali
+    /// </summary>
+    [Parameter]
+    public bool IsActive { get; set; }
+
+    /// <summary>
+    /// Identificatore stabile del pannello
+    /// </summary>
+    [Parameter]
+    public string PanelId { get; set; } = "";
+
+    /// <summary>
+    /// Inoltra una richiesta di navigazione a Commander
+    /// </summary>
+    [Parameter]
+    public EventCallback<string> OnNavigate { get; set; }
+
+    /// <summary>
+    /// Inoltra una richiesta di ordinamento a Commander
+    /// </summary>
+    [Parameter]
+    public EventCallback<SortColumn> OnSortChanged { get; set; }
+
+    /// <summary>
+    /// Inoltra l'attivazione del pannello a Commander
+    /// </summary>
+    [Parameter]
+    public EventCallback OnActivated { get; set; }
+
+    /// <summary>
+    /// Inoltra una richiesta di menu contestuale
+    /// </summary>
+    [Parameter]
+    public EventCallback<ContextMenuEventArgs> OnContextMenu { get; set; }
+
+    /// <summary>
+    /// Inoltra una modifica semantica dell'albero
+    /// </summary>
+    [Parameter]
+    public EventCallback<DirectoryTreeExpansionChange> OnTreeExpansionChanged { get; set; }
+
+    /// <summary>
+    /// Inoltra una modifica del layout verticale
+    /// </summary>
+    [Parameter]
+    public EventCallback<PanelTreeLayoutChange> OnTreeLayoutChanged { get; set; }
+
+    /// <summary>
+    /// Richiede un render del proprietario dopo un'interazione del reducer
+    /// </summary>
+    [Parameter]
+    public EventCallback OnStateChanged { get; set; }
+
+    /// <summary>
+    /// Inoltra la prima riga visibile per la persistenza semantica
+    /// </summary>
+    [Parameter]
+    public EventCallback<string> OnScrollAnchorChanged { get; set; }
+
+    /// <summary>
+    /// Inoltra il numero di righe interamente visibili
+    /// </summary>
+    [Parameter]
+    public EventCallback<int> OnPageSizeChanged { get; set; }
+
+    /// <summary>
+    /// Indica se l'editor del percorso è aperto
+    /// </summary>
+    private bool _isEditingPath;
+
+    /// <summary>
+    /// Valore corrente dell'editor del percorso
+    /// </summary>
+    private string _editPath = "";
+
+    /// <summary>
+    /// Candidati completi mostrati da RadzenAutoComplete
+    /// </summary>
+    private List<string> _autocompleteCandidates = new List<string>();
+
+    /// <summary>
+    /// Nomi candidati usati dal ciclo Tab
+    /// </summary>
+    private List<string> _autocompleteMatches = new List<string>();
+
+    /// <summary>
+    /// Indice del candidato corrente nella sessione Tab
+    /// </summary>
+    private int _autocompleteIndex;
+
+    /// <summary>
+    /// Directory padre della sessione Tab
+    /// </summary>
+    private string _autocompleteParentDirectory = "";
+
+    /// <summary>
+    /// Valore DOM atteso per continuare la sessione Tab corrente
+    /// </summary>
+    private string _autocompleteCycleValue = "";
+
+    /// <summary>
+    /// Versione della richiesta di editing già osservata
+    /// </summary>
+    private long _pathEditRequestVersion;
+
+    /// <summary>
+    /// Modulo JavaScript per autocomplete e scroll Radzen
+    /// </summary>
+    private IJSObjectReference _jsModule;
+
+    /// <summary>
+    /// Riferimento .NET usato dagli adapter JavaScript
+    /// </summary>
+    private DotNetObjectReference<FilePanel> _dotNetReference;
+
+    /// <summary>
+    /// Percorso di scroll già ripristinato
+    /// </summary>
+    private string _restoredScrollAnchorPath = "";
+
+    /// <summary>
+    /// Cancellazione del blur ritardato e degli adapter pendenti
+    /// </summary>
+    private CancellationTokenSource _pathCancellation = new CancellationTokenSource();
+
+    /// <summary>
+    /// Indica che le risorse del componente sono già state rilasciate
+    /// </summary>
+    private bool _isDisposed;
+
+    /// <summary>
+    /// Avvia l'editing richiesto semanticamente da Commander
+    /// </summary>
+    protected override void OnParametersSet()
+    {
+        if (this.State.PathEditRequestVersion != this._pathEditRequestVersion)
+        {
+            this._pathEditRequestVersion = this.State.PathEditRequestVersion;
+            this.StartPathEdit();
+        }
+    }
+
+    /// <summary>
+    /// Installa gli adapter sul wrapper stabile e ripristina lo scroll semantico
+    /// </summary>
+    /// <param name="firstRender">True al primo render</param>
+    protected override async System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260922-file-columns-v1");
+            this._dotNetReference = DotNetObjectReference.Create(this);
+            await this._jsModule.InvokeVoidAsync("registerRadzenFilePanel", this.PanelId, this._dotNetReference);
+        }
+
+        if (this._isEditingPath && this._jsModule != null)
+            await this._jsModule.InvokeVoidAsync("installRadzenPathAdapter", this.PanelId + "-path-host", this._dotNetReference);
+        else if (this._jsModule != null)
+            await this._jsModule.InvokeVoidAsync("uninstallRadzenPathAdapter", this.PanelId + "-path-host");
+
+        if (this._jsModule != null && !string.IsNullOrEmpty(this.State.ScrollAnchorPath) && this.State.ScrollAnchorPath != this._restoredScrollAnchorPath)
+        {
+            this._restoredScrollAnchorPath = this.State.ScrollAnchorPath;
+            int index = this.State.Entries.FindIndex(entry => entry.FullPath == this.State.ScrollAnchorPath);
+            await this._jsModule.InvokeVoidAsync("restoreRadzenFilePanelScroll", this.PanelId, this.State.ScrollAnchorPath, index);
+        }
+    }
+
+    /// <summary>
+    /// Attiva il pannello senza duplicarne il renderer
+    /// </summary>
+    private async System.Threading.Tasks.Task ActivateAsync()
+    {
+        if (!this.IsActive)
+            await this.OnActivated.InvokeAsync();
+    }
+
+    /// <summary>
+    /// Inoltra una navigazione validata al proprietario
+    /// </summary>
+    /// <param name="path">Percorso richiesto</param>
+    private async System.Threading.Tasks.Task NavigateAsync(string path)
+    {
+        await this.OnNavigate.InvokeAsync(path);
+    }
+
+    /// <summary>
+    /// Risale alla directory padre tramite il servizio esistente
+    /// </summary>
+    private async System.Threading.Tasks.Task NavigateUpAsync()
+    {
+        string parent = this.FileSystemService.GetParentPath(this.State.CurrentPath);
+        if (!string.IsNullOrEmpty(parent))
+            await this.OnNavigate.InvokeAsync(parent);
+    }
+
+    /// <summary>
+    /// Indica se esiste una directory padre
+    /// </summary>
+    /// <returns>True quando il servizio espone un percorso padre</returns>
+    private bool CanNavigateUp()
+    {
+        return !string.IsNullOrEmpty(this.FileSystemService.GetParentPath(this.State.CurrentPath));
+    }
+
+    /// <summary>
+    /// Naviga a un segmento del breadcrumb
+    /// </summary>
+    /// <param name="path">Percorso completo del segmento</param>
+    private async System.Threading.Tasks.Task NavigateCrumbAsync(string path)
+    {
+        if (!string.Equals(path, this.State.CurrentPath, this.GetPathComparison()))
+            await this.OnNavigate.InvokeAsync(path);
+    }
+
+    /// <summary>
+    /// Costruisce i segmenti del percorso senza mutarne la normalizzazione
+    /// </summary>
+    /// <returns>Segmenti dalla radice alla directory corrente</returns>
+    private List<PathCrumb> GetPathCrumbs()
+    {
+        List<PathCrumb> result = new List<PathCrumb>();
+        DirectoryInfo current = new DirectoryInfo(this.State.CurrentPath);
+        while (current != null)
+        {
+            string text = string.IsNullOrEmpty(current.Name) ? current.FullName : current.Name;
+            result.Add(new PathCrumb(text, current.FullName));
+            current = current.Parent;
+        }
+        result.Reverse();
+        return result;
+    }
+
+    /// <summary>
+    /// Apre l'editor Radzen del percorso
+    /// </summary>
+    private void StartPathEdit()
+    {
+        this.CancelPendingPathWork();
+        this._isEditingPath = true;
+        this._editPath = this.State.CurrentPath;
+        this.ResetAutocomplete();
+    }
+
+    /// <summary>
+    /// Aggiorna il valore digitato e azzera il ciclo precedente
+    /// </summary>
+    /// <param name="value">Valore prodotto da RadzenAutoComplete</param>
+    private void HandlePathValueChanged(string value)
+    {
+        this._editPath = value ?? "";
+        if (this._autocompleteMatches.Count == 0)
+            this.ResetAutocomplete();
+    }
+
+    /// <summary>
+    /// Gestisce Enter ed Escape lasciando Tab all'adapter catturante
+    /// </summary>
+    /// <param name="args">Tasto ricevuto dal wrapper editor</param>
+    private async System.Threading.Tasks.Task HandlePathKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+            await this.CommitPathEditAsync();
+        else if (args.Key == "Escape")
+            this.CancelPathEdit();
+    }
+
+    /// <summary>
+    /// Riceve Tab dall'adapter e applica prefisso comune o ciclo legacy
+    /// </summary>
+    /// <param name="inputValue">Valore reale dell'input al momento della pressione</param>
+    /// <returns>Percorso completato da riflettere nell'input Radzen</returns>
+    [JSInvokable]
+    public string OnRadzenPathTab(string inputValue)
+    {
+        if (!this._isEditingPath)
+            return this._editPath;
+
+        string actualInput = inputValue ?? "";
+        if (this._autocompleteMatches.Count > 1 && string.Equals(actualInput, this._autocompleteCycleValue, this.GetPathComparison()))
+        {
+            this._autocompleteIndex = (this._autocompleteIndex + 1) % this._autocompleteMatches.Count;
+            this._editPath = this._autocompleteParentDirectory + this._autocompleteMatches[this._autocompleteIndex] + Path.DirectorySeparatorChar;
+            this._autocompleteCycleValue = this._editPath;
+            this.StateHasChanged();
+            return this._editPath;
+        }
+
+        this.ResetAutocomplete();
+        this._editPath = actualInput;
+        string input = this._editPath.TrimEnd('/', '\\');
+        int separator = input.LastIndexOfAny(new[] { '/', '\\' });
+        string parent = separator >= 0 ? input.Substring(0, separator + 1) : this.State.CurrentPath + Path.DirectorySeparatorChar;
+        string prefix = separator >= 0 ? input.Substring(separator + 1) : input;
+        if (!Directory.Exists(parent))
+            return this._editPath;
+
+        List<string> matches = this.FileSystemService.GetMatchingDirectories(parent, prefix);
+        if (matches.Count == 0)
+            return this._editPath;
+        this._autocompleteParentDirectory = parent;
+        this._autocompleteMatches = matches;
+        this._autocompleteCandidates = matches.Select(match => parent + match + Path.DirectorySeparatorChar).ToList();
+        if (matches.Count == 1)
+        {
+            this._editPath = this._autocompleteCandidates[0];
+            this._autocompleteMatches.Clear();
+            this._autocompleteIndex = 0;
+        }
+        else
+        {
+            this._editPath = parent + this.GetCommonPrefix(matches);
+            this._autocompleteIndex = -1;
+        }
+        this._autocompleteCycleValue = this._editPath;
+        this.StateHasChanged();
+        return this._editPath;
+    }
+
+    /// <summary>
+    /// Avvia la chiusura differita su blur per consentire la selezione Radzen
+    /// </summary>
+    private async System.Threading.Tasks.Task HandlePathBlur()
+    {
+        CancellationToken token = this._pathCancellation.Token;
+        await this.ClosePathAfterBlurAsync(token);
+    }
+
+    /// <summary>
+    /// Chiude l'editor dopo il completamento dell'evento di selezione
+    /// </summary>
+    /// <param name="token">Token della sessione editor corrente</param>
+    private async System.Threading.Tasks.Task ClosePathAfterBlurAsync(CancellationToken token)
+    {
+        try
+        {
+            await System.Threading.Tasks.Task.Delay(120, token);
+            if (!token.IsCancellationRequested)
+            {
+                this._isEditingPath = false;
+                await this.InvokeAsync(this.StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    /// <summary>
+    /// Conferma il percorso digitato tramite il callback Commander
+    /// </summary>
+    private async System.Threading.Tasks.Task CommitPathEditAsync()
+    {
+        string path = this._editPath.Trim();
+        if (!string.IsNullOrEmpty(path) && Directory.Exists(path))
+        {
+            path = Path.TrimEndingDirectorySeparator(path);
+            this.CancelPendingPathWork();
+            this._isEditingPath = false;
+            await this.OnNavigate.InvokeAsync(path);
+        }
+    }
+
+    /// <summary>
+    /// Annulla l'editing e ripristina il percorso autoritativo
+    /// </summary>
+    private void CancelPathEdit()
+    {
+        this.CancelPendingPathWork();
+        this._isEditingPath = false;
+        this._editPath = this.State.CurrentPath;
+        this.ResetAutocomplete();
+    }
+
+    /// <summary>
+    /// Azzera lo stato transitorio dell'autocomplete
+    /// </summary>
+    private void ResetAutocomplete()
+    {
+        this._autocompleteCandidates.Clear();
+        this._autocompleteMatches.Clear();
+        this._autocompleteIndex = 0;
+        this._autocompleteParentDirectory = "";
+        this._autocompleteCycleValue = "";
+    }
+
+    /// <summary>
+    /// Calcola il prefisso comune senza distinzione di maiuscole
+    /// </summary>
+    /// <param name="values">Nomi candidati</param>
+    /// <returns>Prefisso comune</returns>
+    private string GetCommonPrefix(List<string> values)
+    {
+        string result = values[0];
+        for (int i = 1; i < values.Count; i++)
+        {
+            int length = 0;
+            while (length < result.Length && length < values[i].Length && char.ToLowerInvariant(result[length]) == char.ToLowerInvariant(values[i][length]))
+                length++;
+            result = result.Substring(0, length);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Cancella timeout e richieste path precedenti
+    /// </summary>
+    private void CancelPendingPathWork()
+    {
+        this._pathCancellation.Cancel();
+        this._pathCancellation.Dispose();
+        this._pathCancellation = new CancellationTokenSource();
+    }
+
+    /// <summary>
+    /// Inoltra la nuova dimensione dell'albero
+    /// </summary>
+    /// <param name="args">Dimensione conclusiva prodotta da Radzen</param>
+    private async System.Threading.Tasks.Task HandleTreeResizeAsync(RadzenSplitterResizeEventArgs args)
+    {
+        if (args.PaneIndex == 0)
+            await this.OnTreeLayoutChanged.InvokeAsync(new PanelTreeLayoutChange(args.NewSize, false));
+    }
+
+    /// <summary>
+    /// Inoltra la compressione dell'albero
+    /// </summary>
+    /// <param name="args">Pannello compresso da Radzen</param>
+    private async System.Threading.Tasks.Task HandleTreeCollapseAsync(RadzenSplitterEventArgs args)
+    {
+        if (args.PaneIndex == 0)
+            await this.OnTreeLayoutChanged.InvokeAsync(new PanelTreeLayoutChange(this.State.TreeSizePercent, true));
+    }
+
+    /// <summary>
+    /// Inoltra l'espansione dell'albero
+    /// </summary>
+    /// <param name="args">Pannello espanso da Radzen</param>
+    private async System.Threading.Tasks.Task HandleTreeExpandAsync(RadzenSplitterEventArgs args)
+    {
+        if (args.PaneIndex == 0)
+            await this.OnTreeLayoutChanged.InvokeAsync(new PanelTreeLayoutChange(this.State.TreeSizePercent, false));
+    }
+
+    /// <summary>
+    /// Inoltra una modifica di espansione semantica
+    /// </summary>
+    /// <param name="change">Modifica prodotta dal tree</param>
+    private async System.Threading.Tasks.Task HandleTreeExpansionAsync(DirectoryTreeExpansionChange change)
+    {
+        await this.OnTreeExpansionChanged.InvokeAsync(change);
+    }
+
+    /// <summary>
+    /// Apre il menu contestuale dello sfondo senza entry associata
+    /// </summary>
+    /// <param name="args">Coordinate del puntatore</param>
+    private async System.Threading.Tasks.Task HandlePanelContextMenuAsync(MouseEventArgs args)
+    {
+        await this.OnContextMenu.InvokeAsync(new ContextMenuEventArgs { X = args.ClientX, Y = args.ClientY });
+    }
+
+    /// <summary>
+    /// Riceve dal browser il primo percorso visibile
+    /// </summary>
+    /// <param name="path">Percorso semantico della prima riga visibile</param>
+    [JSInvokable]
+    public async System.Threading.Tasks.Task OnRadzenFileListScrollAnchorChanged(string path)
+    {
+        if (!string.IsNullOrEmpty(path) && path != this.State.ScrollAnchorPath)
+        {
+            this._restoredScrollAnchorPath = path;
+            await this.OnScrollAnchorChanged.InvokeAsync(path);
+        }
+    }
+
+    /// <summary>
+    /// Riceve dal browser il numero di righe visibili
+    /// </summary>
+    /// <param name="pageSize">Numero di righe interamente visibili</param>
+    [JSInvokable]
+    public async System.Threading.Tasks.Task OnRadzenFileListPageSizeChanged(int pageSize)
+    {
+        if (pageSize > 0)
+            await this.OnPageSizeChanged.InvokeAsync(pageSize);
+    }
+
+    /// <summary>
+    /// Restituisce il confronto percorso della piattaforma
+    /// </summary>
+    /// <returns>Confronto coerente con il filesystem corrente</returns>
+    private StringComparison GetPathComparison()
+    {
+        return OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+    }
+
+    /// <summary>
+    /// Rilascia adapter, richieste e riferimenti interop
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (this._isDisposed)
+            return;
+        this._isDisposed = true;
+
+        try
+        {
+            this._pathCancellation.Cancel();
+            if (this._jsModule != null)
+            {
+                try
+                {
+                    await this._jsModule.InvokeVoidAsync("unregisterRadzenFilePanel", this.PanelId);
+                }
+                finally
+                {
+                    try
+                    {
+                        await this._jsModule.InvokeVoidAsync("uninstallRadzenPathAdapter", this.PanelId + "-path-host");
+                    }
+                    finally
+                    {
+                        await this._jsModule.DisposeAsync();
+                    }
+                }
+            }
+        }
+        catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException)
+        {
+        }
+        finally
+        {
+            this._pathCancellation.Dispose();
+            this._dotNetReference?.Dispose();
+            this._dotNetReference = null;
+        }
+    }
+
+    /// <summary>
+    /// Segmento visuale del breadcrumb con destinazione semantica
+    /// </summary>
+    private sealed record PathCrumb(string Text, string Path);
+}

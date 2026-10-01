@@ -8,12 +8,15 @@
     <NoWarn>CA1416</NoWarn>
     <InvariantGlobalization>true</InvariantGlobalization>
     <ApplicationIcon>app.ico</ApplicationIcon>
+    <Configurations>Debug;Release</Configurations>
+    <RuntimeFrameworkVersion>10.0.12</RuntimeFrameworkVersion>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Otp.NET" Version="1.4.0" />
     <PackageReference Include="Porta.Pty" Version="1.0.7" />
     <PackageReference Include="QRCoder" Version="1.6.0" />
+    <PackageReference Include="Radzen.Blazor" Version="11.4.2" />
     <PackageReference Include="SharpCompress" Version="0.48.1" />
     <PackageReference Include="ZstdSharp.Port" Version="0.8.7" />
   </ItemGroup>

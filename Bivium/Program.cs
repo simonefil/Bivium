@@ -5,6 +5,7 @@ using Bivium.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
+using Radzen;
 
 // Parse port: environment variable > --port argument > default 5000
 int port = 5000;
@@ -58,6 +59,7 @@ builder.Services.AddSingleton<IFileSystemService, FileSystemService>();
 builder.Services.AddSingleton<IFileOperationService, FileOperationService>();
 builder.Services.AddSingleton<IPermissionService, PermissionService>();
 builder.Services.AddSingleton<IArchiveService, ArchiveService>();
+builder.Services.AddRadzenComponents();
 
 builder.Services.AddControllers(ConfigureControllers);
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();

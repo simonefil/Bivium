@@ -1,0 +1,56 @@
+@namespace Bivium.Components.Shared
+
+@this.ChildContent
+
+@code {
+    #region Proprietà
+    /// <summary>Frammento posseduto dalla form originale</summary>
+    [Parameter] public RenderFragment ChildContent { get; set; }
+    /// <summary>Notifica il mount reale e i render successivi</summary>
+    [Parameter] public EventCallback<bool> OnContentRendered { get; set; }
+    #endregion
+
+    #region Variabili di classe
+    /// <summary>Guardia dopo il rilascio dell'owner</summary>
+    private bool _detached;
+
+    /// <summary>Notifica solo render richiesti dall'owner, non il render causato dal callback stesso</summary>
+    private bool _notifyAfterRender = true;
+    #endregion
+
+    #region Metodi pubblici
+
+    /// <summary>Aggiorna il contenuto senza sostituire l'istanza della form</summary>
+    /// <param name="content">Frammento dell'owner aggiornato</param>
+    /// <param name="notify">Notifica il render salvo il refresh automatico del callback</param>
+    public void Refresh(RenderFragment content, bool notify)
+    {
+        if (this._detached)
+            return;
+        this.ChildContent = content;
+        this._notifyAfterRender = notify;
+        this.StateHasChanged();
+    }
+
+    /// <summary>Rimuove i callback e il contenuto di un owner rilasciato</summary>
+    public void Detach()
+    {
+        this._detached = true;
+        this.ChildContent = null;
+        this.StateHasChanged();
+    }
+    #endregion
+
+    #region Overrides
+
+    /// <summary>Notifica il DOM realmente montato, senza polling</summary>
+    /// <param name="firstRender">True solo al primo render del bridge</param>
+    protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (this._detached || !this._notifyAfterRender)
+            return System.Threading.Tasks.Task.CompletedTask;
+        this._notifyAfterRender = false;
+        return this.OnContentRendered.InvokeAsync(firstRender);
+    }
+    #endregion
+}

@@ -1,5 +1,5 @@
 # Stage 1: Build
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.401 AS build
 ARG VERSION=1.0.0
 WORKDIR /src
 RUN dotnet tool install -g Microsoft.Web.LibraryManager.Cli
@@ -10,7 +10,7 @@ RUN cd Bivium && libman restore && cd ..
 RUN dotnet publish Bivium/Bivium.csproj -c Release -p:Version=${VERSION} -o /app
 
 # Stage 2: Runtime
-FROM mcr.microsoft.com/dotnet/aspnet:10.0
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.12
 WORKDIR /app
 COPY --from=build /app .
 ENV LANG=C.UTF-8

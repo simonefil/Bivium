@@ -1,112 +1,147 @@
-@if (this.IsVisible)
-{
-    <!-- Transparent overlay to catch clicks outside menu -->
-    <div class="context-menu-overlay" @onclick="this.HandleClose"></div>
+@namespace Bivium.Components.Shared
+@implements IDisposable
+@inject ContextMenuService ContextMenuService
 
-    <!-- Context menu positioned at click coordinates -->
-    <div class="context-menu" style="left: @(this.X)px; top: @(this.Y)px;">
-        @if (this.IsDirectory && !this.IsMultiSelection)
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public double X { get; set; }
+    [Parameter] public double Y { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnOpen { get; set; }
+    [Parameter] public EventCallback OnEdit { get; set; }
+    [Parameter] public EventCallback OnCut { get; set; }
+    [Parameter] public EventCallback OnCopy { get; set; }
+    [Parameter] public EventCallback OnPaste { get; set; }
+    [Parameter] public EventCallback OnRename { get; set; }
+    [Parameter] public EventCallback OnDelete { get; set; }
+    [Parameter] public EventCallback OnNewFile { get; set; }
+    [Parameter] public EventCallback OnNewFolder { get; set; }
+    [Parameter] public EventCallback OnDownload { get; set; }
+    [Parameter] public EventCallback OnUpload { get; set; }
+    [Parameter] public EventCallback OnExtract { get; set; }
+    [Parameter] public EventCallback OnExtractToFolder { get; set; }
+    [Parameter] public EventCallback OnCompress { get; set; }
+    [Parameter] public EventCallback OnRefresh { get; set; }
+    [Parameter] public EventCallback OnAdvancedRename { get; set; }
+    [Parameter] public EventCallback OnPermissions { get; set; }
+    [Parameter] public EventCallback OnProperties { get; set; }
+    [Parameter] public bool IsDirectory { get; set; }
+    [Parameter] public bool IsArchive { get; set; }
+    [Parameter] public string ArchiveBaseName { get; set; } = "";
+    [Parameter] public bool HasSelection { get; set; }
+    [Parameter] public bool IsMultiSelection { get; set; }
+    [Parameter] public bool IsEditable { get; set; }
+    [Parameter] public Func<bool> CanInvoke { get; set; }
+
+    private bool _opened;
+    private bool _closing;
+    /// <summary>Guardia contro callback dopo il rilascio dell'owner</summary>
+    private bool _isDisposed;
+
+    protected override void OnInitialized()
+    {
+        this.ContextMenuService.OnClose += this.HandleServiceClose;
+    }
+
+    protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (this._isDisposed)
+            return System.Threading.Tasks.Task.CompletedTask;
+        if (this.IsVisible && !this._opened)
         {
-            <div class="context-menu-item" @onclick="this.HandleOpen">
-                <span>Open</span>
-                <span class="shortcut">Enter</span>
-            </div>
+            this._opened = true;
+            this._closing = false;
+            MouseEventArgs args = new MouseEventArgs { ClientX = this.X, ClientY = this.Y };
+            this.ContextMenuService.Open(args, service => @<RadzenMenu IsContextMenu="true" Close="this.HandleCloseAsync" AriaLabel="File actions">
+                @if (this.IsDirectory && !this.IsMultiSelection)
+                {
+                    <RadzenMenuItem id="context-open" Text="Open" Icon="folder_open" Click="async _ => await this.HandleActionAsync(this.OnOpen)" />
+                }
+                @if (!this.IsDirectory && !this.IsMultiSelection && this.IsEditable)
+                {
+                    <RadzenMenuItem id="context-edit" Text="Edit" Icon="edit" Click="async _ => await this.HandleActionAsync(this.OnEdit)" />
+                }
+                <RadzenMenuItem id="context-cut" Text="Cut" Icon="content_cut" Click="async _ => await this.HandleActionAsync(this.OnCut)" />
+                <RadzenMenuItem id="context-copy" Text="Copy" Icon="content_copy" Click="async _ => await this.HandleActionAsync(this.OnCopy)" />
+                <RadzenMenuItem id="context-paste" Text="Paste" Icon="content_paste" Click="async _ => await this.HandleActionAsync(this.OnPaste)" />
+                @if (!this.IsMultiSelection)
+                {
+                    <RadzenMenuItem id="context-rename" Text="Rename" Icon="drive_file_rename_outline" Click="async _ => await this.HandleActionAsync(this.OnRename)" />
+                }
+                @if (this.HasSelection)
+                {
+                    <RadzenMenuItem id="context-advanced-rename" Text="Advanced Rename..." Icon="edit_note" Click="async _ => await this.HandleActionAsync(this.OnAdvancedRename)" />
+                }
+                <RadzenMenuItem id="context-delete" Text="Delete" Icon="delete" Click="async _ => await this.HandleActionAsync(this.OnDelete)" />
+                <RadzenMenuItem id="context-new-file" Text="New File" Icon="note_add" Click="async _ => await this.HandleActionAsync(this.OnNewFile)" />
+                <RadzenMenuItem id="context-new-folder" Text="New Folder" Icon="create_new_folder" Click="async _ => await this.HandleActionAsync(this.OnNewFolder)" />
+                <RadzenMenuItem id="context-download" Text="@(this.IsMultiSelection ? "Download as ZIP" : "Download")" Icon="download" Click="async _ => await this.HandleActionAsync(this.OnDownload)" />
+                <RadzenMenuItem id="context-upload" Text="Upload" Icon="upload" Click="async _ => await this.HandleActionAsync(this.OnUpload)" />
+                @if (this.IsArchive)
+                {
+                    <RadzenMenuItem id="context-extract" Text="Extract Here" Icon="unarchive" Click="async _ => await this.HandleActionAsync(this.OnExtract)" />
+                    <RadzenMenuItem id="context-extract-folder" Text="@("Extract to " + (this.IsMultiSelection ? "*/" : this.ArchiveBaseName + "/"))" Icon="folder_zip" Click="async _ => await this.HandleActionAsync(this.OnExtractToFolder)" />
+                }
+                @if (this.HasSelection)
+                {
+                    <RadzenMenuItem id="context-compress" Text="Compress to..." Icon="archive" Click="async _ => await this.HandleActionAsync(this.OnCompress)" />
+                }
+                <RadzenMenuItem id="context-refresh" Text="Refresh" Icon="refresh" Click="async _ => await this.HandleActionAsync(this.OnRefresh)" />
+                @if (!this.IsMultiSelection)
+                {
+                    <RadzenMenuItem id="context-permissions" Text="Permissions" Icon="admin_panel_settings" Click="async _ => await this.HandleActionAsync(this.OnPermissions)" />
+                    <RadzenMenuItem id="context-properties" Text="Properties" Icon="info" Click="async _ => await this.HandleActionAsync(this.OnProperties)" />
+                }
+            </RadzenMenu>);
         }
-        @if (!this.IsDirectory && !this.IsMultiSelection && this.IsEditable)
+        else if (!this.IsVisible && this._opened)
         {
-            <div class="context-menu-item" @onclick="this.HandleEdit">
-                <span>Edit</span>
-                <span class="shortcut">F4</span>
-            </div>
+            this._closing = true;
+            this._opened = false;
+            this.ContextMenuService.Close();
         }
-        <hr />
-        <div class="context-menu-item" @onclick="this.HandleCut">
-            <span>Cut</span>
-            <span class="shortcut">Ctrl+X</span>
-        </div>
-        <div class="context-menu-item" @onclick="this.HandleCopy">
-            <span>Copy</span>
-            <span class="shortcut">Ctrl+C</span>
-        </div>
-        <div class="context-menu-item" @onclick="this.HandlePaste">
-            <span>Paste</span>
-            <span class="shortcut">Ctrl+V</span>
-        </div>
-        <hr />
-        @if (!this.IsMultiSelection)
-        {
-            <div class="context-menu-item" @onclick="this.HandleRename">
-                <span>Rename</span>
-                <span class="shortcut">F2</span>
-            </div>
-        }
-        @if (this.HasSelection)
-        {
-            <div class="context-menu-item" @onclick="this.HandleAdvancedRename">
-                <span>Advanced Rename...</span>
-                <span class="shortcut">Ctrl+F2</span>
-            </div>
-        }
-        <div class="context-menu-item" @onclick="this.HandleDelete">
-            <span>Delete</span>
-            <span class="shortcut">Del</span>
-        </div>
-        <hr />
-        <div class="context-menu-item" @onclick="this.HandleNewFile">
-            <span>New File</span>
-            <span class="shortcut">Ctrl+N</span>
-        </div>
-        <div class="context-menu-item" @onclick="this.HandleNewFolder">
-            <span>New Folder</span>
-            <span class="shortcut">Ctrl+Shift+N</span>
-        </div>
-        <hr />
-        <div class="context-menu-item" @onclick="this.HandleDownload">
-            <span>@(this.IsMultiSelection ? "Download as ZIP" : "Download")</span>
-            <span class="shortcut"></span>
-        </div>
-        <div class="context-menu-item" @onclick="this.HandleUpload">
-            <span>Upload</span>
-            <span class="shortcut"></span>
-        </div>
-        <hr />
-        @if (this.IsArchive)
-        {
-            <div class="context-menu-item" @onclick="this.HandleExtract">
-                <span>Extract Here</span>
-                <span class="shortcut"></span>
-            </div>
-            <div class="context-menu-item" @onclick="this.HandleExtractToFolder">
-                <span>Extract to @(this.IsMultiSelection ? "*/" : this.ArchiveBaseName + "/")</span>
-                <span class="shortcut"></span>
-            </div>
-        }
-        @if (this.HasSelection)
-        {
-            <div class="context-menu-item" @onclick="this.HandleCompress">
-                <span>Compress to...</span>
-                <span class="shortcut"></span>
-            </div>
-        }
-        @if (this.IsArchive || this.HasSelection)
-        {
-            <hr />
-        }
-        <div class="context-menu-item" @onclick="this.HandleRefresh">
-            <span>Refresh</span>
-            <span class="shortcut">F5</span>
-        </div>
-        @if (!this.IsMultiSelection)
-        {
-            <hr />
-            <div class="context-menu-item" @onclick="this.HandlePermissions">
-                <span>Permissions</span>
-                <span class="shortcut">Ctrl+P</span>
-            </div>
-            <div class="context-menu-item" @onclick="this.HandleProperties">
-                <span>Properties</span>
-                <span class="shortcut">Alt+Enter</span>
-            </div>
-        }
-    </div>
+
+        return System.Threading.Tasks.Task.CompletedTask;
+    }
+
+    private async System.Threading.Tasks.Task HandleActionAsync(EventCallback callback)
+    {
+        if (this._isDisposed)
+            return;
+        this._closing = true;
+        this.ContextMenuService.Close();
+        this._opened = false;
+        await this.OnClose.InvokeAsync();
+        if (this.CanInvoke == null || !this.CanInvoke())
+            return;
+        await callback.InvokeAsync();
+    }
+
+    private async System.Threading.Tasks.Task HandleCloseAsync()
+    {
+        if (this._isDisposed || this._closing)
+            return;
+        this._closing = true;
+        this._opened = false;
+        await this.OnClose.InvokeAsync();
+    }
+
+    private void HandleServiceClose()
+    {
+        if (this._isDisposed || this._closing || !this._opened)
+            return;
+        this._closing = true;
+        this._opened = false;
+        _ = this.InvokeAsync(async () => await this.OnClose.InvokeAsync());
+    }
+
+    public void Dispose()
+    {
+        if (this._isDisposed)
+            return;
+        this._isDisposed = true;
+        this.ContextMenuService.OnClose -= this.HandleServiceClose;
+        if (this._opened)
+            this.ContextMenuService.Close();
+    }
 }

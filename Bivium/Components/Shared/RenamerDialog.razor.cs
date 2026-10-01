@@ -8,7 +8,7 @@ namespace Bivium.Components.Shared
     /// <summary>
     /// Floating window for advanced batch file renaming
     /// </summary>
-    public partial class RenamerDialog : ComponentBase
+    public partial class RenamerDialog : ComponentBase, IAsyncDisposable
     {
         #region Injected Services
 
@@ -91,6 +91,11 @@ namespace Bivium.Components.Shared
         /// </summary>
         private bool _didRename = false;
 
+        /// <summary>
+        /// Whether component-owned callbacks have been released
+        /// </summary>
+        private bool _isDisposed;
+
         #endregion
 
         #region Public Methods
@@ -113,8 +118,6 @@ namespace Bivium.Components.Shared
             this.RecalculatePreview();
             this.StateHasChanged();
 
-            // Initialize drag/resize after render
-            _ = this.InitializeDragResize();
         }
 
         /// <summary>
@@ -131,17 +134,20 @@ namespace Bivium.Components.Shared
         #region Private Methods
 
         /// <summary>
-        /// Initializes drag and resize via JS interop
+        /// Registra drag e resize dopo il render reale, senza una finestra temporale non agganciata
         /// </summary>
-        private async System.Threading.Tasks.Task InitializeDragResize()
+        /// <param name="firstRender">Indica il primo render del componente</param>
+        protected override async System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender)
         {
-            // Wait for DOM to be ready
-            await System.Threading.Tasks.Task.Delay(100);
+            if (this._isDisposed || !this._isVisible)
+                return;
 
             if (this._interopModule == null)
             {
                 this._interopModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260716-window-manager");
             }
+            if (this._isDisposed)
+                return;
 
             await this._interopModule.InvokeVoidAsync("initWindowDrag", "renamer-window", "renamer-titlebar", "renamer-resize-handle");
         }
@@ -180,6 +186,42 @@ namespace Bivium.Components.Shared
 
             // Update status text
             this.UpdateStatusText();
+        }
+
+        /// <summary>
+        /// Restituisce le modalità di rimozione per il controllo Radzen
+        /// </summary>
+        /// <returns>Etichette indicizzate per valore booleano</returns>
+        private Dictionary<bool, string> GetRemoveModes()
+        {
+            return new Dictionary<bool, string> { { false, "By position" }, { true, "By pattern" } };
+        }
+
+        /// <summary>
+        /// Restituisce le modalità di conversione maiuscole e minuscole
+        /// </summary>
+        /// <returns>Etichette indicizzate per modalità</returns>
+        private Dictionary<int, string> GetCaseModes()
+        {
+            return new Dictionary<int, string> { { 0, "lowercase" }, { 1, "UPPERCASE" }, { 2, "Title Case" } };
+        }
+
+        /// <summary>
+        /// Restituisce gli ambiti nome ed estensione
+        /// </summary>
+        /// <returns>Etichette indicizzate per ambito</returns>
+        private Dictionary<int, string> GetNameScopes()
+        {
+            return new Dictionary<int, string> { { 0, "Name only" }, { 1, "Extension only" }, { 2, "Full name" } };
+        }
+
+        /// <summary>
+        /// Restituisce le posizioni disponibili per il trim
+        /// </summary>
+        /// <returns>Etichette indicizzate per posizione</returns>
+        private Dictionary<int, string> GetTrimLocations()
+        {
+            return new Dictionary<int, string> { { 0, "Start" }, { 1, "End" }, { 2, "Both" } };
         }
 
         /// <summary>
@@ -543,6 +585,39 @@ namespace Bivium.Components.Shared
         {
             this._isVisible = false;
             await this.OnClose.InvokeAsync(this._didRename);
+        }
+
+        #endregion
+
+        #region IAsyncDisposable
+
+        /// <summary>
+        /// Rimuove listener globali e callback del trascinamento
+        /// </summary>
+        /// <returns>Operazione asincrona di rilascio</returns>
+        public async ValueTask DisposeAsync()
+        {
+            if (this._isDisposed)
+                return;
+            this._isDisposed = true;
+
+            if (this._interopModule == null)
+                return;
+
+            try
+            {
+                try
+                {
+                    await this._interopModule.InvokeVoidAsync("disposeWindowDrag", "renamer-window");
+                }
+                finally
+                {
+                    await this._interopModule.DisposeAsync();
+                }
+            }
+            catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException)
+            {
+            }
         }
 
         #endregion

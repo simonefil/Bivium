@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
@@ -181,6 +182,76 @@ namespace Bivium.Controllers
             catch (OperationCanceledException)
             {
                 result = this.Conflict("This browser no longer controls the workspace");
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Aggiorna il tema Radzen predefinito e lo scrive in appsettings.json
+        /// </summary>
+        /// <param name="themeRequest">Nome del tema ufficiale Radzen</param>
+        /// <returns>Risultato dell'aggiornamento</returns>
+        [HttpPut("theme")]
+        public IActionResult UpdateTheme([FromBody] string themeRequest)
+        {
+            string attachmentId = this.Request.Headers["X-Bivium-Attachment"].ToString();
+            string generationText = this.Request.Headers["X-Bivium-Lease-Generation"].ToString();
+            long generation;
+            if (string.IsNullOrEmpty(attachmentId) || !long.TryParse(generationText, out generation))
+                return this.Conflict("This browser no longer controls the workspace");
+            WorkspaceClientToken workspaceToken = new WorkspaceClientToken(attachmentId, generation);
+            if (!this._workspaceService.ValidateMutation(workspaceToken))
+                return this.Conflict("This browser no longer controls the workspace");
+
+            string normalizedTheme;
+            if (!RadzenThemeCatalog.TryNormalize(themeRequest, out normalizedTheme))
+                return this.BadRequest("Unsupported Radzen theme");
+
+            IActionResult result;
+
+            try
+            {
+                string settingsPath = Path.Combine(this._environment.ContentRootPath, "appsettings.json");
+                string json = System.IO.File.ReadAllText(settingsPath);
+
+                JsonDocumentOptions docOptions = new JsonDocumentOptions();
+                docOptions.CommentHandling = JsonCommentHandling.Skip;
+                JsonDocument doc = JsonDocument.Parse(json, docOptions);
+                Dictionary<string, object> root = this.JsonElementToDict(doc.RootElement);
+                doc.Dispose();
+
+                if (!root.ContainsKey("CommanderSettings"))
+                {
+                    root["CommanderSettings"] = new Dictionary<string, object>();
+                }
+
+                Dictionary<string, object> settings = (Dictionary<string, object>)root["CommanderSettings"];
+                settings["DefaultTheme"] = normalizedTheme;
+
+                JsonSerializerOptions writeOptions = new JsonSerializerOptions();
+                writeOptions.WriteIndented = true;
+                string updatedJson = JsonSerializer.Serialize(root, writeOptions);
+
+                bool committed = this._workspaceService.TryExecuteMutation(workspaceToken, () =>
+                {
+                    using FileStream stream = new FileStream(settingsPath, FileMode.Open, FileAccess.Write, FileShare.Read);
+                    stream.SetLength(0);
+                    using StreamWriter writer = new StreamWriter(stream, new UTF8Encoding(false));
+                    writer.Write(updatedJson);
+                });
+                if (committed)
+                {
+                    result = this.Ok(new { success = true, theme = normalizedTheme });
+                }
+                else
+                {
+                    result = this.Conflict("This browser no longer controls the workspace");
+                }
+            }
+            catch (IOException ex)
+            {
+                result = this.StatusCode(500, "Failed to write settings: " + ex.Message);
             }
 
             return result;

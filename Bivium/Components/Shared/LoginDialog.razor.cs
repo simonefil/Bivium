@@ -40,9 +40,20 @@ namespace Bivium.Components.Shared
 
         private IJSObjectReference _jsModule;
 
+        /// <summary>Campo username montato nella pagina gated</summary>
+        private Radzen.Blazor.RadzenTextBox _usernameInput;
+
         #endregion
 
         #region Private Methods
+
+        /// <summary>Imposta il focus soltanto al primo mount della pagina</summary>
+        /// <param name="firstRender">Primo render reale</param>
+        protected override async System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender)
+        {
+            if (firstRender)
+                await this._usernameInput.Element.FocusAsync();
+        }
 
         /// <summary>
         /// Ensures the JS module is loaded

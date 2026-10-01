@@ -1,150 +1,62 @@
-/* File list table styles - reset WebTUI table decorations */
-.file-list-table {
-    width: 100%;
-    border-collapse: collapse;
-    table-layout: fixed;
+/* Scoped presentation of the native Radzen compact grid. */
+.radzen-file-grid-host .rz-group-header {
+    justify-content: flex-end;
 }
 
-/* Remove WebTUI outer table border */
-.file-list-table:before {
-    display: none;
+.radzen-file-grid-host .rz-column-picker {
+    flex: 0 1 auto;
+    min-width: 0;
 }
 
-/* Remove WebTUI cell pseudo-element decorations */
-.file-list-table tr th:before,
-.file-list-table tr th:after,
-.file-list-table tr td:before,
-.file-list-table tr td:after {
-    display: none;
-}
-
-/* Remove WebTUI extra padding */
-.file-list-table :first-child > tr:first-child > td,
-.file-list-table :first-child > tr:first-child > th {
-    padding-top: 0;
-}
-
-.file-list-table tr th,
-.file-list-table tr td {
-    padding-bottom: 0;
-}
-
-/* Column widths */
-.file-list-table th:nth-child(1),
-.file-list-table td:nth-child(1) {
+.radzen-file-grid-host .rz-column-picker .rz-dropdown {
     width: auto;
+    max-width: 100%;
+    min-width: 0;
 }
 
-.file-list-table th:nth-child(2),
-.file-list-table td:nth-child(2) {
-    width: 12ch;
-    text-align: right;
+.radzen-file-grid-host .bivium-entry-name,
+.radzen-file-grid-host .bivium-parent-action {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    min-width: 0;
 }
 
-.file-list-table th:nth-child(3),
-.file-list-table td:nth-child(3) {
-    width: 18ch;
-    text-align: right;
+.radzen-file-grid-host .bivium-entry-name > span,
+.radzen-file-grid-host .bivium-parent-action > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-.file-list-table th:nth-child(4),
-.file-list-table td:nth-child(4) {
-    width: 12ch;
+.radzen-file-grid-host .bivium-entry-name .rzi,
+.radzen-file-grid-host .bivium-parent-action .rzi {
+    flex: 0 0 auto;
+}
+
+.radzen-file-grid-host .bivium-parent-action {
+    width: 100%;
+    text-align: start;
+}
+
+.radzen-file-grid-host .bivium-parent-action > span {
+    flex: 0 0 auto;
+    min-width: 2ch;
+}
+
+.radzen-file-grid-host td.bivium-column-size,
+.radzen-file-grid-host td.bivium-column-date {
+    text-align: end;
+}
+
+.radzen-file-grid-host .bivium-empty-directory {
     text-align: center;
 }
 
-.file-list-table th:nth-child(5),
-.file-list-table td:nth-child(5) {
-    width: 12ch;
-    text-align: left;
+.radzen-panel-toolbar .rz-button {
+    flex: 0 0 auto;
 }
 
-/* Persisted colgroup ratios replace all legacy widths only as a complete set */
-.file-list-table.custom-columns th,
-.file-list-table.custom-columns td {
-    width: auto;
-}
-
-/* Header row */
-.file-list-table thead th {
-    background-color: var(--background1);
-    cursor: pointer;
-    user-select: none;
-    padding: 0 1ch;
+.radzen-panel-toolbar .rz-breadcrumb {
     white-space: nowrap;
-    line-height: 1lh;
-    border-bottom: 1px solid var(--box-border-color, var(--foreground2));
-    position: sticky;
-    top: 0;
-    z-index: 1;
-}
-
-.file-list-table thead th:hover {
-    background-color: var(--background2);
-}
-
-.column-resize-handle {
-    position: absolute;
-    top: 0;
-    right: -3px;
-    bottom: 0;
-    width: 7px;
-    cursor: col-resize;
-    touch-action: none;
-    z-index: 2;
-}
-
-.column-resize-handle:hover {
-    background-color: var(--foreground2);
-    opacity: 0.35;
-}
-
-/* Sort indicator */
-.sort-indicator {
-    color: var(--foreground2);
-    margin-left: 0.5ch;
-}
-
-/* Data rows */
-.file-list-table tbody {
-    user-select: none;
-}
-
-.file-list-table tbody td {
-    padding: 0 1ch;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    line-height: 1lh;
-}
-
-/* Row hover */
-.file-list-table tbody tr:hover {
-    background-color: var(--background1);
-}
-
-/* Row selection */
-.file-list-table tbody tr.selected {
-    background-color: var(--background2);
-    color: var(--foreground0);
-}
-
-/* Cursor row (keyboard navigation) */
-.file-list-table tbody tr.cursor {
-    outline: 1px solid var(--foreground2);
-    outline-offset: -1px;
-}
-
-/* Directory prefix */
-.entry-dir {
-    color: var(--foreground1);
-}
-
-.entry-file {
-    color: var(--foreground0);
-}
-
-/* Parent directory row */
-.entry-parent {
-    color: var(--foreground2);
 }

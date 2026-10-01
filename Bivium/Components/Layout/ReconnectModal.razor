@@ -1,31 +1,29 @@
 ﻿<script type="module" src="@Assets["Components/Layout/ReconnectModal.razor.js"]"></script>
 
-<dialog id="components-reconnect-modal" data-nosnippet>
+<dialog id="components-reconnect-modal" data-nosnippet aria-labelledby="reconnect-title">
+    <div class="components-reconnect-titlebar">
+        <RadzenText id="reconnect-title" TextStyle="TextStyle.H6" TagName="TagName.H1" class="rz-m-0">Connection status</RadzenText>
+    </div>
     <div class="components-reconnect-container">
         <div class="components-rejoining-animation" aria-hidden="true">
-            <div></div>
-            <div></div>
+            <RadzenProgressBar Mode="ProgressBarMode.Indeterminate" ShowValue="false" />
         </div>
-        <p class="components-reconnect-first-attempt-visible">
+        <RadzenText TextStyle="TextStyle.Body1" TagName="TagName.P" class="components-reconnect-first-attempt-visible rz-m-0">
             Rejoining the server...
-        </p>
-        <p class="components-reconnect-repeated-attempt-visible">
+        </RadzenText>
+        <RadzenText TextStyle="TextStyle.Body1" TagName="TagName.P" class="components-reconnect-repeated-attempt-visible rz-m-0">
             Rejoin failed... trying again in <span id="components-seconds-to-next-attempt"></span> seconds.
-        </p>
-        <p class="components-reconnect-failed-visible">
+        </RadzenText>
+        <RadzenText TextStyle="TextStyle.Body1" TagName="TagName.P" class="components-reconnect-failed-visible rz-m-0">
             Failed to rejoin.<br />Please retry or reload the page.
-        </p>
-        <button id="components-reconnect-button" class="components-reconnect-failed-visible">
-            Retry
-        </button>
-        <p class="components-pause-visible">
+        </RadzenText>
+        <RadzenButton id="components-reconnect-button" Text="Retry" ButtonType="ButtonType.Button" ButtonStyle="ButtonStyle.Primary" class="components-reconnect-failed-visible" />
+        <RadzenText TextStyle="TextStyle.Body1" TagName="TagName.P" class="components-pause-visible rz-m-0">
             The session has been paused by the server.
-        </p>
-        <p class="components-resume-failed-visible">
+        </RadzenText>
+        <RadzenText TextStyle="TextStyle.Body1" TagName="TagName.P" class="components-resume-failed-visible rz-m-0">
             Failed to resume the session.<br />Please retry or reload the page.
-        </p>
-        <button id="components-resume-button" class="components-pause-visible components-resume-failed-visible">
-            Resume
-        </button>
+        </RadzenText>
+        <RadzenButton id="components-resume-button" Text="Resume" ButtonType="ButtonType.Button" ButtonStyle="ButtonStyle.Primary" class="components-pause-visible components-resume-failed-visible" />
     </div>
 </dialog>

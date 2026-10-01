@@ -23,6 +23,12 @@ namespace Bivium.Components.Shared
         [Parameter]
         public long LeaseGeneration { get; set; }
 
+        /// <summary>
+        /// Rivalida l'autorità del browser prima e dopo il salvataggio asincrono
+        /// </summary>
+        [Parameter]
+        public Func<bool> CanInvoke { get; set; }
+
         #endregion
 
         #region Class Variables
@@ -50,7 +56,10 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Reference to the textarea for focus
         /// </summary>
-        private ElementReference _textareaElement;
+        private Radzen.Blazor.RadzenTextArea _textareaElement;
+
+        /// <summary>Protegge il commit asincrono non cancellabile</summary>
+        private bool _isSaving;
 
         #endregion
 
@@ -67,17 +76,16 @@ namespace Bivium.Components.Shared
             this._isVisible = true;
             this.StateHasChanged();
 
-            // Focus the textarea after render
-            _ = this.FocusTextareaAsync();
         }
 
         /// <summary>
         /// Focuses the textarea after render
         /// </summary>
-        private async System.Threading.Tasks.Task FocusTextareaAsync()
+        /// <param name="firstRender">Primo mount reale del contenuto</param>
+        private async System.Threading.Tasks.Task HandleContentRenderedAsync(bool firstRender)
         {
-            await System.Threading.Tasks.Task.Delay(50);
-            await this._textareaElement.FocusAsync();
+            if (firstRender && this._isVisible)
+                await this._textareaElement.Element.FocusAsync();
         }
 
         /// <summary>
@@ -109,6 +117,9 @@ namespace Bivium.Components.Shared
         /// </summary>
         private async System.Threading.Tasks.Task HandleSave()
         {
+            if (this.CanInvoke != null && !this.CanInvoke())
+                return;
+
             // Parse textarea back to a list of non-empty extensions
             string[] lines = this._extensionsText.Split('\n');
             List<string> extensions = new List<string>();
@@ -128,6 +139,9 @@ namespace Bivium.Components.Shared
             await this.EnsureJsModule();
             bool success = await this._jsModule.InvokeAsync<bool>("putJson", "/api/Settings/extensions", jsonBody, this.AttachmentId, this.LeaseGeneration);
 
+            if (this.CanInvoke != null && !this.CanInvoke())
+                return;
+
             if (success)
             {
                 this._isVisible = false;
@@ -144,8 +158,28 @@ namespace Bivium.Components.Shared
         /// </summary>
         private async System.Threading.Tasks.Task HandleCancel()
         {
+            if (this._isSaving)
+                return;
             this._isVisible = false;
             await this.OnClose.InvokeAsync();
+        }
+
+        /// <summary>Blocca chiusura e doppi salvataggi fino al termine della richiesta</summary>
+        private async System.Threading.Tasks.Task HandleSaveAsync()
+        {
+            if (this._isSaving)
+                return;
+
+            this._isSaving = true;
+            this.StateHasChanged();
+            try
+            {
+                await this.HandleSave();
+            }
+            finally
+            {
+                this._isSaving = false;
+            }
         }
 
         #endregion

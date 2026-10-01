@@ -1,0 +1,118 @@
+@namespace Bivium.Components.Shared
+@implements IDisposable
+@inject DialogService DialogService
+@inject ILogger<PersistentModalShell> Logger
+
+@code {
+    /// <summary>Contenuto appartenente all'owner, senza ricreare la form</summary>
+    [Parameter] public RenderFragment ChildContent { get; set; }
+    /// <summary>Titolo accessibile nativo</summary>
+    [Parameter] public string Label { get; set; } = "Dialog";
+    /// <summary>Classe di presentazione opzionale sul wrapper nativo</summary>
+    [Parameter] public string OverlayClass { get; set; } = "";
+    /// <summary>Annullamento richiesto dall'utente, una sola volta per apertura</summary>
+    [Parameter] public EventCallback OnCancel { get; set; }
+    /// <summary>Notifica DOM pronto: true al primo mount, false sui refresh</summary>
+    [Parameter] public EventCallback<bool> OnContentRendered { get; set; }
+    /// <summary>Abilita X, Escape e backdrop quando l'owner permette la chiusura</summary>
+    [Parameter] public bool CanClose { get; set; } = true;
+    /// <summary>Larghezza di presentazione del dialog</summary>
+    [Parameter] public string Width { get; set; } = "min(94vw, 58rem)";
+
+    /// <summary>Ownership dell'apertura nel servizio condiviso</summary>
+    private RadzenDialogLifetime _lifetime;
+    /// <summary>Bridge montato nel contenuto nativo</summary>
+    private ModalContentHost _host;
+    /// <summary>Opzioni aggiornabili dell'apertura posseduta</summary>
+    private DialogOptions _options;
+    /// <summary>Task osservato dell'apertura, senza bloccare il lifecycle</summary>
+    private System.Threading.Tasks.Task _openTask;
+    /// <summary>Guardia di rilascio e callback</summary>
+    private bool _isDisposed;
+
+    /// <summary>Il render automatico del callback non deve generare una nuova notifica ricorsiva</summary>
+    private bool _skipNextRenderNotification;
+
+    /// <summary>Inizializza il tracker prima dell'apertura</summary>
+    protected override void OnInitialized()
+    {
+        this._lifetime = new RadzenDialogLifetime(this.DialogService);
+    }
+
+    /// <summary>Propaga lo stato dell'owner al bridge e alle opzioni native</summary>
+    protected override void OnParametersSet()
+    {
+        if (this._isDisposed || this._options == null)
+            return;
+
+        this._options.ShowClose = this.CanClose;
+        // Il listener Escape Radzen cattura l'opzione al mount; CanClose rivalida lo stato corrente
+        this._options.CloseDialogOnEsc = true;
+        this._options.CloseDialogOnOverlayClick = this.CanClose;
+        this._options.Width = this.Width;
+        this._host?.Refresh(this.ChildContent, !this._skipNextRenderNotification);
+        this._skipNextRenderNotification = false;
+    }
+
+    /// <summary>Apre una volta dopo il mount dell'owner</summary>
+    /// <param name="firstRender">Primo render della shell</param>
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender || this._isDisposed)
+            return;
+
+        this._options = new DialogOptions
+        {
+            Width = this.Width,
+            WrapperCssClass = "bivium-modal-layer " + this.OverlayClass,
+            ShowClose = this.CanClose,
+            CloseDialogOnEsc = true,
+            CloseDialogOnOverlayClick = this.CanClose,
+            AutoFocusFirstElement = true,
+            CanClose = () => System.Threading.Tasks.Task.FromResult(!this._isDisposed && this.CanClose)
+        };
+        this._lifetime.Begin(this._options);
+        this._openTask = this.ObserveOpenAsync(this._options);
+    }
+
+    /// <summary>Osserva chiusura ed errori senza un await pendente nel lifecycle Blazor</summary>
+    /// <param name="options">Opzioni univoche dell'apertura</param>
+    private async System.Threading.Tasks.Task ObserveOpenAsync(DialogOptions options)
+    {
+        try
+        {
+            await this.DialogService.OpenAsync(this.Label, service => @<ModalContentHost @ref="this._host" ChildContent="this.ChildContent" OnContentRendered="this.HandleContentRenderedAsync" />, options);
+            if (!this._isDisposed)
+                await this.OnCancel.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            this.Logger.LogError(ex, "Errore durante il lifecycle del dialog persistente Radzen");
+        }
+        finally
+        {
+            this._lifetime.Complete(options);
+        }
+    }
+
+    /// <summary>Inoltra il mount reale soltanto mentre l'owner è vivo</summary>
+    /// <param name="firstRender">True soltanto al primo DOM mount</param>
+    private System.Threading.Tasks.Task HandleContentRenderedAsync(bool firstRender)
+    {
+        this._skipNextRenderNotification = this.OnContentRendered.HasDelegate;
+        return this._isDisposed ? System.Threading.Tasks.Task.CompletedTask : this.OnContentRendered.InvokeAsync(firstRender);
+    }
+
+    /// <summary>Owner Hide non annulla nuovamente l'owner e non chiude dialog sovrapposti</summary>
+    public void Dispose()
+    {
+        if (this._isDisposed)
+            return;
+
+        this._isDisposed = true;
+        this._host?.Detach();
+        this._lifetime?.Dispose();
+        if (this._openTask?.IsCompleted == true)
+            this._openTask = null;
+    }
+}

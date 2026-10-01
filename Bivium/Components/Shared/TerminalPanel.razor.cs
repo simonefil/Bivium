@@ -12,7 +12,7 @@ namespace Bivium.Components.Shared
     /// <summary>
     /// Temporary UI adapter for the persistent terminal runtime
     /// </summary>
-    public partial class TerminalPanel : ComponentBase, IDisposable
+    public partial class TerminalPanel : ComponentBase, IAsyncDisposable
     {
         #region Injected Services
 
@@ -61,6 +61,12 @@ namespace Bivium.Components.Shared
         /// </summary>
         [Parameter]
         public EventCallback OnStateChanged { get; set; }
+
+        /// <summary>
+        /// Verifica la lease tramite il proprietario Commander prima della rinomina
+        /// </summary>
+        [Parameter]
+        public Func<bool> CanInvoke { get; set; }
 
         #endregion
 
@@ -192,6 +198,16 @@ namespace Bivium.Components.Shared
         private IJSObjectReference _interopModule;
 
         /// <summary>
+        /// Modulo geometrico dei pulsanti di chiusura esterni ai tab nativi
+        /// </summary>
+        private IJSObjectReference _tabStripModule;
+
+        /// <summary>
+        /// Wrapper stabile della strip, senza alterare l'ID interno di RadzenTabs
+        /// </summary>
+        private ElementReference _tabStripElement;
+
+        /// <summary>
         /// Component reference exposed to JavaScript callbacks
         /// </summary>
         private DotNetObjectReference<TerminalPanel> _dotNetRef;
@@ -252,9 +268,9 @@ namespace Bivium.Components.Shared
         private string _renameText = "";
 
         /// <summary>
-        /// Input used by inline rename
+        /// Dialog nativo per la rinomina del tab
         /// </summary>
-        private ElementReference _renameInputElement;
+        private InputDialog _renameDialog;
 
         #endregion
 
@@ -263,7 +279,7 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Connects the current circuit to the singleton without acquiring PTY ownership
         /// </summary>
-        protected override void OnInitialized()
+        protected override async System.Threading.Tasks.Task OnInitializedAsync()
         {
             BiviumWorkspaceSnapshot workspace;
             this._workspaceSubscription = this._workspaceService.SubscribeAttachment(this.AttachmentId, this.HandleWorkspaceChanged, out workspace);
@@ -272,13 +288,13 @@ namespace Bivium.Components.Shared
             this._subscriptionCancellation = CancellationTokenSource.CreateLinkedTokenSource(this._requestCancellation.Token, revocationToken);
             this._runtimeSubscription = this._terminalRuntime.Subscribe(this.HandleRuntimeChanged, this._subscriptionCancellation.Token);
             this._subscribedLeaseGeneration = this.LeaseGeneration;
-            this.RefreshSessions();
+            await this.RefreshSessionsAsync();
         }
 
         /// <summary>
         /// Ricollega gli eventi quando il recovery riacquisisce una nuova generazione della lease
         /// </summary>
-        protected override void OnParametersSet()
+        protected override async System.Threading.Tasks.Task OnParametersSetAsync()
         {
             if (this._isDisposed || this._subscribedLeaseGeneration == this.LeaseGeneration)
                 return;
@@ -291,7 +307,7 @@ namespace Bivium.Components.Shared
             this._runtimeSubscription = this._terminalRuntime.Subscribe(this.HandleRuntimeChanged, this._subscriptionCancellation.Token);
             this._subscribedLeaseGeneration = this.LeaseGeneration;
             this._appliedRevisions.Clear();
-            this.RefreshSessions();
+            await this.RefreshSessionsAsync();
         }
 
         /// <summary>
@@ -306,6 +322,7 @@ namespace Bivium.Components.Shared
             try
             {
                 await this.EnsureJsModules();
+                await this._tabStripModule.InvokeVoidAsync("refresh", this._tabStripElement);
 
                 // Recreate only missing renderers and apply an atomic handoff on first display
                 for (int i = 0; i < this._sessions.Count; i++)
@@ -326,7 +343,7 @@ namespace Bivium.Components.Shared
                 }
 
                 // Restore focus after all visible renderers are synchronized
-                if (this._isVisible && this._activeSessionId > 0)
+                if (this._isVisible && this._renamingSessionId == 0 && this._activeSessionId > 0 && !await this._tabStripModule.InvokeAsync<bool>("ownsFocus", this._tabStripElement))
                     await this._jsModule.InvokeVoidAsync("focusTerminal", this._activeSessionId);
                 this.ShowNextClipboardRequest();
             }
@@ -345,13 +362,13 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Shows the terminal and creates a tab when necessary
         /// </summary>
-        public void Show()
+        public async System.Threading.Tasks.Task ShowAsync()
         {
             if (this._isDisposed)
                 return;
 
             if (this._sessions.Count == 0)
-                this.CreateTab();
+                await this.CreateTabAsync();
 
             this._isVisible = true;
             this._isMinimized = false;
@@ -364,12 +381,12 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Minimizes the terminal without terminating any PTY
         /// </summary>
-        public void Minimize()
+        public async System.Threading.Tasks.Task MinimizeAsync()
         {
             if (this._isDisposed)
                 return;
 
-            this.FinishRename(true);
+            await this.FinishRenameAsync(false);
             this._isVisible = false;
             this._isMinimized = this._sessions.Count > 0;
             this.PersistWindowState();
@@ -423,14 +440,14 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Toggles visibility and minimized state
         /// </summary>
-        public void Toggle()
+        public async System.Threading.Tasks.Task ToggleAsync()
         {
             if (this._isVisible)
-                this.Minimize();
+                await this.MinimizeAsync();
             else if (this._isMinimized)
                 this.Restore();
             else
-                this.Show();
+                await this.ShowAsync();
         }
 
         #endregion
@@ -511,7 +528,7 @@ namespace Bivium.Components.Shared
         /// </summary>
         /// <param name="visible">Whether the document is visible</param>
         [JSInvokable]
-        public void OnTerminalVisibilityChanged(bool visible)
+        public async System.Threading.Tasks.Task OnTerminalVisibilityChanged(bool visible)
         {
             lock (this._runtimeEventSyncRoot)
             {
@@ -526,7 +543,7 @@ namespace Bivium.Components.Shared
             if (visible)
             {
                 // Rebuild tab chrome while JavaScript requests one authoritative renderer handoff
-                this.RefreshSessions();
+                await this.RefreshSessionsAsync();
                 this.StateHasChanged();
             }
         }
@@ -617,14 +634,14 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Creates a tab in the runtime singleton
         /// </summary>
-        private void CreateTab()
+        private async System.Threading.Tasks.Task CreateTabAsync()
         {
-            this.FinishRename(true);
+            await this.FinishRenameAsync(false);
             TerminalSessionSnapshot session = this._terminalRuntime.CreateSession(this.GetClientToken(), this.WorkingDirectory);
             this._activeSessionId = session.Id;
             this._isVisible = true;
             this._isMinimized = false;
-            this.RefreshSessions();
+            await this.RefreshSessionsAsync();
             this.PersistWindowState();
             this.StateHasChanged();
             _ = this.OnStateChanged.InvokeAsync();
@@ -634,65 +651,114 @@ namespace Bivium.Components.Shared
         /// Selects the active tab
         /// </summary>
         /// <param name="sessionId">Tab identifier</param>
-        private void SelectTab(int sessionId)
+        private async System.Threading.Tasks.Task SelectTabAsync(int sessionId)
         {
-            this.FinishRename(true);
+            await this.FinishRenameAsync(false);
             this._terminalRuntime.SetActiveSession(this.GetClientToken(), sessionId);
             this._activeSessionId = sessionId;
             this._terminalRuntime.AcknowledgeAttention(this.GetClientToken(), sessionId);
-            this.RefreshSessions();
+            await this.RefreshSessionsAsync();
             this.StateHasChanged();
             _ = this.FocusActiveSessionAsync();
         }
 
         /// <summary>
-        /// Starts inline renaming
+        /// Calcola l'indice visuale Radzen dall'identità autoritativa della sessione attiva
+        /// </summary>
+        /// <returns>Indice corrente oppure -1 quando non esistono sessioni</returns>
+        private int GetSelectedTabIndex()
+        {
+            return this._sessions.FindIndex(session => session.Id == this._activeSessionId);
+        }
+
+        /// <summary>
+        /// Traduce l'indice visuale Radzen nell'identità stabile della sessione
+        /// </summary>
+        /// <param name="index">Indice selezionato dal controllo</param>
+        private async System.Threading.Tasks.Task HandleSelectedTabChangedAsync(int index)
+        {
+            if (index >= 0 && index < this._sessions.Count)
+                await this.SelectTabAsync(this._sessions[index].Id);
+        }
+
+        /// <summary>
+        /// Proietta la rinomina F2 sull'header Radzen della singola sessione
+        /// </summary>
+        /// <param name="session">Sessione rappresentata dall'header</param>
+        /// <returns>Attributi evento dell'header</returns>
+        private Dictionary<string, object> GetTabHeaderAttributes(TerminalSessionSnapshot session)
+        {
+            Dictionary<string, object> result = new Dictionary<string, object>();
+            result["aria-label"] = session.Label + " terminal tab";
+            result["data-terminal-tab-id"] = session.Id;
+            if (session.Id == this._activeSessionId)
+                result["class"] = "rz-background-color-primary rz-color-on-primary";
+            result["onkeydown"] = EventCallback.Factory.Create<KeyboardEventArgs>(this, args => this.HandleTabHeaderKeyDown(session, args));
+            return result;
+        }
+
+        /// <summary>
+        /// Avvia la rinomina soltanto quando F2 proviene dall'header del tab
+        /// </summary>
+        /// <param name="session">Sessione rappresentata dall'header</param>
+        /// <param name="args">Evento tastiera</param>
+        private void HandleTabHeaderKeyDown(TerminalSessionSnapshot session, KeyboardEventArgs args)
+        {
+            if (args.Key == "F2" && !args.CtrlKey && !args.ShiftKey && !args.AltKey)
+                this.BeginRename(session);
+        }
+
+        /// <summary>
+        /// Apre il dialog nativo di rinomina senza input nel button del tab
         /// </summary>
         /// <param name="session">Session to rename</param>
         private void BeginRename(TerminalSessionSnapshot session)
         {
+            if (session == null || this._isDisposed || this._renamingSessionId != 0 || this._renameDialog == null || this.CanInvoke?.Invoke() == false)
+                return;
             this._renamingSessionId = session.Id;
             this._renameText = session.Label;
+            this._renameDialog.Show("Rename terminal tab", "Tab label", session.Label, session.Label.Length);
             this.StateHasChanged();
-            _ = this.FocusRenameInputAsync();
         }
 
         /// <summary>
-        /// Updates the rename text
+        /// Apre la rinomina della sessione attiva derivata dallo snapshot
         /// </summary>
-        /// <param name="args">New input value</param>
-        private void HandleRenameInput(ChangeEventArgs args)
+        private void BeginRenameActiveTab()
         {
-            this._renameText = args.Value == null ? "" : args.Value.ToString();
+            this.BeginRename(this._sessions.Find(session => session.Id == this._activeSessionId));
         }
 
         /// <summary>
-        /// Handles confirmation or cancellation from the keyboard
+        /// Riceve il valore confermato oppure l'annullamento dal dialog osservato
         /// </summary>
-        /// <param name="args">Keyboard event</param>
-        private void HandleRenameKeyDown(KeyboardEventArgs args)
+        /// <param name="value">Valore confermato, vuoto in annullamento</param>
+        private async System.Threading.Tasks.Task HandleRenameDialogCloseAsync(string value)
         {
-            if (args.Key == "Enter")
-                this.FinishRename(true);
-            else if (args.Key == "Escape")
-                this.FinishRename(false);
+            this._renameText = value ?? "";
+            await this.FinishRenameAsync(!string.IsNullOrWhiteSpace(value));
         }
 
         /// <summary>
         /// Completes tab renaming
         /// </summary>
         /// <param name="save">Whether to save the text</param>
-        private void FinishRename(bool save)
+        private async System.Threading.Tasks.Task FinishRenameAsync(bool save)
         {
             if (this._renamingSessionId == 0)
                 return;
 
-            if (save && !string.IsNullOrWhiteSpace(this._renameText))
+            if (save && !this._isDisposed && this.CanInvoke?.Invoke() != false && this._sessions.Exists(session => session.Id == this._renamingSessionId) && !string.IsNullOrWhiteSpace(this._renameText))
                 this._terminalRuntime.RenameSession(this.GetClientToken(), this._renamingSessionId, this._renameText);
 
+            if (!save)
+                this._renameDialog?.Hide();
             this._renamingSessionId = 0;
             this._renameText = "";
-            this.RefreshSessions();
+            if (this._isDisposed)
+                return;
+            await this.RefreshSessionsAsync();
             this.StateHasChanged();
         }
 
@@ -719,10 +785,10 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Requests confirmation before destructively closing an active tab
+        /// Requests confirmation before destructively closing the requested tab
         /// </summary>
         /// <param name="sessionId">Tab identifier</param>
-        private void RequestCloseTab(int sessionId)
+        private async System.Threading.Tasks.Task RequestCloseTabAsync(int sessionId)
         {
             TerminalSessionSnapshot session = this._sessions.Find(item => item.Id == sessionId);
             if (session == null)
@@ -736,7 +802,7 @@ namespace Bivium.Components.Shared
             }
             else
             {
-                this.CloseTab(sessionId);
+                await this.CloseTabAsync(sessionId);
             }
         }
 
@@ -765,7 +831,7 @@ namespace Bivium.Components.Shared
             }
             else if (action == ConfirmAction.CloseTab)
             {
-                this.CloseTab(sessionId);
+                await this.CloseTabAsync(sessionId);
             }
 
             this.StateHasChanged();
@@ -776,23 +842,22 @@ namespace Bivium.Components.Shared
         /// Explicitly closes one tab
         /// </summary>
         /// <param name="sessionId">Tab identifier</param>
-        private void CloseTab(int sessionId)
+        private async System.Threading.Tasks.Task CloseTabAsync(int sessionId)
         {
             this._terminalRuntime.CloseSession(this.GetClientToken(), sessionId);
             this._appliedRevisions.Remove(sessionId);
-            if (this._jsModule != null)
-                _ = this._jsModule.InvokeVoidAsync("disposeTerminal", sessionId);
-            this.RefreshSessions();
+            await this.DisposeTerminalRendererAsync(sessionId);
+            await this.RefreshSessionsAsync();
             if (this._sessions.Count == 0)
             {
                 this._isVisible = false;
                 this._isMinimized = false;
                 this.PersistWindowState();
-                _ = this.OnClose.InvokeAsync();
+                await this.OnClose.InvokeAsync();
             }
 
             this.StateHasChanged();
-            _ = this.OnStateChanged.InvokeAsync();
+            await this.OnStateChanged.InvokeAsync();
         }
 
         /// <summary>
@@ -804,7 +869,7 @@ namespace Bivium.Components.Shared
         {
             string result = "terminal-tab";
             if (session.Id == this._activeSessionId)
-                result += " active";
+                result += " active rz-color-on-primary";
             if (session.Exited)
                 result += " exited";
             if (session.HasUnreadOutput && session.Id != this._activeSessionId)
@@ -815,19 +880,18 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Returns the progress indicator text for one tab
+        /// Proietta lo stato di progresso nella severità nativa del badge
         /// </summary>
-        private string GetProgressText(TerminalSessionSnapshot session)
+        /// <param name="session">Snapshot della sessione</param>
+        /// <returns>Severità Radzen senza palette applicativa</returns>
+        private Radzen.BadgeStyle GetProgressBadgeStyle(TerminalSessionSnapshot session)
         {
-            return session.ProgressState == TerminalProgressState.Indeterminate ? "↻" : session.ProgressValue + "%";
-        }
-
-        /// <summary>
-        /// Returns progress classes for one tab
-        /// </summary>
-        private string GetProgressCssClass(TerminalSessionSnapshot session)
-        {
-            return "terminal-tab-progress " + session.ProgressState.ToString().ToLowerInvariant();
+            return session.ProgressState switch
+            {
+                TerminalProgressState.Error => Radzen.BadgeStyle.Danger,
+                TerminalProgressState.Warning => Radzen.BadgeStyle.Warning,
+                _ => Radzen.BadgeStyle.Info
+            };
         }
 
         /// <summary>
@@ -847,7 +911,7 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Reloads the bounded session list
         /// </summary>
-        private void RefreshSessions()
+        private async System.Threading.Tasks.Task RefreshSessionsAsync()
         {
             TerminalRuntimeSnapshot snapshot = this._terminalRuntime.GetSnapshot(this._requestCancellation.Token);
             this._sessions.Clear();
@@ -867,8 +931,7 @@ namespace Bivium.Components.Shared
             for (int i = 0; i < staleIds.Count; i++)
             {
                 this._appliedRevisions.Remove(staleIds[i]);
-                if (this._jsModule != null)
-                    _ = this._jsModule.InvokeVoidAsync("disposeTerminal", staleIds[i]);
+                await this.DisposeTerminalRendererAsync(staleIds[i]);
             }
         }
 
@@ -951,7 +1014,7 @@ namespace Bivium.Components.Shared
 
                 // Update the tab list first because the patch may reference a newly created session
                 if (runtimeEvent.SessionsChanged)
-                    this.RefreshSessions();
+                    await this.RefreshSessionsAsync();
 
                 // Attempt the incremental patch from the revision actually applied to the renderer
                 long fromRevision = 0;
@@ -1186,14 +1249,14 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Opens and selects the session that produced a toast
         /// </summary>
-        private void OpenToast(TerminalClientEvent toast)
+        private async System.Threading.Tasks.Task OpenToastAsync(TerminalClientEvent toast)
         {
             this._toasts.RemoveAll(item => item.Id == toast.Id);
             if (this._sessions.Exists(session => session.Id == toast.SessionId))
             {
                 if (!this._isVisible)
                     this.Restore();
-                this.SelectTab(toast.SessionId);
+                await this.SelectTabAsync(toast.SessionId);
             }
             this.StateHasChanged();
         }
@@ -1300,6 +1363,8 @@ namespace Bivium.Components.Shared
                 this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/terminal.js?v=20260922-render-v13");
             if (this._interopModule == null)
                 this._interopModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260922-file-columns-v1");
+            if (this._tabStripModule == null)
+                this._tabStripModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/terminal-tabs.js?v=20261001-tab-close-v2");
             if (!this._windowDragInitialized)
             {
                 await this._interopModule.InvokeVoidAsync("initWindowDrag", "terminal-window", "terminal-titlebar", "terminal-resize-handle", this._dotNetRef);
@@ -1315,7 +1380,7 @@ namespace Bivium.Components.Shared
             try
             {
                 await this.EnsureJsModules();
-                if (this._activeSessionId > 0)
+                if (this._renamingSessionId == 0 && this._activeSessionId > 0)
                     await this._jsModule.InvokeVoidAsync("focusTerminal", this._activeSessionId);
             }
             catch (JSDisconnectedException)
@@ -1327,18 +1392,19 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Moves focus to the rename input
+        /// Releases one browser renderer without changing the server-side terminal session
         /// </summary>
-        private async System.Threading.Tasks.Task FocusRenameInputAsync()
+        /// <param name="sessionId">Session renderer to release</param>
+        private async System.Threading.Tasks.Task DisposeTerminalRendererAsync(int sessionId)
         {
-            await System.Threading.Tasks.Task.Delay(50);
-            if (this._renamingSessionId == 0 || this._isDisposed)
+            if (this._jsModule == null)
                 return;
+
             try
             {
-                await this._renameInputElement.FocusAsync();
+                await this._jsModule.InvokeVoidAsync("disposeTerminal", sessionId);
             }
-            catch (Exception ex) when (ex is JSDisconnectedException || ex is ObjectDisposedException || ex is InvalidOperationException)
+            catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException || ex is ObjectDisposedException)
             {
             }
         }
@@ -1354,11 +1420,17 @@ namespace Bivium.Components.Shared
                 return;
             try
             {
-                if (disposeTerminals)
-                    await module.InvokeVoidAsync("disposeAllTerminals");
-                await module.DisposeAsync();
+                try
+                {
+                    if (disposeTerminals)
+                        await module.InvokeVoidAsync("disposeAllTerminals");
+                }
+                finally
+                {
+                    await module.DisposeAsync();
+                }
             }
-            catch (Exception ex) when (ex is JSDisconnectedException || ex is ObjectDisposedException)
+            catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException || ex is ObjectDisposedException)
             {
             }
         }
@@ -1373,22 +1445,52 @@ namespace Bivium.Components.Shared
                 return;
             try
             {
-                await module.InvokeVoidAsync("disposeWindowDrag", "terminal-window");
-                await module.DisposeAsync();
+                try
+                {
+                    await module.InvokeVoidAsync("disposeWindowDrag", "terminal-window");
+                }
+                finally
+                {
+                    await module.DisposeAsync();
+                }
             }
-            catch (Exception ex) when (ex is JSDisconnectedException || ex is ObjectDisposedException)
+            catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException || ex is ObjectDisposedException)
             {
             }
         }
 
         #endregion
 
-        #region IDisposable
+        #region IAsyncDisposable
+
+        /// <summary>
+        /// Rilascia observer e frame della strip prima del modulo geometrico
+        /// </summary>
+        /// <param name="module">Modulo geometrico da rilasciare</param>
+        private async System.Threading.Tasks.Task DisposeTabStripModuleAsync(IJSObjectReference module)
+        {
+            if (module == null)
+                return;
+            try
+            {
+                try
+                {
+                    await module.InvokeVoidAsync("dispose", this._tabStripElement);
+                }
+                finally
+                {
+                    await module.DisposeAsync();
+                }
+            }
+            catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException || ex is ObjectDisposedException)
+            {
+            }
+        }
 
         /// <summary>
         /// Detaches only the circuit without stopping PTYs or processes
         /// </summary>
-        public void Dispose()
+        public async ValueTask DisposeAsync()
         {
             if (this._isDisposed)
                 return;
@@ -1410,19 +1512,39 @@ namespace Bivium.Components.Shared
 
             IJSObjectReference jsModule = this._jsModule;
             IJSObjectReference interopModule = this._interopModule;
+            IJSObjectReference tabStripModule = this._tabStripModule;
             this._jsModule = null;
             this._interopModule = null;
+            this._tabStripModule = null;
 
             // Release only browser resources; the singleton still owns PTYs, emulators and history
-            if (jsModule != null)
-                _ = this.DisposeJsModuleAsync(jsModule, true);
-            if (interopModule != null)
-                _ = this.DisposeWindowModuleAsync(interopModule);
-            this._dotNetRef?.Dispose();
-            this._dotNetRef = null;
-            this._subscriptionCancellation?.Dispose();
-            this._subscriptionCancellation = null;
-            this._requestCancellation.Dispose();
+            try
+            {
+                try
+                {
+                    await this.DisposeJsModuleAsync(jsModule, true);
+                }
+                finally
+                {
+                    try
+                    {
+                        await this.DisposeTabStripModuleAsync(tabStripModule);
+                    }
+                    finally
+                    {
+                        await this.DisposeWindowModuleAsync(interopModule);
+                    }
+                }
+            }
+            finally
+            {
+                this._dotNetRef?.Dispose();
+                this._dotNetRef = null;
+                this._subscriptionCancellation?.Dispose();
+                this._subscriptionCancellation = null;
+                this._requestCancellation.Dispose();
+            }
+
             GC.SuppressFinalize(this);
         }
 

@@ -1,5 +1,7 @@
+@namespace Bivium.Components
+
 <!DOCTYPE html>
-<html lang="en" data-webtui-theme="dark">
+<html lang="en">
 
 <head>
     <meta charset="utf-8" />
@@ -15,12 +17,14 @@
     <link rel="stylesheet" href="@Assets["Bivium.styles.css"]" />
     <ImportMap />
     <HeadOutlet />
+    <script type="module" src="@Assets["js/radzen-startup.js"]"></script>
 </head>
 
 <body>
-    <Routes />
+    <Routes @rendermode="InteractiveServer" />
     <ReconnectModal />
     <script src="@Assets["_framework/blazor.web.js"]"></script>
+    <script src="@Assets["_content/Radzen.Blazor/Radzen.Blazor.js"]"></script>
 </body>
 
 </html>

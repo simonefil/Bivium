@@ -28,12 +28,142 @@ if (!floatingWindowManager) {
 const initializedWindowDragElements = floatingWindowManager.initializedDragElements;
 const windowDragRegistrations = new Map();
 let workspacePresenceRegistration = null;
+let keyboardCaptureRegistration = null;
+let longPressRegistration = null;
+let popupLayerRegistration = null;
+
+function isVisibleElement(element) {
+    if (!element?.isConnected) return false;
+    const style = getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
+}
+
+function getTopBlockingModal() {
+    const reconnect = Array.from(document.querySelectorAll('dialog[open]')).filter(isVisibleElement);
+    if (reconnect.length) return reconnect[reconnect.length - 1];
+    const dialogs = Array.from(document.querySelectorAll('.rz-dialog-wrapper')).filter(isVisibleElement);
+    return dialogs[dialogs.length - 1] || null;
+}
+
+/** Layout-owned adapter for native Radzen portals; never a global popup CSS override. */
+export function registerNativePopupLayers() {
+    disposeNativePopupLayers();
+    const layers = new Map();
+    const headerLayers = new Map();
+    let previousTop = getTopBlockingModal();
+
+    function ownerFor(popup, info, popups, depth = 0) {
+        if (depth > 4) return null;
+        const ariaOwner = Array.from(document.querySelectorAll('[aria-controls], [aria-owns]')).find(function (control) {
+            return [control.getAttribute('aria-controls'), control.getAttribute('aria-owns')]
+                .some(value => value?.split(/\s+/).includes(popup.id));
+        });
+        const control = ariaOwner || info?.parent;
+        if (!control?.isConnected) return null;
+        const owner = control.closest('.rz-dialog-wrapper, .terminal-window, .editor-window, .renamer-window');
+        if (owner) return owner;
+        const parentPopup = control.closest('.rz-popup, .rz-overlaypanel');
+        if (parentPopup && parentPopup !== popup) {
+            return ownerFor(parentPopup, popups.find(item => item.id === parentPopup.id), popups, depth + 1);
+        }
+        return null;
+    }
+
+    function restore(popup) {
+        const layer = layers.get(popup);
+        if (!layer) return;
+        if (popup.style.zIndex !== layer.originalZ) popup.style.zIndex = layer.originalZ;
+        layers.delete(popup);
+    }
+
+    function update() {
+        const radzen = globalThis.Radzen;
+        if (!radzen) return;
+        const top = getTopBlockingModal();
+        const topChanged = top !== previousTop;
+        previousTop = top;
+        const popups = (radzen.popups || []).slice();
+        const active = new Set();
+        const modelessTop = Math.max(FLOATING_WINDOW_BASE_Z_INDEX,
+            ...Array.from(document.querySelectorAll('.terminal-window.visible, .editor-window.visible, .renamer-window.visible'))
+                .map(element => Number(getComputedStyle(element).zIndex) || FLOATING_WINDOW_BASE_Z_INDEX));
+
+        for (const info of popups) {
+            const popup = document.getElementById(info.id);
+            if (!isVisibleElement(popup) || popup.classList.contains('rz-close')) continue;
+            const owner = ownerFor(popup, info, popups);
+            if ((top && owner !== top) || (owner && !isVisibleElement(owner))) {
+                restore(popup);
+                // Verified 11.4.2 API: preserve callback cleanup but not focus beneath the new modal.
+                radzen.closePopup(info.id, info.instance, info.callback, null, true);
+                continue;
+            }
+            active.add(popup);
+            if (!layers.has(popup)) layers.set(popup, { originalZ: popup.style.zIndex });
+            const ownerZ = owner ? Number(getComputedStyle(owner).zIndex) || modelessTop : Math.max(4000, modelessTop);
+            const zIndex = String(ownerZ + 1);
+            if (popup.style.zIndex !== zIndex) popup.style.zIndex = zIndex;
+        }
+        for (const popup of layers.keys()) {
+            if (!active.has(popup)) restore(popup);
+        }
+
+        // Inline navigation menus inherit the header stacking context, not a body portal.
+        for (const header of document.querySelectorAll('.commander-layout > .rz-header')) {
+            const menuOpen = Array.from(header.querySelectorAll('.rz-navigation-menu')).some(isVisibleElement);
+            if (top && topChanged) {
+                for (const item of header.querySelectorAll('.rz-navigation-item-active')) radzen.closeMenuItem(item);
+            }
+            if (menuOpen && !top) {
+                if (!headerLayers.has(header)) headerLayers.set(header, header.style.zIndex);
+                const zIndex = String(Math.max(4000, modelessTop + 1));
+                if (header.style.zIndex !== zIndex) header.style.zIndex = zIndex;
+            } else if (headerLayers.has(header)) {
+                header.style.zIndex = headerLayers.get(header);
+                headerLayers.delete(header);
+            }
+        }
+    }
+
+    const layerSelector = '.rz-popup, .rz-overlaypanel, .rz-dialog-wrapper, dialog, .terminal-window, .editor-window, .renamer-window, .rz-header';
+    const observer = new MutationObserver(function (records) {
+        // Terminal renderer churn does not change popup ownership or native layer geometry.
+        const relevant = records.some(function (record) {
+            if (record.type === 'attributes') {
+                return record.target.matches(layerSelector) || record.target.closest('.rz-header') ||
+                    (['aria-controls', 'aria-owns'].includes(record.attributeName));
+            }
+            return [...record.addedNodes, ...record.removedNodes].some(function (node) {
+                return node.nodeType === 1 && (node.matches(layerSelector) || node.querySelector(layerSelector));
+            });
+        });
+        if (relevant) update();
+    });
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'open', 'aria-controls', 'aria-owns'] });
+    update();
+    popupLayerRegistration = {
+        dispose: function () {
+            observer.disconnect();
+            for (const popup of layers.keys()) restore(popup);
+            for (const [header, originalZ] of headerLayers) header.style.zIndex = originalZ;
+            headerLayers.clear();
+        }
+    };
+}
+
+/** Releases only this layout's observer and restores native inline presentation. */
+export function disposeNativePopupLayers() {
+    popupLayerRegistration?.dispose();
+    popupLayerRegistration = null;
+}
 
 /**
  * Starts browser-originated workspace presence heartbeats.
  * @param {object} dotNetReference - Current Commander callback owner.
+ * @param {string} attachmentId - Current browser attachment.
+ * @param {number} leaseGeneration - Current authoritative lease generation.
  */
-export function startWorkspacePresence(dotNetReference) {
+export function startWorkspacePresence(dotNetReference, attachmentId, leaseGeneration) {
     stopWorkspacePresence();
     if (!dotNetReference) return;
 
@@ -42,6 +172,13 @@ export function startWorkspacePresence(dotNetReference) {
     let disconnected = false;
     let pageActive = true;
     let heartbeatPending = false;
+    let currentAttachmentId = attachmentId || '';
+    let currentLeaseGeneration = Number(leaseGeneration) || 0;
+
+    function updateLease(nextAttachmentId, nextLeaseGeneration) {
+        currentAttachmentId = nextAttachmentId || '';
+        currentLeaseGeneration = Number(nextLeaseGeneration) || 0;
+    }
 
     function heartbeat() {
         if (!pageActive || !isCircuitConnected() || heartbeatPending) return;
@@ -56,6 +193,20 @@ export function startWorkspacePresence(dotNetReference) {
         if (disconnected) return;
         pageActive = false;
         disconnected = true;
+        const attachmentSnapshot = currentAttachmentId;
+        const generationSnapshot = currentLeaseGeneration;
+        if (attachmentSnapshot && generationSnapshot > 0) {
+            const disconnectUrl = new URL('api/workspace/disconnect', document.baseURI);
+            fetch(disconnectUrl, {
+                method: 'POST',
+                headers: {
+                    'X-Bivium-Attachment': attachmentSnapshot,
+                    'X-Bivium-Lease-Generation': String(generationSnapshot)
+                },
+                credentials: 'same-origin',
+                keepalive: true
+            }).catch(function () { });
+        }
         invokeCircuitMethod(dotNetReference, 'OnWorkspaceDisconnected').catch(function () { });
     }
 
@@ -83,6 +234,7 @@ export function startWorkspacePresence(dotNetReference) {
     }, { signal: eventSignal });
 
     workspacePresenceRegistration = {
+        updateLease: updateLease,
         dispose: function () {
             window.clearInterval(interval);
             eventController.abort();
@@ -90,6 +242,16 @@ export function startWorkspacePresence(dotNetReference) {
         }
     };
     heartbeat();
+}
+
+/**
+ * Updates the lease token captured by the active unload listener.
+ * @param {string} attachmentId - Current browser attachment.
+ * @param {number} leaseGeneration - Current authoritative lease generation.
+ */
+export function updateWorkspacePresenceLease(attachmentId, leaseGeneration) {
+    if (!workspacePresenceRegistration) return;
+    workspacePresenceRegistration.updateLease(attachmentId, leaseGeneration);
 }
 
 /**
@@ -125,6 +287,7 @@ function getTopVisibleFloatingWindow() {
 }
 
 function restoreFloatingWindowFocus(win) {
+    if (isBlockingModalOpen()) return;
     let focusTarget = floatingWindowManager.lastFocusedElements.get(win);
     if (!focusTarget || !focusTarget.isConnected || !win.contains(focusTarget)) {
         const semanticTarget = win.dataset.focusTarget || '';
@@ -135,7 +298,7 @@ function restoreFloatingWindowFocus(win) {
     if (!focusTarget || !focusTarget.isConnected || !win.contains(focusTarget)) return;
 
     requestAnimationFrame(function () {
-        if (!isFloatingWindowVisible(win) || getTopVisibleFloatingWindow() !== win || !focusTarget.isConnected) return;
+        if (isBlockingModalOpen() || !isFloatingWindowVisible(win) || getTopVisibleFloatingWindow() !== win || !focusTarget.isConnected) return;
 
         try {
             focusTarget.focus({ preventScroll: true });
@@ -235,15 +398,32 @@ export function initResizer(splitterId, direction, cssVarName) {
  * @param {object} dotNetRef - .NET DotNetObjectReference for callbacks
  */
 export function captureKeyboard(dotNetRef) {
+    disposeKeyboardCapture();
+    const eventController = new AbortController();
     document.addEventListener('keydown', function (e) {
         const key = e.key;
         const ctrl = e.ctrlKey;
         const shift = e.shiftKey;
         const alt = e.altKey;
 
+        // F12 belongs to Commander before terminal, Monaco or input dispatch.
+        if (key === 'F12' && !ctrl && !shift && !alt && !e.metaKey) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (!isBlockingModalOpen()) {
+                invokeCircuitMethod(dotNetRef, 'OnKeyDown', key, ctrl, shift, alt).catch(function () { });
+            }
+            return;
+        }
+
         // Check if focus is inside the terminal renderer
         const terminalWindow = document.getElementById('terminal-window');
         const activeEl = document.activeElement;
+        if (isBlockingModalOpen()) return;
+        // Parent navigation is a native button action, not a Commander cursor action.
+        if (activeEl?.closest?.('.bivium-parent-action') && ['Enter', ' ', 'Spacebar'].includes(key)) {
+            return;
+        }
         const inTerminal = terminalWindow &&
             terminalWindow.classList.contains('visible') &&
             (terminalWindow.contains(activeEl) || (activeEl && activeEl.closest && activeEl.closest('.terminal-body')));
@@ -259,14 +439,6 @@ export function captureKeyboard(dotNetRef) {
             return;
         }
 
-        // F12 toggles the terminal whenever the terminal itself is not focused
-        if (key === 'F12') {
-            e.preventDefault();
-            e.stopPropagation();
-            invokeCircuitMethod(dotNetRef, 'OnKeyDown', key, ctrl, shift, alt).catch(function () { });
-            return;
-        }
-
         // If Monaco editor has focus, only block browser defaults (Ctrl+S save page)
         if (inEditor) {
             if (key === 's' && ctrl) {
@@ -276,9 +448,25 @@ export function captureKeyboard(dotNetRef) {
         }
 
         // If a dialog overlay is visible, let the dialog handle keyboard events
-        const hasDialog = document.querySelector('.context-menu-overlay');
-        if (hasDialog) {
+        const hasDialog = Array.from(document.querySelectorAll('[aria-modal="true"], .context-menu-overlay, .rz-dialog-wrapper, .rz-dialog-mask, .rz-context-menu, .rz-menu-popup')).some(function (element) {
+            const style = globalThis.getComputedStyle(element);
+            return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
+        });
+        if (hasDialog || isBlockingModalOpen()) {
             return;
+        }
+
+        const semanticControlSelector = '[role="combobox"], [role="listbox"], [role="spinbutton"], [role="slider"], [role="tab"], .rz-column-picker';
+        const nativeOwnerSelector = 'button, a, input, textarea, select, [contenteditable], [role="button"], [role="menu"], [role="menuitem"], [role="tree"], [role="treeitem"], .rz-tree, .radzen-panel-tree, .rz-menu, .rz-menu-popup, .rz-navigation-item, ' + semanticControlSelector;
+        const nativeOwner = activeEl?.closest?.(nativeOwnerSelector);
+        // Semantic input widgets own their keys (including Ctrl chords), after reserved F12.
+        if (activeEl?.closest?.(semanticControlSelector)) return;
+
+        // Navigation belongs only to the file surface, never to native controls or trees.
+        if (['Enter', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', 'Delete', ' ', 'Spacebar'].includes(key)) {
+            const fileSurface = activeEl?.closest?.('.radzen-panel-filelist, .panel-filelist, .radzen-file-grid-host');
+            const workspaceBody = (!activeEl || activeEl === document.body) && document.querySelector('.radzen-file-panel.active, .file-panel.active');
+            if (nativeOwner || (!fileSurface && !workspaceBody)) return;
         }
 
         // If an input or textarea has focus, check context
@@ -293,9 +481,6 @@ export function captureKeyboard(dotNetRef) {
                 // Fall through to normal key handling
             } else {
                 // Inside a dialog or regular typing: let the input handle it
-                if (key === 'Tab') {
-                    e.preventDefault();
-                }
                 if (key === 'Escape') {
                     invokeCircuitMethod(dotNetRef, 'OnKeyDown', key, ctrl, shift, alt).catch(function () { });
                 }
@@ -343,14 +528,28 @@ export function captureKeyboard(dotNetRef) {
             e.preventDefault();
         }
 
-        // Intercept Tab to prevent focus leaving
+        // Commander switches panels only while focus is on the file-list surface
         if (key === 'Tab') {
+            const fileSurface = activeEl?.closest?.('.radzen-panel-filelist, .panel-filelist');
+            if (!fileSurface || nativeOwner) return;
             e.preventDefault();
+        }
+
+        // Commander owns semantic navigation; do not also run Radzen's viewport-local keyboard reducer
+        if (activeEl?.closest?.('.radzen-file-grid-host') && ['ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(key)) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
         }
 
         // Send key event to .NET
         invokeCircuitMethod(dotNetRef, 'OnKeyDown', key, ctrl, shift, alt).catch(function () { });
-    }, true);
+    }, { capture: true, signal: eventController.signal });
+    keyboardCaptureRegistration = { dispose: function () { eventController.abort(); } };
+}
+
+export function disposeKeyboardCapture() {
+    keyboardCaptureRegistration?.dispose();
+    keyboardCaptureRegistration = null;
 }
 
 /**
@@ -358,6 +557,9 @@ export function captureKeyboard(dotNetRef) {
  * Fires a synthetic contextmenu event after 500ms hold
  */
 export function initLongPress() {
+    disposeLongPress();
+    const eventController = new AbortController();
+    const eventSignal = eventController.signal;
     let timer = null;
     let startX = 0;
     let startY = 0;
@@ -385,7 +587,7 @@ export function initLongPress() {
             });
             target.dispatchEvent(contextEvent);
         }, HOLD_DURATION);
-    }, { passive: true });
+    }, { passive: true, signal: eventSignal });
 
     document.addEventListener('touchmove', function (e) {
         if (timer === null) return;
@@ -399,35 +601,25 @@ export function initLongPress() {
             clearTimeout(timer);
             timer = null;
         }
-    }, { passive: true });
+    }, { passive: true, signal: eventSignal });
 
     document.addEventListener('touchend', function () {
         if (timer !== null) {
             clearTimeout(timer);
             timer = null;
         }
-    });
+    }, { signal: eventSignal });
+    longPressRegistration = {
+        dispose: function () {
+            if (timer !== null) clearTimeout(timer);
+            eventController.abort();
+        }
+    };
 }
 
-/**
- * Set the WebTUI theme attribute on the html element
- * @param {string} themeName - Theme name (dark, nord, catppuccin-mocha, etc.)
- */
-export function setTheme(themeName) {
-    document.documentElement.setAttribute('data-webtui-theme', themeName);
-    localStorage.setItem('webtui-theme', themeName);
-}
-
-/**
- * Load the saved theme from localStorage
- * @returns {string} The saved theme name, or empty string
- */
-export function loadSavedTheme() {
-    const saved = localStorage.getItem('webtui-theme');
-    if (saved) {
-        document.documentElement.setAttribute('data-webtui-theme', saved);
-    }
-    return saved || '';
+export function disposeLongPress() {
+    longPressRegistration?.dispose();
+    longPressRegistration = null;
 }
 
 /**
@@ -436,7 +628,19 @@ export function loadSavedTheme() {
  */
 export function focusElement(elementId) {
     const el = document.getElementById(elementId);
+    if (el?.closest('.terminal-window, .editor-window, .renamer-window') && isBlockingModalOpen()) return;
     if (el) el.focus();
+}
+
+/** Focuses a modeless control only while no blocking modal owns focus. */
+export function focusModelessElement(element) {
+    if (!element?.isConnected || isBlockingModalOpen()) return;
+    element.focus({ preventScroll: true });
+}
+
+/** Returns true only for a visible native blocking modal (including reconnect). */
+export function isBlockingModalOpen() {
+    return getTopBlockingModal() !== null;
 }
 
 /**
@@ -631,16 +835,108 @@ export function adjustContextMenuPosition() {
  */
 export function scrollCursorIntoView(cursorIndex = -1) {
     const activePanel = document.querySelector('.file-panel.active');
-    const row = activePanel?.querySelector('.file-list-table tbody tr.cursor');
-    if (row) {
-        row.scrollIntoView({ block: 'nearest' });
+    const radzenPanel = document.querySelector('.radzen-file-panel.active');
+    const scroller = radzenPanel?.querySelector('.rz-data-grid-data') || activePanel?.querySelector('.panel-filelist');
+    if (!scroller) return;
+    const focusedRow = radzenPanel?.querySelector('tr.bivium-focused') || activePanel?.querySelector('tr.cursor');
+    const index = cursorIndex >= 0 ? cursorIndex : Number(focusedRow?.dataset.entryIndex ?? -1);
+    scrollToFileListEntry(scroller, index, '', false);
+}
+
+const fileListScrollRequests = new WeakMap();
+
+/**
+ * Materializes a virtual entry using measured row geometry, then aligns the real row.
+ * Indices are transient hints only; restoration still resolves the semantic path.
+ */
+function scrollToFileListEntry(scroller, index, path, alignStart, onComplete) {
+    fileListScrollRequests.get(scroller)?.();
+    if (index < 0) {
+        onComplete?.();
         return;
     }
 
-    const scroller = activePanel?.querySelector('.panel-filelist');
-    if (scroller && cursorIndex >= 0) {
-        scroller.scrollTop = Math.max(0, cursorIndex * 20);
+    const deadline = performance.now() + 2000;
+    const virtualized = Boolean(scroller.closest('.radzen-file-grid-host'));
+    const quietPeriod = 160;
+    let stableSince = 0;
+    let stableGeometry = null;
+    let stableRows = '';
+    let finished = false;
+    let frame = 0;
+    const inputs = ['wheel', 'touchstart', 'pointerdown', 'keydown'];
+    function finish() {
+        if (finished) return;
+        finished = true;
+        cancelAnimationFrame(frame);
+        for (const input of inputs) scroller.removeEventListener(input, finish);
+        if (fileListScrollRequests.get(scroller) === finish) fileListScrollRequests.delete(scroller);
+        onComplete?.();
     }
+    function position() {
+        if (finished) return;
+        if (!scroller.isConnected || performance.now() >= deadline) {
+            finish();
+            return;
+        }
+
+        const viewport = scroller.getBoundingClientRect();
+        const scale = scroller.offsetHeight > 0 ? viewport.height / scroller.offsetHeight : 1;
+        const headerHeight = scroller.querySelector('thead')?.getBoundingClientRect().height || 0;
+        const rows = Array.from(scroller.querySelectorAll('tr[data-entry-path]'));
+        const target = rows.find(row => path ? row.dataset.entryPath === path : Number(row.dataset.entryIndex) === index);
+        if (target) {
+            const rect = target.getBoundingClientRect();
+            const top = viewport.top + headerHeight;
+            const bottom = viewport.top + scroller.clientHeight * scale;
+            const previousScrollTop = scroller.scrollTop;
+            if ((alignStart && Math.abs(rect.top - top) > 0.5) || rect.top < top - 0.5) scroller.scrollTop += (rect.top - top) / scale;
+            else if (!alignStart && rect.bottom > bottom + 0.5) scroller.scrollTop += (rect.bottom - bottom) / scale;
+            if (!virtualized) {
+                finish();
+                return;
+            }
+
+            // Virtualize can adjust spacer heights after the target first materializes.
+            // Keep ownership until real geometry and the rendered row identities stay quiet.
+            const alignedRect = target.getBoundingClientRect();
+            const visible = alignedRect.height > 0 && alignedRect.top >= top - 0.5 && alignedRect.bottom <= bottom + 0.5;
+            const geometry = [scroller.scrollTop, scroller.scrollHeight, viewport.top, viewport.height, headerHeight, alignedRect.top, alignedRect.bottom];
+            const materializedRows = JSON.stringify(rows.map(row => [row.dataset.entryPath, row.dataset.entryIndex, row.dataset.entryRenderIndex]));
+            const realigned = Math.abs(scroller.scrollTop - previousScrollTop) > 0.5;
+            const changed = !stableGeometry || geometry.some((value, offset) => Math.abs(value - stableGeometry[offset]) > 0.5) || materializedRows !== stableRows;
+            if (!visible || realigned || changed) {
+                stableSince = performance.now();
+                stableGeometry = geometry;
+                stableRows = materializedRows;
+            } else if (performance.now() - stableSince >= quietPeriod) {
+                finish();
+                return;
+            }
+            frame = requestAnimationFrame(position);
+            return;
+        }
+
+        stableSince = 0;
+        stableGeometry = null;
+        stableRows = '';
+        const sample = rows[0];
+        const rect = sample?.getBoundingClientRect();
+        const height = rect && rect.height >= 1 ? rect.height / scale : 20;
+        const parentHost = scroller.closest('[data-parent-row-count]') || scroller.querySelector('[data-parent-row-count]');
+        const parentCount = Number(parentHost?.dataset.parentRowCount ?? 0);
+        const hasVisualIndex = sample?.hasAttribute('data-entry-render-index');
+        const sampleIndex = hasVisualIndex ? Number(sample.dataset.entryRenderIndex) : Number(sample?.dataset.entryIndex ?? 0) + (sample && parentHost ? parentCount : 0);
+        const visualOffset = hasVisualIndex ? Number(sample.dataset.entryRenderIndex) - Number(sample.dataset.entryIndex) : parentCount;
+        const visualIndexForTarget = hasVisualIndex || parentHost ? index + visualOffset : index;
+        const sampleTop = rect ? scroller.scrollTop + (rect.top - viewport.top - headerHeight) / scale : 0;
+        scroller.scrollTop = Math.max(0, sampleTop + (visualIndexForTarget - sampleIndex) * height);
+        frame = requestAnimationFrame(position);
+    }
+
+    fileListScrollRequests.set(scroller, finish);
+    for (const input of inputs) scroller.addEventListener(input, finish, { passive: true });
+    frame = requestAnimationFrame(position);
 }
 
 const filePanelScrollTrackers = new Map();
@@ -777,7 +1073,7 @@ export function registerFilePanelScroll(panelId, dotNetReference) {
         if (tracker.restoring) return;
         window.clearTimeout(tracker.timer);
         tracker.timer = window.setTimeout(function () {
-            const top = scroller.getBoundingClientRect().top;
+            const top = scroller.getBoundingClientRect().top + (scroller.querySelector('thead')?.getBoundingClientRect().height || 0);
             const rows = scroller.querySelectorAll('tr[data-entry-path]');
             for (const row of rows) {
                 if (row.getBoundingClientRect().bottom > top + 1) {
@@ -825,6 +1121,7 @@ function computeFileListPageSize(scroller) {
 export function unregisterFilePanelScroll(panelId) {
     const tracker = filePanelScrollTrackers.get(panelId);
     if (!tracker) return;
+    fileListScrollRequests.get(tracker.scroller)?.();
     window.clearTimeout(tracker.timer);
     tracker.scroller.removeEventListener('scroll', tracker.listener);
     tracker.resizeObserver?.disconnect();
@@ -842,20 +1139,260 @@ export function restoreFilePanelScrollAnchor(panelId, anchorPath, anchorIndex) {
     const scroller = tracker?.scroller || document.getElementById(panelId + '-filelist');
     if (!scroller || anchorIndex < 0) return;
 
-    if (tracker) tracker.restoring = true;
-    scroller.scrollTop = Math.max(0, anchorIndex * 20);
-    window.requestAnimationFrame(function () {
-        const rows = scroller.querySelectorAll('tr[data-entry-path]');
-        for (const row of rows) {
-            if (row.dataset.entryPath === anchorPath) {
-                row.scrollIntoView({ block: 'start' });
-                break;
-            }
-        }
-        window.setTimeout(function () {
-            if (tracker) tracker.restoring = false;
-        }, 150);
+    fileListScrollRequests.get(scroller)?.();
+    if (tracker) {
+        window.clearTimeout(tracker.timer);
+        tracker.restoring = true;
+    }
+    scrollToFileListEntry(scroller, anchorIndex, anchorPath, true, function () {
+        if (tracker) tracker.restoring = false;
     });
+}
+
+const radzenFilePanelTrackers = new Map();
+const radzenPathAdapters = new Map();
+const radzenColumnResizers = new Map();
+const MIN_RADZEN_FILE_COLUMN_WIDTH = 48;
+
+/**
+ * Registra scroll semantico e misura pagina sul contenitore Radzen stabile.
+ * @param {string} panelId - Identificatore applicativo del pannello.
+ * @param {object} dotNetReference - Proprietario dei callback.
+ */
+export function registerRadzenFilePanel(panelId, dotNetReference) {
+    unregisterRadzenFilePanel(panelId);
+    const host = document.getElementById(panelId + '-filelist');
+    const scroller = host?.querySelector('.rz-data-grid-data');
+    if (!host || !scroller || !dotNetReference) return;
+
+    const tracker = { host, scroller, dotNetReference, timer: 0, restoring: false, pageSize: 0 };
+    tracker.measure = function () {
+        if (!isCircuitConnected()) return;
+        const rows = Array.from(scroller.querySelectorAll('tr[data-entry-path]'));
+        const sampleHeight = rows[0]?.getBoundingClientRect().height || 28;
+        const pageSize = Math.max(1, Math.floor(scroller.clientHeight / sampleHeight));
+        if (pageSize === tracker.pageSize) return;
+        invokeCircuitMethod(dotNetReference, 'OnRadzenFileListPageSizeChanged', pageSize).then(function () {
+            tracker.pageSize = pageSize;
+        }).catch(function () { });
+    };
+    tracker.listener = function () {
+        if (tracker.restoring) return;
+        window.clearTimeout(tracker.timer);
+        tracker.timer = window.setTimeout(function () {
+            const top = scroller.getBoundingClientRect().top;
+            const rows = scroller.querySelectorAll('tr[data-entry-path]');
+            for (const row of rows) {
+                if (row.getBoundingClientRect().bottom > top + 1) {
+                    invokeCircuitMethod(dotNetReference, 'OnRadzenFileListScrollAnchorChanged', row.dataset.entryPath || '').catch(function () { });
+                    break;
+                }
+            }
+            tracker.measure();
+        }, 120);
+    };
+    scroller.addEventListener('scroll', tracker.listener, { passive: true });
+    tracker.resizeObserver = new ResizeObserver(tracker.measure);
+    tracker.resizeObserver.observe(scroller);
+    tracker.measure();
+    radzenFilePanelTrackers.set(panelId, tracker);
+}
+
+/**
+ * Rimuove tracker e richieste di scroll di un pannello Radzen.
+ * @param {string} panelId - Identificatore applicativo del pannello.
+ */
+export function unregisterRadzenFilePanel(panelId) {
+    const tracker = radzenFilePanelTrackers.get(panelId);
+    if (!tracker) return;
+    fileListScrollRequests.get(tracker.scroller)?.();
+    window.clearTimeout(tracker.timer);
+    tracker.scroller.removeEventListener('scroll', tracker.listener);
+    tracker.resizeObserver.disconnect();
+    radzenFilePanelTrackers.delete(panelId);
+}
+
+/**
+ * Ripristina una riga Radzen per percorso usando l'indice soltanto come hint transitorio.
+ * @param {string} panelId - Identificatore applicativo del pannello.
+ * @param {string} path - Percorso semantico da risolvere.
+ * @param {number} index - Indice corrente usato per materializzare la riga.
+ */
+export function restoreRadzenFilePanelScroll(panelId, path, index) {
+    const tracker = radzenFilePanelTrackers.get(panelId);
+    if (!tracker || index < 0) return;
+    tracker.restoring = true;
+    scrollToFileListEntry(tracker.scroller, index, path, true, function () {
+        tracker.restoring = false;
+    });
+}
+
+/**
+ * Misura le larghezze visibili delle cinque colonne Radzen.
+ * @param {string} hostId - Identificatore del wrapper stabile della griglia.
+ * @returns {number[]} Larghezze dei cinque header, oppure un array vuoto.
+ */
+export async function measureRadzenFileColumns(hostId) {
+    const host = document.getElementById(hostId);
+    if (!host) return [];
+    for (let attempt = 0; attempt < 30; attempt++) {
+        const headers = Array.from(host.querySelectorAll('thead th')).filter(function (header) {
+            return header.getClientRects().length > 0;
+        });
+        const widths = headers.map(function (header) { return header.getBoundingClientRect().width; });
+        if (widths.length === 5 && widths.every(function (width) { return Number.isFinite(width) && width > 0; })) return widths;
+        await new Promise(requestAnimationFrame);
+    }
+    return [];
+}
+
+/**
+ * Registra un resize immediato sui resizer Radzen senza attendere il roundtrip Blazor Server del mousedown.
+ * @param {string} hostId - Identificatore del wrapper stabile della griglia.
+ * @param {object} dotNetReference - Proprietario del layout semantico.
+ */
+export function registerRadzenColumnResizer(hostId, dotNetReference) {
+    const host = document.getElementById(hostId);
+    const table = host?.querySelector('.rz-grid-table');
+    if (!host || !table || !dotNetReference) return;
+    const handles = Array.from(table.querySelectorAll('thead .rz-column-resizer'));
+    const existing = radzenColumnResizers.get(hostId);
+    if (existing?.table === table && existing.handleCount === handles.length) return;
+    existing?.dispose();
+
+    const controller = new AbortController();
+    let drag = null;
+    function finish(event) {
+        if (!drag) return;
+        const completed = drag;
+        drag = null;
+        if (!completed.changed) return;
+        invokeCircuitMethod(dotNetReference, 'OnRadzenColumnWidthsChanged', completed.ids, completed.widths).catch(function () { });
+        event?.preventDefault();
+    }
+    handles.forEach(function (handle, handleIndex) {
+        handle.addEventListener('mousedown', function (event) {
+            if (event.button !== 0) return;
+            const headers = Array.from(table.querySelectorAll('thead th')).filter(function (header) { return header.getClientRects().length > 0; });
+            const columns = Array.from(table.querySelectorAll(':scope > colgroup > col'));
+            if (headers.length !== columns.length || handleIndex >= headers.length) return;
+            const ids = headers.map(function (header) {
+                const semanticClass = Array.from(header.classList).find(value => value.startsWith('bivium-column-')) || '';
+                return semanticClass.substring('bivium-column-'.length);
+            });
+            if (ids.some(id => !id)) return;
+            drag = {
+                startX: event.clientX,
+                index: handleIndex,
+                startWidth: headers[handleIndex].getBoundingClientRect().width,
+                widths: headers.map(header => header.getBoundingClientRect().width),
+                ids,
+                columns,
+                changed: false
+            };
+            event.preventDefault();
+            event.stopImmediatePropagation();
+        }, { capture: true, signal: controller.signal });
+    });
+    document.addEventListener('mousemove', function (event) {
+        if (!drag) return;
+        const index = drag.index;
+        const width = Math.max(MIN_RADZEN_FILE_COLUMN_WIDTH, drag.startWidth + event.clientX - drag.startX);
+        if (Math.abs(width - drag.widths[index]) < 0.01) return;
+        drag.widths[index] = width;
+        drag.columns[index].style.width = width + 'px';
+        drag.changed = true;
+        event.preventDefault();
+    }, { signal: controller.signal });
+    document.addEventListener('mouseup', finish, { signal: controller.signal });
+
+    const registration = {
+        table,
+        handleCount: handles.length,
+        dispose: function () {
+            drag = null;
+            controller.abort();
+            if (radzenColumnResizers.get(hostId) === registration) radzenColumnResizers.delete(hostId);
+        }
+    };
+    radzenColumnResizers.set(hostId, registration);
+}
+
+/**
+ * Projects the Blazor-owned sort direction onto the generated Radzen column header.
+ * @param {string} hostId - Stable grid wrapper identifier.
+ */
+export function projectRadzenAriaSort(hostId) {
+    const host = document.getElementById(hostId);
+    if (!host) return;
+    for (const control of host.querySelectorAll('thead .radzen-file-sort[data-bivium-sort-direction]')) {
+        const header = control.closest('th');
+        const direction = control.getAttribute('data-bivium-sort-direction');
+        if (header && ['none', 'ascending', 'descending'].includes(direction)) header.setAttribute('aria-sort', direction);
+    }
+}
+
+/**
+ * Rimuove l'adapter di resize colonne di una griglia Radzen.
+ * @param {string} hostId - Identificatore del wrapper stabile della griglia.
+ */
+export function unregisterRadzenColumnResizer(hostId) {
+    radzenColumnResizers.get(hostId)?.dispose();
+}
+
+/**
+ * Installa la cattura Tab sull'input interno di RadzenAutoComplete.
+ * @param {string} hostId - Identificatore del wrapper applicativo.
+ * @param {object} dotNetReference - Proprietario del callback autocomplete.
+ */
+export function installRadzenPathAdapter(hostId, dotNetReference) {
+    const host = document.getElementById(hostId);
+    const input = host?.querySelector('input');
+    if (!host || !input || !dotNetReference) return;
+    const existing = radzenPathAdapters.get(hostId);
+    if (existing?.input === input) return;
+    existing?.dispose();
+
+    const controller = new AbortController();
+    let disposed = false;
+    let inputGeneration = 0;
+    let pending = Promise.resolve();
+    input.addEventListener('input', function () {
+        inputGeneration++;
+    }, { signal: controller.signal });
+    input.addEventListener('keydown', function (event) {
+        if (event.key !== 'Tab') return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const requestedGeneration = inputGeneration;
+        pending = pending.then(function () {
+            if (disposed) return null;
+            return invokeCircuitMethod(dotNetReference, 'OnRadzenPathTab', input.value);
+        }).then(function (value) {
+            if (disposed || requestedGeneration !== inputGeneration || typeof value !== 'string') return;
+            input.value = value;
+        }).catch(function () { });
+    }, { capture: true, signal: controller.signal });
+    const registration = {
+        input,
+        dispose: function () {
+            disposed = true;
+            controller.abort();
+            if (radzenPathAdapters.get(hostId) === registration) radzenPathAdapters.delete(hostId);
+        }
+    };
+    radzenPathAdapters.set(hostId, registration);
+    requestAnimationFrame(function () {
+        if (input.isConnected) input.focus();
+    });
+}
+
+/**
+ * Rimuove l'adapter Tab di un editor percorso Radzen.
+ * @param {string} hostId - Identificatore del wrapper applicativo.
+ */
+export function uninstallRadzenPathAdapter(hostId) {
+    radzenPathAdapters.get(hostId)?.dispose();
 }
 
 /**
@@ -903,7 +1440,7 @@ export function computeWindowGeometry(geometry, viewportWidth, viewportHeight, s
  * @returns {number} First usable vertical viewport coordinate.
  */
 function getFloatingWindowUsableTop() {
-    const menuBar = document.querySelector('.menu-bar');
+    const menuBar = document.querySelector('.bivium-radzen-menu-bar, .menu-bar');
     if (!menuBar) return 0;
     const bottom = Number(menuBar.getBoundingClientRect().bottom);
     return Number.isFinite(bottom) ? Math.max(0, bottom) : 0;
@@ -1031,6 +1568,7 @@ export function initWindowDrag(windowId, titlebarId, resizeHandleId, dotNetRefer
 
     // Drag via titlebar
     titlebar.addEventListener('mousedown', function (e) {
+        if (e.button !== 0 || isBlockingModalOpen() || e.target.closest('button, input, select, textarea, a, [role="tab"], [role="button"], [contenteditable="true"], .rz-tabview-nav, .terminal-tab')) return;
         bringFloatingWindowToFront(win, true);
         isDragging = true;
         dragOffsetX = e.clientX - win.offsetLeft;

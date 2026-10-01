@@ -3,15 +3,16 @@
 
 <PageTitle>Error</PageTitle>
 
-<h1>Error.</h1>
-<h2>An error occurred while processing your request.</h2>
-
-@if (this.ShowRequestId)
-{
-    <p>
-        <strong>Request ID:</strong> <code>@this.RequestId</code>
-    </p>
-}
+<RadzenCard Style="margin:1rem;max-width:48rem;max-height:calc(100dvh - 2rem);overflow:auto;">
+    <RadzenStack Gap="1rem">
+        <RadzenText TextStyle="TextStyle.H4" TagName="TagName.H1" Text="Error" />
+        <RadzenAlert AlertStyle="AlertStyle.Danger" AllowClose="false">An error occurred while processing your request.</RadzenAlert>
+        @if (this.ShowRequestId)
+        {
+            <RadzenText TextStyle="TextStyle.Body1" Style="overflow-wrap:anywhere;">Request ID: <code>@this.RequestId</code></RadzenText>
+        }
+    </RadzenStack>
+</RadzenCard>
 
 @code{
     [CascadingParameter]

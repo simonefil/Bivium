@@ -1,26 +1,127 @@
-@if (this._isVisible)
-{
-    <div class="context-menu-overlay" @onclick="this.HandleCancel">
-        <div class="context-menu" style="position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 40ch; outline: none;"
-             tabindex="0"
-             @ref="this._dialogElement"
-             @onclick:stopPropagation="true"
-             @onkeydown="this.HandleKeyDown">
-            <div style="background-color: var(--background1); padding: 0 1ch; border-bottom: 1px solid var(--foreground2);">
-                @this._title
-            </div>
-            <div style="padding: 1lh 1ch; white-space: pre-wrap;">
-                @this._message
-            </div>
-            <div style="display: flex; justify-content: flex-end; gap: 2ch; padding: 0 1ch 1lh 1ch;">
-                @if (!string.IsNullOrEmpty(this._cancelText))
-                {
-                    <button class="@(this._focusedButton == 0 ? "dialog-btn-focused" : "")"
-                            @onclick="this.HandleCancel">@this._cancelText</button>
-                }
-                <button class="@(this._focusedButton == 1 ? "dialog-btn-focused" : "")"
-                        @onclick="this.HandleConfirm">@this._confirmText</button>
-            </div>
-        </div>
-    </div>
+@namespace Bivium.Components.Shared
+@implements IDisposable
+@inject DialogService DialogService
+@inject ILogger<ConfirmDialog> Logger
+
+@code {
+    /// <summary>
+    /// Callback che riceve l'esito della conferma
+    /// </summary>
+    [Parameter]
+    public EventCallback<bool> OnClose { get; set; }
+
+    /// <summary>
+    /// Versione dell'apertura corrente usata per ignorare completamenti obsoleti
+    /// </summary>
+    private int _generation;
+
+    /// <summary>
+    /// Tracker dell'apertura posseduta da questo adapter
+    /// </summary>
+    private RadzenDialogLifetime _lifetime;
+
+    /// <summary>
+    /// Inizializza il tracker sul servizio scoped del circuito
+    /// </summary>
+    protected override void OnInitialized()
+    {
+        this._lifetime = new RadzenDialogLifetime(this.DialogService);
+    }
+
+    /// <summary>
+    /// Apre il dialog di conferma mantenendo il contratto sincrono legacy
+    /// </summary>
+    /// <param name="title">Titolo del dialog</param>
+    /// <param name="message">Messaggio da confermare</param>
+    /// <param name="confirmText">Testo del pulsante di conferma</param>
+    /// <param name="cancelText">Testo del pulsante di annullamento oppure stringa vuota per un alert</param>
+    public void Show(string title, string message, string confirmText, string cancelText)
+    {
+        if (this._lifetime.IsDisposed || this._lifetime.IsOpen())
+            return;
+
+        int generation = ++this._generation;
+        _ = this.ObserveTaskAsync(this.ShowAsync(generation, title, message, confirmText, cancelText), "apertura conferma");
+    }
+
+    /// <summary>
+    /// Nasconde il dialog soltanto quando l'apertura posseduta è in cima allo stack Radzen
+    /// </summary>
+    public void Hide()
+    {
+        this._generation++;
+        this._lifetime.RequestClose();
+    }
+
+    /// <summary>
+    /// Apre e attende il risultato del dialog Radzen
+    /// </summary>
+    /// <param name="generation">Versione dell'apertura</param>
+    /// <param name="title">Titolo del dialog</param>
+    /// <param name="message">Messaggio da confermare</param>
+    /// <param name="confirmText">Testo della conferma</param>
+    /// <param name="cancelText">Testo dell'annullamento</param>
+    private async System.Threading.Tasks.Task ShowAsync(int generation, string title, string message, string confirmText, string cancelText)
+    {
+        DialogOptions options = new DialogOptions
+        {
+            Width = "min(92vw, 48rem)",
+            ShowClose = false,
+            CloseDialogOnEsc = true,
+            CloseDialogOnOverlayClick = true,
+            AutoFocusFirstElement = true,
+            CssClass = "bivium-radzen-service-dialog",
+            WrapperCssClass = "bivium-modal-layer"
+        };
+        this._lifetime.Begin(options);
+        object result;
+        try
+        {
+            result = await this.DialogService.OpenAsync(title, service => @<div>
+                <RadzenText TextStyle="TextStyle.Body1" TagName="TagName.Div" class="rz-m-0" Style="white-space: pre-wrap;">@message</RadzenText>
+                <div class="bivium-radzen-dialog-actions">
+                    @if (!string.IsNullOrEmpty(cancelText))
+                    {
+                        <RadzenButton Text="@cancelText" ButtonStyle="ButtonStyle.Light" Click="@(() => service.Close(false))" />
+                    }
+                    <RadzenButton Text="@confirmText" ButtonStyle="ButtonStyle.Primary" Click="@(() => service.Close(true))" />
+                </div>
+            </div>, options);
+        }
+        finally
+        {
+            this._lifetime.Complete(options);
+        }
+        if (generation != this._generation)
+            return;
+
+        bool confirmed = result is bool value && value;
+        await this.OnClose.InvokeAsync(confirmed);
+    }
+
+    /// <summary>
+    /// Osserva e registra le eccezioni del task avviato dal contratto <see langword="void"/>
+    /// </summary>
+    /// <param name="task">Task da osservare</param>
+    /// <param name="operation">Descrizione usata nel log</param>
+    private async System.Threading.Tasks.Task ObserveTaskAsync(System.Threading.Tasks.Task task, string operation)
+    {
+        try
+        {
+            await task;
+        }
+        catch (Exception ex)
+        {
+            this.Logger.LogError(ex, "Errore durante {Operation} Radzen", operation);
+        }
+    }
+
+    /// <summary>
+    /// Rilascia il tracker senza chiudere dialog appartenenti ad altri adapter
+    /// </summary>
+    public void Dispose()
+    {
+        this._generation++;
+        this._lifetime?.Dispose();
+    }
 }

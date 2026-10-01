@@ -6,7 +6,7 @@ namespace Bivium.Components.Shared
     /// <summary>
     /// Dialog for hierarchical chunked file and directory uploads
     /// </summary>
-    public partial class UploadDialog : ComponentBase, IDisposable
+    public partial class UploadDialog : ComponentBase, IAsyncDisposable
     {
         #region Parameters
 
@@ -98,9 +98,20 @@ namespace Bivium.Components.Shared
         private DotNetObjectReference<UploadDialog> _dotNetRef;
 
         /// <summary>
+        /// Whether component-owned callbacks have been released
+        /// </summary>
+        private bool _isDisposed;
+
+        /// <summary>
         /// Reference to the Browse button for focus
         /// </summary>
-        private ElementReference _browseButton;
+        private Radzen.Blazor.RadzenButton _browseButton;
+
+        /// <summary>Bridge pronto per la selezione nel mount corrente</summary>
+        private bool _bridgeReady;
+
+        /// <summary>Generazione locale dell'apertura per scartare inizializzazioni obsolete</summary>
+        private long _showGeneration;
 
         #endregion
 
@@ -123,10 +134,9 @@ namespace Bivium.Components.Shared
             this._processedFiles = 0;
             this._uploadFileCount = 0;
             this._isVisible = true;
+            this._bridgeReady = false;
+            this._showGeneration++;
             this.StateHasChanged();
-
-            // Initialize the JS module and focus
-            _ = this.InitializeAndFocusAsync();
         }
 
         /// <summary>
@@ -135,6 +145,8 @@ namespace Bivium.Components.Shared
         public void Hide()
         {
             this._isVisible = false;
+            this._bridgeReady = false;
+            this._showGeneration++;
             this.StateHasChanged();
         }
 
@@ -151,6 +163,9 @@ namespace Bivium.Components.Shared
         [JSInvokable]
         public void OnUploadSelectionChanged(int fileCount, int directoryCount, long totalBytes)
         {
+            if (this._isDisposed || !this._isVisible)
+                return;
+
             this._fileCount = fileCount;
             this._directoryCount = directoryCount;
             this._totalBytes = totalBytes;
@@ -168,6 +183,9 @@ namespace Bivium.Components.Shared
         [JSInvokable]
         public void OnUploadProgress(int percent, string currentPath, int processedFiles, int totalFiles)
         {
+            if (this._isDisposed || !this._isVisible || !this._isUploading)
+                return;
+
             this._progress = percent;
             this._currentItem = currentPath;
             this._processedFiles = processedFiles;
@@ -183,6 +201,9 @@ namespace Bivium.Components.Shared
         [JSInvokable]
         public async System.Threading.Tasks.Task OnUploadComplete(bool success, string message)
         {
+            if (this._isDisposed || !this._isVisible || !this._isUploading)
+                return;
+
             this._isUploading = false;
 
             if (success)
@@ -206,11 +227,24 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Initializes JS module and focuses the Browse button
         /// </summary>
-        private async System.Threading.Tasks.Task InitializeAndFocusAsync()
+        /// <param name="firstRender">Primo mount reale del contenuto nativo</param>
+        private async System.Threading.Tasks.Task HandleContentRenderedAsync(bool firstRender)
         {
+            if (!firstRender || this._isDisposed || !this._isVisible)
+                return;
+
+            long generation = this._showGeneration;
             await this.InitializeJsModule();
+            if (this._isDisposed || !this._isVisible || generation != this._showGeneration || this._jsModule == null)
+                return;
+            await this._jsModule.InvokeVoidAsync("initUpload", this._dotNetRef);
+            if (this._isDisposed || !this._isVisible || generation != this._showGeneration)
+                return;
             await this._jsModule.InvokeVoidAsync("clearUploadSelection");
-            await this._browseButton.FocusAsync();
+            if (this._isDisposed || !this._isVisible || generation != this._showGeneration)
+                return;
+            this._bridgeReady = true;
+            await this._browseButton.Element.FocusAsync();
         }
 
         /// <summary>
@@ -218,13 +252,21 @@ namespace Bivium.Components.Shared
         /// </summary>
         private async System.Threading.Tasks.Task InitializeJsModule()
         {
-            // Small delay for DOM readiness
-            await System.Threading.Tasks.Task.Delay(50);
+            if (this._isDisposed || !this._isVisible)
+                return;
 
             if (this._jsModule == null)
             {
-                this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/upload.js");
+                IJSObjectReference module = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/upload.js");
+                if (this._isDisposed || !this._isVisible)
+                {
+                    await module.DisposeAsync();
+                    return;
+                }
+                this._jsModule = module;
             }
+            if (this._isDisposed || !this._isVisible)
+                return;
 
             // Create .NET reference for callbacks
             if (this._dotNetRef == null)
@@ -232,7 +274,6 @@ namespace Bivium.Components.Shared
                 this._dotNetRef = DotNetObjectReference.Create(this);
             }
 
-            await this._jsModule.InvokeVoidAsync("initUpload", this._dotNetRef);
         }
 
         /// <summary>
@@ -251,7 +292,7 @@ namespace Bivium.Components.Shared
         /// </summary>
         private async System.Threading.Tasks.Task HandleUpload()
         {
-            if (this._jsModule == null || !this.HasSelection())
+            if (this._jsModule == null || !this._bridgeReady || this._isUploading || !this.HasSelection())
                 return;
 
             this._isUploading = true;
@@ -270,48 +311,27 @@ namespace Bivium.Components.Shared
         /// </summary>
         private async System.Threading.Tasks.Task HandleCancel()
         {
-            if (this._isUploading)
-            {
+            if (!this._isVisible)
                 return;
-            }
 
+            bool wasUploading = this._isUploading;
+            this._isUploading = false;
             this._isVisible = false;
+            this._bridgeReady = false;
+            this._showGeneration++;
+            this._progress = 0;
+            this._statusText = "";
+            this._currentItem = "";
+            this._processedFiles = 0;
+            this._uploadFileCount = 0;
+            this._fileCount = 0;
+            this._directoryCount = 0;
+            this._totalBytes = 0;
+            if (wasUploading && this._jsModule != null)
+                await this._jsModule.InvokeVoidAsync("cancelUpload");
+            else if (this._jsModule != null)
+                await this._jsModule.InvokeVoidAsync("clearUploadSelection");
             await this.OnClose.InvokeAsync(false);
-        }
-
-        /// <summary>
-        /// Renders a TUI-style progress bar string
-        /// </summary>
-        /// <returns>Progress bar text representation</returns>
-        private string RenderProgressBar()
-        {
-            // 30 character wide progress bar
-            int barWidth = 30;
-            int filled = (int)((this._progress / 100.0) * barWidth);
-            if (filled > barWidth)
-            {
-                filled = barWidth;
-            }
-
-            string bar = "[";
-            for (int i = 0; i < barWidth; i++)
-            {
-                if (i < filled)
-                {
-                    bar += "=";
-                }
-                else if (i == filled)
-                {
-                    bar += ">";
-                }
-                else
-                {
-                    bar += " ";
-                }
-            }
-            bar += "] " + this._progress + "%";
-
-            return bar;
         }
 
         /// <summary>
@@ -377,22 +397,41 @@ namespace Bivium.Components.Shared
 
         #endregion
 
-        #region IDisposable
+        #region IAsyncDisposable
 
         /// <summary>
         /// Cleanup JS references
         /// </summary>
-        public void Dispose()
+        public async ValueTask DisposeAsync()
         {
-            if (this._jsModule != null)
-            {
-                _ = this._jsModule.InvokeVoidAsync("dispose");
-            }
+            if (this._isDisposed)
+                return;
+            this._isDisposed = true;
 
-            if (this._dotNetRef != null)
+            try
             {
-                this._dotNetRef.Dispose();
-                this._dotNetRef = null;
+                if (this._jsModule != null)
+                {
+                    try
+                    {
+                        await this._jsModule.InvokeVoidAsync("dispose");
+                    }
+                    finally
+                    {
+                        await this._jsModule.DisposeAsync();
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException)
+            {
+            }
+            finally
+            {
+                if (this._dotNetRef != null)
+                {
+                    this._dotNetRef.Dispose();
+                    this._dotNetRef = null;
+                }
             }
         }
 

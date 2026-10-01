@@ -1,83 +1,851 @@
-<table id="@this.TableId" class="file-list-table @(this.HasValidColumnRatios() ? "custom-columns" : "")">
-    <colgroup>
-        <col style="@this.GetColumnStyle(this.NameColumnRatio)" />
-        <col style="@this.GetColumnStyle(this.SizeColumnRatio)" />
-        <col style="@this.GetColumnStyle(this.DateColumnRatio)" />
-        <col style="@this.GetColumnStyle(this.AttributesColumnRatio)" />
-        <col style="@this.GetColumnStyle(this.OwnerColumnRatio)" />
-    </colgroup>
-    <thead>
-        <tr>
-            <th @onclick="() => this.ToggleSort(SortField.Name)">
-                Name @this.GetSortIndicator(SortField.Name)
-                <span class="column-resize-handle" data-column-resizer="0" title="Resize columns"></span>
-            </th>
-            <th @onclick="() => this.ToggleSort(SortField.Size)">
-                Size @this.GetSortIndicator(SortField.Size)
-                <span class="column-resize-handle" data-column-resizer="1" title="Resize columns"></span>
-            </th>
-            <th @onclick="() => this.ToggleSort(SortField.Date)">
-                Date @this.GetSortIndicator(SortField.Date)
-                <span class="column-resize-handle" data-column-resizer="2" title="Resize columns"></span>
-            </th>
-            <th @onclick="() => this.ToggleSort(SortField.Attributes)">
-                Attr @this.GetSortIndicator(SortField.Attributes)
-                <span class="column-resize-handle" data-column-resizer="3" title="Resize columns"></span>
-            </th>
-            <th @onclick="() => this.ToggleSort(SortField.Owner)">
-                Owner @this.GetSortIndicator(SortField.Owner)
-            </th>
-        </tr>
-    </thead>
-    <tbody>
-        @* Parent directory row *@
-        @if (this._hasParent)
-        {
-            <tr class="entry-parent"
-                @ondblclick="this.NavigateToParent">
-                <td>[..] ..</td>
-                <td></td>
-                <td></td>
-                <td></td>
-                <td></td>
-            </tr>
-        }
+@namespace Bivium.Components.FileList
+@implements IAsyncDisposable
+@inject IJSRuntime JSRuntime
+@using System.Globalization
 
-        <Virtualize @key="this.Entries"
-                    @ref="this._virtualizeComponent"
-                    ItemsProvider="this.GetRows"
-                    Context="row"
-                    ItemSize="20"
-                    OverscanCount="30"
-                    SpacerElement="tr">
-            @{
-                int localIdx = row.Index;
-                FileSystemEntry entry = row.Entry;
-                bool isSelected = this._selectedPathSet.Contains(entry.FullPath);
-                bool isCursor = localIdx == this.CursorIndex;
+<div id="@this.HostId" class="radzen-file-grid-host" data-parent-row-count="@(this.HasParentDirectory() ? 1 : 0)" @oncontextmenu="this.HandleBackgroundContextMenuAsync" @oncontextmenu:preventDefault="true" @oncontextmenu:stopPropagation="true">
+    <RadzenDataGrid @ref="this._grid" Data="@this._rowsRenderSnapshot" TItem="FileListRow"
+                    AllowVirtualization="true" VirtualizationOverscanCount="8" Density="Density.Compact" Style="height:100%"
+                    AllowSorting="false" AllowColumnResize="true" AllowColumnReorder="true"
+                    SelectionMode="DataGridSelectionMode.Multiple" AllowRowSelectOnRowClick="false" Value="@this._selectedRows" ValueChanged="this.DiscardNativeSelection"
+                    AllowColumnPicking="true" AllowPickAllColumns="false" ShowPagingSummary="false"
+                    RowClick="this.HandleRowClick" RowDoubleClick="this.HandleRowDoubleClick"
+                     RowRender="this.HandleRowRender" CellRender="this.HandleCellRender" CellContextMenu="this.HandleCellContextMenu"
+                    ColumnResized="this.HandleColumnResized" ColumnReordered="this.HandleColumnReordered"
+                    PickedColumnsChanged="this.HandlePickedColumnsChanged" EmptyText="Empty directory" FooterTemplate="@this.GetEmptyDirectoryFooter()"
+                    ColumnsPickerMaxSelectedLabels="0" ColumnsShowingText="columns" SelectVisibleColumnsAriaLabel="Choose visible columns">
+        <Columns>
+            @foreach (FileListColumnState column in this._columns)
+            {
+                <RadzenDataGridColumn @key="column.Id" TItem="FileListRow" Property="@this.GetProperty(column.Id)" Title="@this.GetTitle(column.Id)"
+                                       Width="@this.GetColumnWidth(column)"
+                                       HeaderCssClass="@("bivium-column-" + column.Id.ToString().ToLowerInvariant())"
+                                       CssClass="@("bivium-column-" + column.Id.ToString().ToLowerInvariant())"
+                                       Visible="@column.Visible" Pickable="@(column.Id != FileListColumnId.Name)" Reorderable="true" Resizable="true">
+                    <HeaderTemplate>
+                        <RadzenButton ButtonStyle="ButtonStyle.Base" Variant="Variant.Text" Size="ButtonSize.Small" class="radzen-file-sort" data-bivium-sort-direction="@this.GetAriaSort(column.Id)" Click="() => this.ToggleSortAsync(column.Id)" @onclick:stopPropagation="true">
+                            @this.GetTitle(column.Id) @this.GetSortIndicator(column.Id)
+                        </RadzenButton>
+                    </HeaderTemplate>
+                    <Template Context="row">
+                        @if (row.Kind == FileListRowKind.Parent)
+                        {
+                            @if (column.Id == FileListColumnId.Name)
+                            {
+                                <RadzenButton ButtonStyle="ButtonStyle.Base" Variant="Variant.Text" Size="ButtonSize.Small" class="bivium-parent-action" aria-label="Parent directory" title="Parent directory"
+                                        Click="args => this.HandleParentButtonClickAsync(row, args)" @onclick:stopPropagation="true" @onkeydown:stopPropagation="true">
+                                    <RadzenIcon Icon="folder" aria-hidden="true" /><span>..</span>
+                                </RadzenButton>
+                            }
+                        }
+                        else if (column.Id == FileListColumnId.Name)
+                        {
+                            <span class="bivium-entry-name" title="@row.Entry.FullPath">
+                                <RadzenIcon Icon="@(row.Entry.IsDirectory ? "folder" : "description")" aria-hidden="true" />
+                                <span>@this.GetCellText(row.Entry, column.Id)</span>
+                            </span>
+                        }
+                        else
+                        {
+                            <span title="@this.GetCellText(row.Entry, column.Id)">@this.GetCellText(row.Entry, column.Id)</span>
+                        }
+                    </Template>
+                </RadzenDataGridColumn>
             }
+        </Columns>
+    </RadzenDataGrid>
+</div>
 
-            <tr class="@(isSelected ? "selected" : "") @(isCursor ? "cursor" : "") @(entry.IsDirectory ? "entry-dir" : "entry-file")"
-                data-entry-path="@entry.FullPath"
-                @onclick="(e) => this.HandleRowClick(localIdx, e)"
-                @ondblclick="() => this.HandleRowDoubleClick(localIdx)"
-                @oncontextmenu="(e) => this.HandleRowContextMenu(localIdx, e)"
-                @oncontextmenu:preventDefault="true"
-                @oncontextmenu:stopPropagation="true">
-                <td title="@entry.Name">@entry.Name@(entry.IsSymLink ? " @" : "")</td>
-                <td>@entry.FormatSize()</td>
-                <td>@entry.FormatDate()</td>
-                <td>@entry.Attributes</td>
-                <td>@entry.Owner</td>
-            </tr>
-        </Virtualize>
+@code {
+    /// <summary>
+    /// Stato autoritativo del pannello
+    /// </summary>
+    [Parameter]
+    public PanelState State { get; set; }
 
-        @* Empty directory message *@
-        @if (this.Entries.Count == 0)
+    /// <summary>
+    /// Percorso padre risolto dal pannello senza aggiungere entry di dominio
+    /// </summary>
+    [Parameter]
+    public string ParentPath { get; set; } = "";
+
+    /// <summary>
+    /// Identificatore stabile del wrapper applicativo
+    /// </summary>
+    [Parameter]
+    public string HostId { get; set; } = "";
+
+    /// <summary>
+    /// Identificatore del pannello proprietario del tracker di scroll
+    /// </summary>
+    [Parameter]
+    public string PanelId { get; set; } = "";
+
+    /// <summary>
+    /// Notifica una richiesta di navigazione
+    /// </summary>
+    [Parameter]
+    public EventCallback<string> OnNavigate { get; set; }
+
+    /// <summary>
+    /// Notifica una richiesta di menu contestuale
+    /// </summary>
+    [Parameter]
+    public EventCallback<ContextMenuEventArgs> OnContextMenu { get; set; }
+
+    /// <summary>
+    /// Richiede il render del proprietario dopo un reducer UI
+    /// </summary>
+    [Parameter]
+    public EventCallback OnStateChanged { get; set; }
+
+    /// <summary>
+    /// Notifica una richiesta di ordinamento
+    /// </summary>
+    [Parameter]
+    public EventCallback<SortColumn> OnSortChanged { get; set; }
+
+    /// <summary>
+    /// Griglia Radzen usata per aggiornare la virtualizzazione in-place
+    /// </summary>
+    private RadzenDataGrid<FileListRow> _grid;
+
+    /// <summary>
+    /// Proiezione UI con padre opzionale e sole entry reali nello snapshot semantico
+    /// </summary>
+    private FileListRow[] _rowsRenderSnapshot = Array.Empty<FileListRow>();
+
+    /// <summary>
+    /// Percorso padre osservato nell'ultima proiezione UI
+    /// </summary>
+    private string _renderedParentPath = "";
+
+    /// <summary>
+    /// Layout locale proiettato dallo stato Commander
+    /// </summary>
+    private List<FileListColumnState> _columns = new List<FileListColumnState>();
+
+    /// <summary>
+    /// Snapshot non autoritativa che cambia identità quando cambia la sequenza Commander
+    /// </summary>
+    private FileSystemEntry[] _entriesRenderSnapshot = Array.Empty<FileSystemEntry>();
+
+    /// <summary>
+    /// Percorsi dell'ultimo ordine semantico osservato
+    /// </summary>
+    private string[] _entryOrder = Array.Empty<string>();
+
+    /// <summary>
+    /// Risolve in O(1) l'indice semantico delle righe virtualizzate
+    /// </summary>
+    private Dictionary<string, int> _entryIndexes = new Dictionary<string, int>();
+
+    /// <summary>
+    /// Snapshot non autoritativo usato soltanto per invalidare le righe renderizzate
+    /// </summary>
+    private List<string> _renderedSelectionPaths = new List<string>();
+
+    /// <summary>
+    /// Proiezione one-way della selezione Commander per la skin nativa Radzen
+    /// </summary>
+    private IList<FileListRow> _selectedRows = new List<FileListRow>();
+
+    /// <summary>
+    /// Focus semantico osservato nell'ultimo render
+    /// </summary>
+    private string _focusedPath = "";
+
+    /// <summary>
+    /// Indica che l'invalidazione semantica è stata inizializzata
+    /// </summary>
+    private bool _semanticStateObserved;
+
+    /// <summary>
+    /// Indica che la prima sequenza autoritativa è stata acquisita
+    /// </summary>
+    private bool _entriesObserved;
+
+    /// <summary>
+    /// Indica che la sorgente in-place deve essere riletta da Radzen
+    /// </summary>
+    private bool _refreshPending;
+
+    /// <summary>
+    /// Indica che il layout legacy deve essere misurato una sola volta
+    /// </summary>
+    private bool _measurePending;
+
+    /// <summary>
+    /// Indica che l'adapter colonne deve verificare il DOM corrente
+    /// </summary>
+    private bool _columnAdapterPending = true;
+
+    /// <summary>
+    /// Indica che la direzione accessibile deve essere riproiettata sugli header
+    /// </summary>
+    private bool _ariaSortProjectionPending = true;
+
+    /// <summary>
+    /// Indica che il sort proiettato è stato osservato almeno una volta
+    /// </summary>
+    private bool _sortProjectionObserved;
+
+    /// <summary>
+    /// Campo dell'ultima proiezione sort richiesta
+    /// </summary>
+    private SortField _sortProjectionField;
+
+    /// <summary>
+    /// Direzione dell'ultima proiezione sort richiesta
+    /// </summary>
+    private SortDirection _sortProjectionDirection;
+
+    /// <summary>
+    /// Richiesta one-shot di visibilità del focus dopo un cambio ordinamento
+    /// </summary>
+    private bool _sortFocusScrollPending;
+
+    /// <summary>
+    /// Directory della richiesta sort, usata per scartarla dopo una navigazione
+    /// </summary>
+    private string _sortFocusDirectoryPath = "";
+
+    /// <summary>
+    /// Cancella l'invocazione interop del focus quando la griglia viene rilasciata
+    /// </summary>
+    private readonly CancellationTokenSource _sortFocusCancellation = new CancellationTokenSource();
+
+    /// <summary>
+    /// Modulo JavaScript per la misura iniziale delle colonne
+    /// </summary>
+    private IJSObjectReference _jsModule;
+
+    /// <summary>
+    /// Riferimento .NET posseduto dall'adapter di resize colonne
+    /// </summary>
+    private DotNetObjectReference<FileListTable> _dotNetReference;
+
+    /// <summary>
+    /// Indica che le risorse della griglia sono già state rilasciate
+    /// </summary>
+    private bool _isDisposed;
+
+    /// <summary>
+    /// Sincronizza lookup, ordine dati e layout senza introdurre stato di selezione locale
+    /// </summary>
+    protected override void OnParametersSet()
+    {
+        bool entriesChanged = !this._entriesObserved || !this.EntriesMatchRenderSnapshot();
+        if (entriesChanged)
         {
-            <tr>
-                <td colspan="5" style="color: var(--foreground2); text-align: center;">Empty directory</td>
-            </tr>
+            if (this._entriesObserved)
+                this._refreshPending = true;
+            this._entriesRenderSnapshot = this.State.Entries.ToArray();
+            this._entryOrder = new string[this._entriesRenderSnapshot.Length];
+            this._entryIndexes = new Dictionary<string, int>(this.GetPathComparer());
+            for (int i = 0; i < this._entriesRenderSnapshot.Length; i++)
+            {
+                this._entryOrder[i] = this._entriesRenderSnapshot[i].FullPath;
+                this._entryIndexes[this._entryOrder[i]] = i;
+            }
+            this._entriesObserved = true;
         }
-    </tbody>
-</table>
+
+        string parentPath = this.HasParentDirectory() ? this.ParentPath : "";
+        int parentOffset = string.IsNullOrEmpty(parentPath) ? 0 : 1;
+        bool rowsChanged = entriesChanged || !this.GetPathComparer().Equals(this._renderedParentPath, parentPath);
+        if (rowsChanged)
+        {
+            this._rowsRenderSnapshot = new FileListRow[this._entriesRenderSnapshot.Length + parentOffset];
+            if (parentOffset == 1)
+                this._rowsRenderSnapshot[0] = new FileListRow(FileListRowKind.Parent, null, parentPath);
+            for (int i = 0; i < this._entriesRenderSnapshot.Length; i++)
+                this._rowsRenderSnapshot[i + parentOffset] = new FileListRow(FileListRowKind.Entry, this._entriesRenderSnapshot[i], "");
+            this._renderedParentPath = parentPath;
+            this._refreshPending = true;
+        }
+
+        bool selectionChanged = !this._semanticStateObserved || !this._renderedSelectionPaths.SequenceEqual(this.State.SelectedPaths, this.GetPathComparer());
+        bool semanticStateChanged = selectionChanged || !this.GetPathComparer().Equals(this._focusedPath, this.State.FocusedPath);
+        if (rowsChanged || selectionChanged)
+        {
+            HashSet<string> selectedPaths = new HashSet<string>(this.State.SelectedPaths, this.GetPathComparer());
+            List<FileListRow> selectedRows = new List<FileListRow>();
+            foreach (FileListRow row in this._rowsRenderSnapshot)
+            {
+                if (row.Kind == FileListRowKind.Entry && selectedPaths.Contains(row.Entry.FullPath))
+                    selectedRows.Add(row);
+            }
+            this._selectedRows = selectedRows;
+        }
+        if (this._semanticStateObserved && semanticStateChanged)
+            this._refreshPending = true;
+        if (!this._semanticStateObserved || semanticStateChanged)
+        {
+            this._renderedSelectionPaths = this.State.SelectedPaths.ToList();
+            this._focusedPath = this.State.FocusedPath;
+        }
+        this._semanticStateObserved = true;
+
+        if (!this.LayoutMatchesState())
+        {
+            this._columns = this.CreateInitialColumns();
+            this._columnAdapterPending = true;
+            this._ariaSortProjectionPending = true;
+        }
+        if (!this._sortProjectionObserved || this._sortProjectionField != this.State.CurrentSort.Field || this._sortProjectionDirection != this.State.CurrentSort.Direction)
+        {
+            if (this._sortProjectionObserved && !this._isDisposed)
+            {
+                this._sortFocusScrollPending = true;
+                this._sortFocusDirectoryPath = this.State.CurrentPath;
+                this._refreshPending = true;
+            }
+            this._sortProjectionField = this.State.CurrentSort.Field;
+            this._sortProjectionDirection = this.State.CurrentSort.Direction;
+            this._sortProjectionObserved = true;
+            this._ariaSortProjectionPending = true;
+        }
+        if (this.State.Columns.Count == 0)
+            this._measurePending = true;
+    }
+
+    /// <summary>
+    /// Aggiorna Radzen dopo mutazioni in-place e migra il layout legacy dalla geometria reale
+    /// </summary>
+    /// <param name="firstRender">True al primo render</param>
+    protected override async System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (this._isDisposed)
+            return;
+
+        if (this._jsModule == null)
+        {
+            this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260922-file-columns-v1");
+            this._dotNetReference ??= DotNetObjectReference.Create(this);
+        }
+
+        if (this._refreshPending && this._grid != null)
+        {
+            this._refreshPending = false;
+            await this._grid.RefreshDataAsync();
+        }
+
+        if (this._isDisposed)
+            return;
+
+        if (this._sortFocusScrollPending && !this._refreshPending && this._grid != null && this._jsModule != null)
+        {
+            this._sortFocusScrollPending = false;
+            if (this.GetPathComparer().Equals(this._sortFocusDirectoryPath, this.State.CurrentPath) && !string.IsNullOrEmpty(this.PanelId))
+            {
+                string focusedPath = this.State.FocusedPath;
+                int focusedIndex = this.State.Entries.FindIndex(entry => this.GetPathComparer().Equals(entry.FullPath, focusedPath));
+                if (focusedIndex >= 0)
+                {
+                    try
+                    {
+                        await this._jsModule.InvokeVoidAsync("restoreRadzenFilePanelScroll", this._sortFocusCancellation.Token, this.PanelId, focusedPath, focusedIndex);
+                    }
+                    catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException)
+                    {
+                    }
+                }
+            }
+        }
+
+        if (this._isDisposed)
+            return;
+
+        if (this._jsModule != null && this._columnAdapterPending)
+        {
+            await this._jsModule.InvokeVoidAsync("registerRadzenColumnResizer", this.HostId, this._dotNetReference);
+            this._columnAdapterPending = false;
+        }
+
+        if (this._jsModule != null && this._ariaSortProjectionPending)
+        {
+            await this._jsModule.InvokeVoidAsync("projectRadzenAriaSort", this.HostId);
+            this._ariaSortProjectionPending = false;
+        }
+
+        if (this._measurePending && this.State.Columns.Count == 0)
+        {
+            this._measurePending = false;
+            double[] widths = await this._jsModule.InvokeAsync<double[]>("measureRadzenFileColumns", this.HostId);
+            if (widths != null && widths.Length == this._columns.Count)
+            {
+                List<FileListColumnState> measured = new List<FileListColumnState>();
+                for (int i = 0; i < this._columns.Count; i++)
+                    measured.Add(new FileListColumnState(this._columns[i].Id, widths[i], this._columns[i].Visible));
+                this.RequestColumnLayout(measured);
+                await this.OnStateChanged.InvokeAsync();
+            }
+            else
+            {
+                this._measurePending = true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Proietta selezione e focus semantici negli attributi accessibili della riga
+    /// </summary>
+    /// <param name="args">Riga renderizzata da Radzen</param>
+    private void HandleRowRender(RowRenderEventArgs<FileListRow> args)
+    {
+        if (args.Data.Kind == FileListRowKind.Parent)
+        {
+            args.Attributes["class"] = "rz-data-row bivium-parent-row";
+            args.Attributes["aria-label"] = "Parent directory";
+            args.Attributes["aria-selected"] = "false";
+            args.Attributes["tabindex"] = "-1";
+            return;
+        }
+
+        FileSystemEntry entry = args.Data.Entry;
+        bool selected = this.IsSelected(entry.FullPath);
+        bool focused = this.GetPathComparer().Equals(this.State.FocusedPath, entry.FullPath);
+        args.Attributes["data-entry-path"] = entry.FullPath;
+        int semanticIndex;
+        if (!this._entryIndexes.TryGetValue(entry.FullPath, out semanticIndex))
+            return;
+        args.Attributes["data-entry-index"] = semanticIndex.ToString(CultureInfo.InvariantCulture);
+        args.Attributes["data-entry-render-index"] = (semanticIndex + (this.HasParentDirectory() ? 1 : 0)).ToString(CultureInfo.InvariantCulture);
+        args.Attributes["aria-selected"] = selected ? "true" : "false";
+        args.Attributes["tabindex"] = focused ? "0" : "-1";
+        // Lo splat RowRender sostituisce la classe Radzen: conserva la base e lo stato nativo
+        args.Attributes["class"] = "rz-data-row " + (selected ? "rz-state-highlight bivium-selected " : "") + (focused ? "bivium-focused " : "") + (entry.IsDirectory ? "entry-dir" : "entry-file");
+    }
+
+    /// <summary>
+    /// Scarta l'eventuale selezione da tastiera interna e riproietta soltanto Commander
+    /// </summary>
+    /// <param name="value">Proposta nativa non autoritativa, mai applicata al dominio</param>
+    private void DiscardNativeSelection(IList<FileListRow> value)
+    {
+        // Radzen modifica il proprio Value con Enter/Space anche con row click disabilitato
+        this.StateHasChanged();
+    }
+
+    /// <summary>
+    /// Inoltra il click al reducer Commander con i modificatori nativi
+    /// </summary>
+    /// <param name="args">Dati del click Radzen</param>
+    private async System.Threading.Tasks.Task HandleRowClick(DataGridRowMouseEventArgs<FileListRow> args)
+    {
+        if (args.Data.Kind == FileListRowKind.Parent)
+            return;
+        this.State.InteractionRequested?.Invoke(new FileListInteractionRequest { Intent = FileListInteractionIntent.Click, TargetPath = args.Data.Entry.FullPath, Control = args.CtrlKey || args.MetaKey, Shift = args.ShiftKey });
+        await this.OnStateChanged.InvokeAsync();
+    }
+
+    /// <summary>
+    /// Attiva l'entry focalizzata senza usare la selezione nativa della griglia
+    /// </summary>
+    /// <param name="args">Dati del doppio click Radzen</param>
+    private async System.Threading.Tasks.Task HandleRowDoubleClick(DataGridRowMouseEventArgs<FileListRow> args)
+    {
+        if (args.Data.Kind == FileListRowKind.Parent)
+        {
+            await this.OnNavigate.InvokeAsync(args.Data.ParentPath);
+            return;
+        }
+        this.State.InteractionRequested?.Invoke(new FileListInteractionRequest { Intent = FileListInteractionIntent.Click, TargetPath = args.Data.Entry.FullPath });
+        if (args.Data.Entry.IsDirectory)
+            await this.OnNavigate.InvokeAsync(args.Data.Entry.FullPath);
+        else
+            this.State.InteractionRequested?.Invoke(new FileListInteractionRequest { Intent = FileListInteractionIntent.ActivateFocused });
+        await this.OnStateChanged.InvokeAsync();
+    }
+
+    /// <summary>
+    /// Mantiene la selezione multipla e sposta soltanto il focus prima del menu contestuale
+    /// </summary>
+    /// <param name="args">Cella cliccata con il tasto secondario</param>
+    private async System.Threading.Tasks.Task HandleCellContextMenu(DataGridCellMouseEventArgs<FileListRow> args)
+    {
+        if (args.Data.Kind == FileListRowKind.Parent)
+            return;
+        FileListInteractionIntent intent = this.IsSelected(args.Data.Entry.FullPath) ? FileListInteractionIntent.Focus : FileListInteractionIntent.Click;
+        this.State.InteractionRequested?.Invoke(new FileListInteractionRequest { Intent = intent, TargetPath = args.Data.Entry.FullPath });
+        await this.OnStateChanged.InvokeAsync();
+        await this.OnContextMenu.InvokeAsync(new ContextMenuEventArgs { X = args.ClientX, Y = args.ClientY, Entry = args.Data.Entry });
+    }
+
+    /// <summary>
+    /// Isola il context menu delle celle dal callback dello sfondo, incluso il padre escluso
+    /// </summary>
+    /// <param name="args">Cella nativa Radzen</param>
+    private void HandleCellRender(DataGridCellRenderEventArgs<FileListRow> args)
+    {
+        // Flag emesso da AddEventStopPropagationAttribute in Blazor .NET 10
+        args.Attributes["__internal_stopPropagation_oncontextmenu"] = true;
+        args.Attributes["__internal_preventDefault_oncontextmenu"] = true;
+    }
+
+    /// <summary>
+    /// Inoltra una sola richiesta sullo sfondo senza modificarne selezione o focus
+    /// </summary>
+    /// <param name="args">Coordinate originali del context menu</param>
+    private async System.Threading.Tasks.Task HandleBackgroundContextMenuAsync(MouseEventArgs args)
+    {
+        await this.OnContextMenu.InvokeAsync(new ContextMenuEventArgs { X = args.ClientX, Y = args.ClientY });
+    }
+
+    /// <summary>
+    /// Esclude percorsi padre vuoti o equivalenti alla directory corrente normalizzata
+    /// </summary>
+    /// <returns>True quando esiste una destinazione padre distinta</returns>
+    private bool HasParentDirectory()
+    {
+        if (string.IsNullOrEmpty(this.ParentPath))
+            return false;
+        string parent = Path.TrimEndingDirectorySeparator(Path.GetFullPath(this.ParentPath));
+        string current = Path.TrimEndingDirectorySeparator(Path.GetFullPath(this.State.CurrentPath));
+        return !this.GetPathComparer().Equals(parent, current);
+    }
+
+    /// <summary>
+    /// Attiva il padre da tastiera mantenendo il doppio click mouse della baseline
+    /// </summary>
+    /// <param name="row">Riga padre UI</param>
+    /// <param name="args">Click nativo, con Detail zero per l'attivazione da tastiera</param>
+    private async System.Threading.Tasks.Task HandleParentButtonClickAsync(FileListRow row, MouseEventArgs args)
+    {
+        if (args.Detail == 0)
+            await this.OnNavigate.InvokeAsync(row.ParentPath);
+    }
+
+    /// <summary>
+    /// Mostra lo stato vuoto anche quando il padre impedisce l'EmptyTemplate nativo
+    /// </summary>
+    /// <returns>Messaggio solo per una directory non root senza entry reali</returns>
+    private RenderFragment GetEmptyDirectoryFooter()
+    {
+        if (this.State.Entries.Count == 0 && this.HasParentDirectory())
+            return @<RadzenText TextStyle="TextStyle.Body2" class="bivium-empty-directory rz-m-0 rz-p-2" role="status" Text="Empty directory" />;
+        return null;
+    }
+
+    /// <summary>
+    /// Richiede a Commander il nuovo ordinamento mantenendo le directory per prime
+    /// </summary>
+    /// <param name="columnId">Identità stabile della colonna</param>
+    private async System.Threading.Tasks.Task ToggleSortAsync(FileListColumnId columnId)
+    {
+        SortField field = this.GetSortField(columnId);
+        SortDirection direction = this.State.CurrentSort.Field == field && this.State.CurrentSort.Direction == SortDirection.Ascending ? SortDirection.Descending : SortDirection.Ascending;
+        await this.OnSortChanged.InvokeAsync(new SortColumn(field, direction));
+    }
+
+    /// <summary>
+    /// Acquisisce tutte le larghezze fissate dalla gesture Radzen
+    /// </summary>
+    /// <param name="args">Larghezze indicizzate per colonna</param>
+    private async System.Threading.Tasks.Task HandleColumnResized(DataGridColumnResizedEventArgs<FileListRow> args)
+    {
+        Dictionary<FileListColumnId, double> widths = this._columns.ToDictionary(column => column.Id, column => column.Width);
+        if (args.Widths != null)
+        {
+            foreach (KeyValuePair<RadzenDataGridColumn<FileListRow>, double> pair in args.Widths)
+            {
+                FileListColumnId id;
+                if (this.TryGetColumnId(pair.Key.Property, out id) && double.IsFinite(pair.Value) && pair.Value > 0)
+                    widths[id] = pair.Value;
+            }
+        }
+        List<FileListColumnState> layout = this._columns.Select(column => new FileListColumnState(column.Id, widths[column.Id], column.Visible)).ToList();
+        this.RequestColumnLayout(layout);
+        await this.OnStateChanged.InvokeAsync();
+    }
+
+    /// <summary>
+    /// Riceve le larghezze prodotte dalla gesture client-side sul wrapper Radzen stabile
+    /// </summary>
+    /// <param name="ids">Identità semantiche delle colonne visibili</param>
+    /// <param name="widths">Larghezze finali in pixel</param>
+    [JSInvokable]
+    public async System.Threading.Tasks.Task OnRadzenColumnWidthsChanged(string[] ids, double[] widths)
+    {
+        if (ids == null || widths == null || ids.Length != widths.Length)
+            return;
+
+        Dictionary<FileListColumnId, double> values = this._columns.ToDictionary(column => column.Id, column => column.Width);
+        for (int i = 0; i < ids.Length; i++)
+        {
+            FileListColumnId id;
+            if (Enum.TryParse(ids[i], true, out id) && double.IsFinite(widths[i]) && widths[i] > 0)
+                values[id] = widths[i];
+        }
+        List<FileListColumnState> layout = this._columns.Select(column => new FileListColumnState(column.Id, values[column.Id], column.Visible)).ToList();
+        this.RequestColumnLayout(layout);
+        await this.OnStateChanged.InvokeAsync();
+    }
+
+    /// <summary>
+    /// Traduce il riordino Radzen nell'ordine stabile del modello UI
+    /// </summary>
+    /// <param name="args">Indici precedente e nuovo</param>
+    private async System.Threading.Tasks.Task HandleColumnReordered(DataGridColumnReorderedEventArgs<FileListRow> args)
+    {
+        FileListColumnId reorderedId;
+        if (args.Column != null && this.TryGetColumnId(args.Column.Property, out reorderedId) && args.NewIndex >= 0 && args.NewIndex < this._columns.Count)
+        {
+            List<FileListColumnState> layout = this.CloneColumns(this._columns);
+            int oldIndex = layout.FindIndex(column => column.Id == reorderedId);
+            if (oldIndex < 0)
+                return;
+            FileListColumnState moved = layout[oldIndex];
+            layout.RemoveAt(oldIndex);
+            layout.Insert(args.NewIndex, moved);
+            this.RequestColumnLayout(layout);
+            await this.OnStateChanged.InvokeAsync();
+        }
+    }
+
+    /// <summary>
+    /// Traduce il picker Radzen in visibilità semantica mantenendo Name visibile
+    /// </summary>
+    /// <param name="args">Colonne attualmente scelte</param>
+    private async System.Threading.Tasks.Task HandlePickedColumnsChanged(DataGridPickedColumnsChangedEventArgs<FileListRow> args)
+    {
+        HashSet<FileListColumnId> visible = new HashSet<FileListColumnId> { FileListColumnId.Name };
+        foreach (RadzenDataGridColumn<FileListRow> column in args.Columns)
+        {
+            FileListColumnId id;
+            if (this.TryGetColumnId(column.Property, out id))
+                visible.Add(id);
+        }
+        List<FileListColumnState> layout = this._columns.Select(column => new FileListColumnState(column.Id, column.Width, visible.Contains(column.Id))).ToList();
+        this.RequestColumnLayout(layout);
+        await this.OnStateChanged.InvokeAsync();
+    }
+
+    /// <summary>
+    /// Invia sempre un layout completo al callback autoritativo
+    /// </summary>
+    /// <param name="layout">Cinque colonne ordinate</param>
+    private void RequestColumnLayout(List<FileListColumnState> layout)
+    {
+        this._columns = this.CloneColumns(layout);
+        this._columnAdapterPending = true;
+        this._ariaSortProjectionPending = true;
+        this.State.ColumnLayoutRequested?.Invoke(layout);
+    }
+
+    /// <summary>
+    /// Crea il layout da snapshot semantico, rapporti legacy o default geometrici
+    /// </summary>
+    /// <returns>Cinque colonne ordinate</returns>
+    private List<FileListColumnState> CreateInitialColumns()
+    {
+        if (this.State.Columns.Count == 5)
+            return this.CloneColumns(this.State.Columns);
+
+        double[] widths = this.HasLegacyRatios()
+            ? new[] { this.State.NameColumnRatio.Value * 1000, this.State.SizeColumnRatio.Value * 1000, this.State.DateColumnRatio.Value * 1000, this.State.AttributesColumnRatio.Value * 1000, this.State.OwnerColumnRatio.Value * 1000 }
+            : new[] { 360d, 120d, 180d, 120d, 160d };
+        FileListColumnId[] ids = Enum.GetValues<FileListColumnId>();
+        List<FileListColumnState> result = new List<FileListColumnState>();
+        for (int i = 0; i < ids.Length; i++)
+            result.Add(new FileListColumnState(ids[i], widths[i], true));
+        return result;
+    }
+
+    /// <summary>
+    /// Lascia a Radzen il fit iniziale, preservando larghezze persistite e rapporti legacy
+    /// </summary>
+    /// <param name="column">Colonna da proiettare</param>
+    /// <returns>Larghezza fissata oppure null per il layout automatico iniziale</returns>
+    private string GetColumnWidth(FileListColumnState column)
+    {
+        if (this.State.Columns.Count == 0 && !this.HasLegacyRatios())
+            return null;
+        return column.Width.ToString("0.##", CultureInfo.InvariantCulture) + "px";
+    }
+
+    /// <summary>
+    /// Verifica se il layout locale coincide con quello persistito
+    /// </summary>
+    /// <returns>True quando ordine, larghezze e visibilità coincidono</returns>
+    private bool LayoutMatchesState()
+    {
+        if (this.State.Columns.Count == 0)
+            return this._columns.Count == 5;
+        if (this.State.Columns.Count != this._columns.Count)
+            return false;
+        for (int i = 0; i < this._columns.Count; i++)
+        {
+            FileListColumnState left = this._columns[i];
+            FileListColumnState right = this.State.Columns[i];
+            if (left.Id != right.Id || left.Width != right.Width || left.Visible != right.Visible)
+                return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Verifica la disponibilità dei cinque rapporti legacy
+    /// </summary>
+    /// <returns>True quando tutti i rapporti sono positivi e finiti</returns>
+    private bool HasLegacyRatios()
+    {
+        return this.State.NameColumnRatio.HasValue && this.State.SizeColumnRatio.HasValue && this.State.DateColumnRatio.HasValue && this.State.AttributesColumnRatio.HasValue && this.State.OwnerColumnRatio.HasValue
+            && double.IsFinite(this.State.NameColumnRatio.Value) && double.IsFinite(this.State.SizeColumnRatio.Value) && double.IsFinite(this.State.DateColumnRatio.Value) && double.IsFinite(this.State.AttributesColumnRatio.Value) && double.IsFinite(this.State.OwnerColumnRatio.Value)
+            && this.State.NameColumnRatio.Value > 0 && this.State.SizeColumnRatio.Value > 0 && this.State.DateColumnRatio.Value > 0 && this.State.AttributesColumnRatio.Value > 0 && this.State.OwnerColumnRatio.Value > 0;
+    }
+
+    /// <summary>
+    /// Confronta in O(n) riferimenti e percorsi con l'ultima proiezione Radzen
+    /// </summary>
+    /// <returns>True quando ogni entry conserva identità e posizione</returns>
+    private bool EntriesMatchRenderSnapshot()
+    {
+        if (this._entriesRenderSnapshot.Length != this.State.Entries.Count || this._entryOrder.Length != this.State.Entries.Count)
+            return false;
+        StringComparer comparer = this.GetPathComparer();
+        for (int i = 0; i < this.State.Entries.Count; i++)
+        {
+            if (!ReferenceEquals(this._entriesRenderSnapshot[i], this.State.Entries[i]) || !comparer.Equals(this._entryOrder[i], this.State.Entries[i].FullPath))
+                return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Copia un layout per separare la proiezione dagli oggetti autoritativi
+    /// </summary>
+    /// <param name="source">Layout sorgente</param>
+    /// <returns>Copia completa</returns>
+    private List<FileListColumnState> CloneColumns(IEnumerable<FileListColumnState> source)
+    {
+        return source.Select(column => new FileListColumnState(column.Id, column.Width, column.Visible)).ToList();
+    }
+
+    /// <summary>
+    /// Restituisce il comparatore filesystem della piattaforma
+    /// </summary>
+    /// <returns>Comparatore dei percorsi</returns>
+    private StringComparer GetPathComparer()
+    {
+        return OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+    }
+
+    /// <summary>
+    /// Consulta la selezione autoritativa senza mantenerne una copia locale
+    /// </summary>
+    /// <param name="path">Percorso da verificare</param>
+    /// <returns>True quando il percorso è selezionato</returns>
+    private bool IsSelected(string path)
+    {
+        StringComparer comparer = this.GetPathComparer();
+        for (int i = 0; i < this.State.SelectedPaths.Count; i++)
+        {
+            if (comparer.Equals(this.State.SelectedPaths[i], path))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Converte l'identità UI nella proprietà stabile Radzen
+    /// </summary>
+    /// <param name="id">Identità della colonna</param>
+    /// <returns>Nome della proprietà del modello</returns>
+    private string GetProperty(FileListColumnId id) => "Entry." + (id switch { FileListColumnId.Name => nameof(FileSystemEntry.Name), FileListColumnId.Size => nameof(FileSystemEntry.SizeBytes), FileListColumnId.Date => nameof(FileSystemEntry.LastModified), FileListColumnId.Attributes => nameof(FileSystemEntry.Attributes), _ => nameof(FileSystemEntry.Owner) });
+
+    /// <summary>
+    /// Converte l'identità UI nel titolo visibile
+    /// </summary>
+    /// <param name="id">Identità della colonna</param>
+    /// <returns>Titolo breve</returns>
+    private string GetTitle(FileListColumnId id) => id switch { FileListColumnId.Name => "Name", FileListColumnId.Size => "Size", FileListColumnId.Date => "Date", FileListColumnId.Attributes => "Attr", _ => "Owner" };
+
+    /// <summary>
+    /// Converte l'identità UI nel campo di ordinamento Commander
+    /// </summary>
+    /// <param name="id">Identità della colonna</param>
+    /// <returns>Campo di ordinamento equivalente</returns>
+    private SortField GetSortField(FileListColumnId id) => id switch { FileListColumnId.Name => SortField.Name, FileListColumnId.Size => SortField.Size, FileListColumnId.Date => SortField.Date, FileListColumnId.Attributes => SortField.Attributes, _ => SortField.Owner };
+
+    /// <summary>
+    /// Restituisce l'indicatore dell'ordinamento autoritativo
+    /// </summary>
+    /// <param name="id">Identità della colonna</param>
+    /// <returns>Indicatore visuale o stringa vuota</returns>
+    private string GetSortIndicator(FileListColumnId id) => this.State.CurrentSort.Field == this.GetSortField(id) ? (this.State.CurrentSort.Direction == SortDirection.Ascending ? "▲" : "▼") : "";
+
+    /// <summary>
+    /// Proietta l'ordinamento Commander nell'attributo accessibile dell'header
+    /// </summary>
+    /// <param name="id">Identità della colonna</param>
+    /// <returns>Direzione ARIA oppure none</returns>
+    private string GetAriaSort(FileListColumnId id) => this.State.CurrentSort.Field == this.GetSortField(id) ? (this.State.CurrentSort.Direction == SortDirection.Ascending ? "ascending" : "descending") : "none";
+
+    /// <summary>
+    /// Formatta una cella senza delegare calcoli di dominio al browser
+    /// </summary>
+    /// <param name="entry">Entry della riga</param>
+    /// <param name="id">Identità della colonna</param>
+    /// <returns>Testo già prodotto dal modello applicativo</returns>
+    private string GetCellText(FileSystemEntry entry, FileListColumnId id) => id switch { FileListColumnId.Name => entry.Name + (entry.IsSymLink ? " @" : ""), FileListColumnId.Size => entry.FormatSize(), FileListColumnId.Date => entry.FormatDate(), FileListColumnId.Attributes => entry.Attributes, _ => entry.Owner };
+
+    /// <summary>
+    /// Risolve una proprietà Radzen nell'identità stabile corrispondente
+    /// </summary>
+    /// <param name="property">Nome della proprietà Radzen</param>
+    /// <param name="id">Identità risolta</param>
+    /// <returns>True quando la proprietà è nota</returns>
+    private bool TryGetColumnId(string property, out FileListColumnId id)
+    {
+        for (int i = 0; i < Enum.GetValues<FileListColumnId>().Length; i++)
+        {
+            FileListColumnId candidate = Enum.GetValues<FileListColumnId>()[i];
+            if (this.GetProperty(candidate) == property)
+            {
+                id = candidate;
+                return true;
+            }
+        }
+        id = FileListColumnId.Name;
+        return false;
+    }
+
+    /// <summary>
+    /// Rilascia il modulo JavaScript del componente
+    /// </summary>
+    /// <returns>Operazione asincrona di rilascio</returns>
+    public async ValueTask DisposeAsync()
+    {
+        if (this._isDisposed)
+            return;
+        this._isDisposed = true;
+        this._sortFocusScrollPending = false;
+        this._sortFocusCancellation.Cancel();
+
+        try
+        {
+            if (this._jsModule != null)
+            {
+                try
+                {
+                    await this._jsModule.InvokeVoidAsync("unregisterRadzenColumnResizer", this.HostId);
+                }
+                finally
+                {
+                    await this._jsModule.DisposeAsync();
+                }
+            }
+        }
+        catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException)
+        {
+        }
+        finally
+        {
+            this._sortFocusCancellation.Dispose();
+            this._dotNetReference?.Dispose();
+            this._dotNetReference = null;
+        }
+    }
+}

@@ -1,229 +1,128 @@
+@namespace Bivium.Components.Pages
 @page "/"
-@rendermode InteractiveServer
 @inject IJSRuntime JSRuntime
+@inject NotificationService NotificationService
 
 <PageTitle>Bivium File Manager</PageTitle>
 
 @if (!this._authReady)
 {
-    <div></div>
+    <RadzenCard class="bivium-page-state"><RadzenText TextStyle="TextStyle.Body1" Text="Loading Bivium…" /><RadzenProgressBar Mode="ProgressBarMode.Indeterminate" ShowValue="false" /></RadzenCard>
 }
 else if (!this._canAccess)
 {
     <Bivium.Components.Shared.LoginDialog RequiresTwoFactor="@this._authStatus.TwoFactorEnabled" OnLogin="this.HandleLoginComplete" />
 }
+else if (!this._presenceInitialized)
+{
+    <RadzenCard class="bivium-page-state"><RadzenText TextStyle="TextStyle.Body1" Text="Connecting workspace…" /><RadzenProgressBar Mode="ProgressBarMode.Indeterminate" ShowValue="false" /></RadzenCard>
+}
 else if (!this._clientAttached || !this._hasActiveLease)
 {
     <div class="workspace-takeover-overlay">
-        <div class="workspace-takeover-card">
-            <div>Hai Bivium già aperto da IP @(this._observedLease?.RemoteIp ?? "unknown"). Vuoi rendere attiva questa sessione?</div>
-            @if (this._observedLease != null && !string.IsNullOrEmpty(this._observedLease.ClientLabel))
-            {
-                <div class="workspace-takeover-client">@this._observedLease.ClientLabel</div>
-            }
-            <button type="button" @onclick="this.RequestWorkspaceTakeover">Rendi attiva questa sessione</button>
-        </div>
+        <RadzenCard class="workspace-takeover-card">
+            <RadzenStack Gap="1rem">
+                <RadzenText TextStyle="TextStyle.Body1" Text="@("Hai Bivium già aperto da IP " + (this._observedLease?.RemoteIp ?? "unknown") + ". Vuoi rendere attiva questa sessione?")" />
+                @if (this._observedLease != null && !string.IsNullOrEmpty(this._observedLease.ClientLabel))
+                {
+                    <RadzenText TextStyle="TextStyle.Body2" class="workspace-takeover-client" Text="@this._observedLease.ClientLabel" />
+                }
+                <RadzenButton Text="Rendi attiva questa sessione" Icon="switch_account" ButtonStyle="ButtonStyle.Primary" Click="this.RequestWorkspaceTakeover" />
+            </RadzenStack>
+        </RadzenCard>
     </div>
 }
 else
 {
-<div class="commander-layout">
-    <!-- Top menu bar -->
+<RadzenLayout class="commander-layout">
+    <RadzenHeader>
     <Bivium.Components.Shared.MenuBar
-        OnNewFile="this.DoNewFile"
-        OnNewFolder="this.DoNewFolder"
-        OnDownload="this.DoDownload"
-        OnUpload="this.DoUpload"
-        OnExit="this.DoExit"
-        OnResetWorkspace="this.DoResetWorkspace"
-        OnCopy="this.DoCopy"
-        OnCut="this.DoCut"
-        OnPaste="this.DoPaste"
-        OnDelete="this.DoDelete"
-        OnRename="this.DoRename"
-        OnSelectAll="this.DoSelectAll"
-        OnAdvancedRename="this.DoAdvancedRename"
-        OnRefresh="this.DoRefresh"
-        OnTerminal="this.DoToggleTerminal"
-        OnEditorExtensions="this.DoEditorExtensions"
-        OnCreationPermissions="this.DoCreationPermissions"
-        OnAuthenticationSettings="this.DoAuthenticationSettings"
-        OnExtract="this.DoExtract"
-        OnCompress="this.DoCompress"
-        OnToggleSinglePanel="this.DoToggleSinglePanel"
-        OnLogout="this.DoLogout"
-        SinglePanelMode="@this._singlePanelMode"
-        IsMultiSelection="@(this.GetActivePanel().SelectedPaths.Count > 1)"
-        CanExtract="@this.CanExtractActiveTarget()"
-        CanCompress="@this.CanCompressActiveTarget()"
-        CanLogout="@this._authStatus.Authenticated"
-        CanManageAuthenticationSettings="@this._authStatus.CanManageSettings"
+        OnNewFile="this.DoNewFile" OnNewFolder="this.DoNewFolder" OnDownload="this.DoDownload" OnUpload="this.DoUpload"
+        OnExit="this.DoExit" OnResetWorkspace="this.DoResetWorkspace" OnCopy="this.DoCopy" OnCut="this.DoCut" OnPaste="this.DoPaste"
+        OnDelete="this.DoDelete" OnRename="this.DoRename" OnSelectAll="this.DoSelectAll" OnAdvancedRename="this.DoAdvancedRename"
+        OnRefresh="this.DoRefresh" OnTerminal="this.DoToggleTerminalAsync" OnEditorExtensions="this.DoEditorExtensions"
+        TerminalVisible="@this.IsTerminalVisible()" TerminalMinimized="@this.IsTerminalMinimized()"
+        TerminalNeedsAttention="@(this._terminalPanel != null && this._terminalPanel.NeedsAttention())"
+        OnCreationPermissions="this.DoCreationPermissions" OnAuthenticationSettings="this.DoAuthenticationSettings"
+        OnExtract="this.DoExtract" OnCompress="this.DoCompress" OnToggleSinglePanel="this.DoToggleSinglePanel"
+        ThemeOptions="@RadzenThemeCatalog.GetThemes()" CurrentTheme="@this._currentTheme" OnThemeChanged="this.DoThemeChange"
+        OnLogout="this.DoLogout" SinglePanelMode="@this._singlePanelMode" IsMultiSelection="@(this.GetActivePanel().SelectedPaths.Count > 1)"
+        CanExtract="@this.CanExtractActiveTarget()" CanCompress="@this.CanCompressActiveTarget()" CanLogout="@this._authStatus.Authenticated"
+        CanManageAuthenticationSettings="@this._authStatus.CanManageSettings" CanInvoke="this.CanMutateWorkspace"
         OnAbout="() => this._aboutDialog.Show()" />
-
-    <!-- Panels area -->
-    <div class="@this._panelsAreaClass">
-        <!-- Left panel -->
-        <Bivium.Components.Panel.FilePanel
-            State="@this._leftPanel"
-            IsActive="@(this._activePanel == 0)"
-            PanelId="left"
-            OnNavigate="this.HandleLeftNavigate"
-            OnSelectionChanged="this.HandleLeftSelectionChanged"
-            OnSortChanged="this.HandleLeftSortChanged"
-            OnCursorChanged="this.HandleLeftCursorChanged"
-            OnSelectionAnchorChanged="this.HandleLeftSelectionAnchorChanged"
-            OnColumnRatiosChanged="this.HandleLeftColumnRatiosChanged"
-            OnScrollAnchorChanged="this.HandleLeftScrollAnchorChanged"
-            OnPageSizeChanged="this.HandleLeftPageSizeChanged"
-            OnTreeExpansionChanged="this.HandlePanelTreeExpansionChanged"
-            OnActivated="() => this.SetActivePanel(0)"
-            OnContextMenu="args => this.HandleContextMenuRequest(args, 0)" />
-
+    </RadzenHeader>
+    <RadzenBody>
+    <div class="radzen-panels-area @this._panelsAreaClass">
         @if (!this._singlePanelMode)
         {
-            <!-- Vertical splitter -->
-            <Bivium.Components.Shared.ResizableSplitter
-                Direction="vertical"
-                SplitterId="vsplit"
-                CssVariable="--left-panel-width" />
-
-            <!-- Right panel -->
-            <Bivium.Components.Panel.FilePanel
-                State="@this._rightPanel"
-                IsActive="@(this._activePanel == 1)"
-                PanelId="right"
-                OnNavigate="this.HandleRightNavigate"
-                OnSelectionChanged="this.HandleRightSelectionChanged"
-                OnSortChanged="this.HandleRightSortChanged"
-                OnCursorChanged="this.HandleRightCursorChanged"
-                OnSelectionAnchorChanged="this.HandleRightSelectionAnchorChanged"
-                OnColumnRatiosChanged="this.HandleRightColumnRatiosChanged"
-                OnScrollAnchorChanged="this.HandleRightScrollAnchorChanged"
-                OnPageSizeChanged="this.HandleRightPageSizeChanged"
-                OnTreeExpansionChanged="this.HandlePanelTreeExpansionChanged"
-                OnActivated="() => this.SetActivePanel(1)"
-                OnContextMenu="args => this.HandleContextMenuRequest(args, 1)" />
+            <RadzenButton class="responsive-panel-switch" Text="@(this._activePanel == 0 ? "Show right panel" : "Show left panel")"
+                          Icon="swap_horiz" ButtonStyle="ButtonStyle.Light" Size="ButtonSize.Small" Click="this.SwitchResponsivePanel" />
         }
+        <div id="outer-splitter-host" class="radzen-outer-splitter-host">
+            @if (this._singlePanelMode)
+            {
+                <Bivium.Components.Panel.FilePanel State="@this._leftPanel" IsActive="true" PanelId="left"
+                    OnNavigate="this.HandleLeftNavigate" OnSortChanged="this.HandleLeftSortChanged" OnScrollAnchorChanged="this.HandleLeftScrollAnchorChanged"
+                    OnPageSizeChanged="this.HandleLeftPageSizeChanged" OnTreeExpansionChanged="this.HandleLeftTreeExpansionChanged"
+                    OnTreeLayoutChanged="this.HandleLeftTreeLayoutChanged" OnStateChanged="this.HandlePanelUiStateChanged"
+                    OnActivated="() => this.SetActivePanel(0)" OnContextMenu="args => this.HandleContextMenuRequest(args, 0)" />
+            }
+            else
+            {
+                <RadzenSplitter Orientation="Orientation.Horizontal" Style="height:100%" Resize="this.HandleOuterSplitterResize" Collapse="this.HandleOuterSplitterCollapse" Expand="this.HandleOuterSplitterExpand">
+                    <RadzenSplitterPane Size="@(this._outerPanelSizePercent.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "%")"
+                                        Min="20%" Max="80%" Collapsible="true" Collapsed="@(this._collapsedPanelIndex == 0)"
+                                        ResizeAriaLabel="Resize file panels" CollapseAriaLabel="Collapse left panel" ExpandAriaLabel="Expand left panel">
+                        <Bivium.Components.Panel.FilePanel State="@this._leftPanel" IsActive="@(this._activePanel == 0)" PanelId="left"
+                            OnNavigate="this.HandleLeftNavigate" OnSortChanged="this.HandleLeftSortChanged" OnScrollAnchorChanged="this.HandleLeftScrollAnchorChanged"
+                            OnPageSizeChanged="this.HandleLeftPageSizeChanged" OnTreeExpansionChanged="this.HandleLeftTreeExpansionChanged"
+                            OnTreeLayoutChanged="this.HandleLeftTreeLayoutChanged" OnStateChanged="this.HandlePanelUiStateChanged"
+                            OnActivated="() => this.SetActivePanel(0)" OnContextMenu="args => this.HandleContextMenuRequest(args, 0)" />
+                    </RadzenSplitterPane>
+                    <RadzenSplitterPane Min="20%" Collapsible="true" Collapsed="@(this._collapsedPanelIndex == 1)"
+                                        CollapseAriaLabel="Collapse right panel" ExpandAriaLabel="Expand right panel">
+                        <Bivium.Components.Panel.FilePanel State="@this._rightPanel" IsActive="@(this._activePanel == 1)" PanelId="right"
+                            OnNavigate="this.HandleRightNavigate" OnSortChanged="this.HandleRightSortChanged" OnScrollAnchorChanged="this.HandleRightScrollAnchorChanged"
+                            OnPageSizeChanged="this.HandleRightPageSizeChanged" OnTreeExpansionChanged="this.HandleRightTreeExpansionChanged"
+                            OnTreeLayoutChanged="this.HandleRightTreeLayoutChanged" OnStateChanged="this.HandlePanelUiStateChanged"
+                            OnActivated="() => this.SetActivePanel(1)" OnContextMenu="args => this.HandleContextMenuRequest(args, 1)" />
+                    </RadzenSplitterPane>
+                </RadzenSplitter>
+            }
+        </div>
     </div>
 
-    <!-- Status bar -->
-    <Bivium.Components.Shared.StatusBar
-        SelectedPaths="@this.GetActivePanel().SelectedPaths"
-        CurrentPath="@this.GetActivePanel().CurrentPath"
-        Entries="@this.GetActivePanel().Entries"
-        ProgressText="@this.GetStatusCenterText()"
-        CanCancelOperation="@(this._operationCancellation != null)"
+    </RadzenBody>
+    <RadzenFooter>
+    <Bivium.Components.Shared.StatusBar SelectedPaths="@this.GetActivePanel().SelectedPaths" CurrentPath="@this.GetActivePanel().CurrentPath"
+        Entries="@this.GetActivePanel().Entries" ProgressText="@this.GetStatusCenterText()" CanCancelOperation="@(this._operationCancellation != null)"
         OnCancelOperation="this.CancelActiveOperation" />
 
-    <!-- Command bar -->
-    <Bivium.Components.Shared.CommandBar
-        OnAbout="() => this._aboutDialog.Show()"
-        OnCopy="this.DoCopy"
-        OnCut="this.DoCut"
-        OnPaste="this.DoPaste"
-        OnDelete="this.DoDelete"
-        OnRename="this.DoRename"
-        OnNewFolder="this.DoNewFolder"
-        OnRefresh="this.DoRefresh"
-        OnProperties="this.DoProperties"
-        OnTerminal="this.DoToggleTerminal"
-        TerminalVisible="@this.IsTerminalVisible()"
-        TerminalMinimized="@this.IsTerminalMinimized()"
-        TerminalNeedsAttention="@(this._terminalPanel != null && this._terminalPanel.NeedsAttention())"
-        IsMultiSelection="@(this.GetActivePanel().SelectedPaths.Count > 1)" />
-</div>
+    </RadzenFooter>
+</RadzenLayout>
 
-<!-- Context menu -->
-<Bivium.Components.Shared.ContextMenu
-    IsVisible="@this._contextMenuVisible"
-    X="@this._contextMenuX"
-    Y="@this._contextMenuY"
-    OnClose="this.CloseContextMenu"
-    OnOpen="this.DoOpen"
-    OnEdit="this.DoEdit"
-    OnCut="this.DoCut"
-    OnCopy="this.DoCopy"
-    OnPaste="this.DoPaste"
-    OnRename="this.DoRename"
-    OnDelete="this.DoDelete"
-    OnNewFile="this.DoNewFile"
-    OnNewFolder="this.DoNewFolder"
-    OnDownload="this.DoDownload"
-    OnUpload="this.DoUpload"
-    OnExtract="this.DoExtract"
-    OnExtractToFolder="this.DoExtractToFolder"
-    OnCompress="this.DoCompress"
-    OnRefresh="this.DoRefresh"
-    OnAdvancedRename="this.DoAdvancedRename"
-    OnPermissions="this.DoPermissions"
-    OnProperties="this.DoProperties"
-    IsDirectory="@this._contextMenuIsDirectory"
-    IsArchive="@this._contextMenuIsArchive"
-    ArchiveBaseName="@this._contextMenuArchiveBaseName"
-    HasSelection="@this._contextMenuHasSelection"
-    IsMultiSelection="@this._contextMenuIsMultiSelection"
-    IsEditable="@this._contextMenuIsEditable" />
+<Bivium.Components.Shared.ContextMenu IsVisible="@this._contextMenuVisible" X="@this._contextMenuX" Y="@this._contextMenuY"
+    OnClose="this.CloseContextMenu" OnOpen="this.DoOpen" OnEdit="this.DoEdit" OnCut="this.DoCut" OnCopy="this.DoCopy"
+    OnPaste="this.DoPaste" OnRename="this.DoRename" OnDelete="this.DoDelete" OnNewFile="this.DoNewFile" OnNewFolder="this.DoNewFolder"
+    OnDownload="this.DoDownload" OnUpload="this.DoUpload" OnExtract="this.DoExtract" OnExtractToFolder="this.DoExtractToFolder"
+    OnCompress="this.DoCompress" OnRefresh="this.DoRefresh" OnAdvancedRename="this.DoAdvancedRename" OnPermissions="this.DoPermissions"
+    OnProperties="this.DoProperties" IsDirectory="@this._contextMenuIsDirectory" IsArchive="@this._contextMenuIsArchive"
+    ArchiveBaseName="@this._contextMenuArchiveBaseName" HasSelection="@this._contextMenuHasSelection"
+    IsMultiSelection="@this._contextMenuIsMultiSelection" IsEditable="@this._contextMenuIsEditable" CanInvoke="this.CanMutateWorkspace" />
 
-<!-- Modal dialogs -->
-<Bivium.Components.Shared.ConfirmDialog @ref="this._confirmDialog"
-    OnClose="this.HandleConfirmDialogClose" />
-
-<Bivium.Components.Shared.OverwriteDialog @ref="this._overwriteDialog"
-    OnClose="this.HandleOverwriteDialogClose" />
-
-<Bivium.Components.Shared.InputDialog @ref="this._inputDialog"
-    OnClose="this.HandleInputDialogClose" />
-
-<Bivium.Components.Shared.PropertiesDialog @ref="this._propertiesDialog"
-    OnClose="this.HandlePropertiesDialogClose" />
-
-<Bivium.Components.Shared.PermissionsDialog @ref="this._permissionsDialog"
-    AttachmentId="@this._attachmentId"
-    LeaseGeneration="@this._leaseGeneration"
-    OnClose="this.HandlePermissionsDialogClose" />
-
-<Bivium.Components.Shared.AboutDialog @ref="this._aboutDialog"
-    OnClose="this.HandleAboutDialogClose" />
-
-<Bivium.Components.Shared.UploadDialog @ref="this._uploadDialog"
-    AttachmentId="@this._attachmentId"
-    LeaseGeneration="@this._leaseGeneration"
-    OnClose="this.HandleUploadDialogClose" />
-
-<Bivium.Components.Shared.CompressDialog @ref="this._compressDialog"
-    OnClose="this.HandleCompressDialogClose" />
-
-<Bivium.Components.Shared.SettingsDialog @ref="this._settingsDialog"
-    AttachmentId="@this._attachmentId"
-    LeaseGeneration="@this._leaseGeneration"
-    OnClose="this.HandleSettingsDialogClose" />
-
-<Bivium.Components.Shared.CreationPermissionsDialog @ref="this._creationPermissionsDialog"
-    AttachmentId="@this._attachmentId"
-    LeaseGeneration="@this._leaseGeneration"
-    OnClose="this.HandleSettingsDialogClose" />
-
-<Bivium.Components.Shared.AuthSettingsDialog @ref="this._authSettingsDialog"
-    AttachmentId="@this._attachmentId"
-    LeaseGeneration="@this._leaseGeneration"
-    OnClose="this.HandleSettingsDialogClose" />
-
-<!-- Floating windows -->
-<Bivium.Components.Shared.EditorDialog @ref="this._editorDialog"
-    AttachmentId="@this._attachmentId"
-    LeaseGeneration="@this._leaseGeneration"
-    OnClose="this.HandleEditorDialogClose" />
-
-<Bivium.Components.Shared.RenamerDialog @ref="this._renamerDialog"
-    FileOperationService="@this._fileOperationService"
-    AttachmentId="@this._attachmentId"
-    LeaseGeneration="@this._leaseGeneration"
-    OnClose="this.HandleRenamerDialogClose" />
-
-<Bivium.Components.Shared.TerminalPanel @ref="this._terminalPanel"
-    WorkingDirectory="@this.GetActivePanel().CurrentPath"
-    AttachmentId="@this._attachmentId"
-    LeaseGeneration="@this._leaseGeneration"
-    OnClose="this.HandleTerminalClose"
-    OnStateChanged="this.HandleTerminalStateChanged" />
+<Bivium.Components.Shared.ConfirmDialog @ref="this._confirmDialog" OnClose="this.HandleConfirmDialogClose" />
+<Bivium.Components.Shared.OverwriteDialog @ref="this._overwriteDialog" OnClose="this.HandleOverwriteDialogClose" />
+<Bivium.Components.Shared.InputDialog @ref="this._inputDialog" OnClose="this.HandleInputDialogClose" />
+<Bivium.Components.Shared.PropertiesDialog @ref="this._propertiesDialog" OnClose="this.HandlePropertiesDialogClose" />
+<Bivium.Components.Shared.PermissionsDialog @ref="this._permissionsDialog" AttachmentId="@this._attachmentId" LeaseGeneration="@this._leaseGeneration" OnClose="this.HandlePermissionsDialogClose" />
+<Bivium.Components.Shared.AboutDialog @ref="this._aboutDialog" OnClose="this.HandleAboutDialogClose" />
+<Bivium.Components.Shared.UploadDialog @ref="this._uploadDialog" AttachmentId="@this._attachmentId" LeaseGeneration="@this._leaseGeneration" OnClose="this.HandleUploadDialogClose" />
+<Bivium.Components.Shared.CompressDialog @ref="this._compressDialog" OnClose="this.HandleCompressDialogClose" CanInvoke="this.CanMutateWorkspace" />
+<Bivium.Components.Shared.SettingsDialog @ref="this._settingsDialog" AttachmentId="@this._attachmentId" LeaseGeneration="@this._leaseGeneration" OnClose="this.HandleSettingsDialogClose" CanInvoke="this.CanMutateWorkspace" />
+<Bivium.Components.Shared.CreationPermissionsDialog @ref="this._creationPermissionsDialog" AttachmentId="@this._attachmentId" LeaseGeneration="@this._leaseGeneration" OnClose="this.HandleSettingsDialogClose" CanInvoke="this.CanMutateWorkspace" />
+<Bivium.Components.Shared.AuthSettingsDialog @ref="this._authSettingsDialog" AttachmentId="@this._attachmentId" LeaseGeneration="@this._leaseGeneration" OnClose="this.HandleSettingsDialogClose" CanInvoke="this.CanMutateWorkspace" />
+<Bivium.Components.Shared.EditorDialog @ref="this._editorDialog" AttachmentId="@this._attachmentId" LeaseGeneration="@this._leaseGeneration" OnClose="this.HandleEditorDialogClose" />
+<Bivium.Components.Shared.RenamerDialog @ref="this._renamerDialog" FileOperationService="@this._fileOperationService" AttachmentId="@this._attachmentId" LeaseGeneration="@this._leaseGeneration" OnClose="this.HandleRenamerDialogClose" />
+<Bivium.Components.Shared.TerminalPanel @ref="this._terminalPanel" WorkingDirectory="@this.GetActivePanel().CurrentPath" AttachmentId="@this._attachmentId"
+    LeaseGeneration="@this._leaseGeneration" CanInvoke="this.CanMutateWorkspace" OnClose="this.HandleTerminalClose" OnStateChanged="this.HandleTerminalStateChanged" />
 }

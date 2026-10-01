@@ -1,95 +1,41 @@
+@namespace Bivium.Components.Shared
+
 @if (this._isVisible)
 {
-    <div class="context-menu-overlay" @onclick="this.HandleCancel">
-        <div class="context-menu" style="position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 50ch; outline: none;"
-             tabindex="0"
-             @ref="this._dialogElement"
-             @onclick:stopPropagation="true">
-            <div style="background-color: var(--background1); padding: 0 1ch; border-bottom: 1px solid var(--foreground2);">
-                Permissions - @this._entryName
-            </div>
-            <div style="padding: 1lh 1ch;">
+    <PersistentModalShell Label="@("Permissions - " + this._entryName)" OnCancel="this.HandleCancel" OnContentRendered="this.HandleContentRenderedAsync">
+        <RadzenStack class="bivium-radzen-modal" Gap="1rem" Style="width:100%;max-height:calc(100dvh - 9rem);box-sizing:border-box;">
                 @if (this._model.IsUnix)
                 {
-                    <!-- Unix permissions -->
-                    <table style="width: 100%;">
-                        <tr>
-                            <td style="width: 12ch; color: var(--foreground2);">Owner:</td>
-                            <td><input type="text" @bind="this._model.Owner" style="width: 20ch; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2); padding: 0 0.5ch;" /></td>
-                        </tr>
-                        <tr>
-                            <td style="color: var(--foreground2);">Group:</td>
-                            <td><input type="text" @bind="this._model.Group" style="width: 20ch; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2); padding: 0 0.5ch;" /></td>
-                        </tr>
-                    </table>
-
-                    <div style="margin-top: 1lh;">
-                        <table style="width: 100%;">
-                            <tr>
-                                <td style="width: 12ch;"></td>
-                                <td style="width: 6ch; text-align: center; color: var(--foreground2);">Read</td>
-                                <td style="width: 6ch; text-align: center; color: var(--foreground2);">Write</td>
-                                <td style="width: 6ch; text-align: center; color: var(--foreground2);">Exec</td>
-                            </tr>
-                            <tr>
-                                <td style="color: var(--foreground2);">Owner:</td>
-                                <td style="text-align: center;"><input type="checkbox" @bind="this._model.OwnerRead" /></td>
-                                <td style="text-align: center;"><input type="checkbox" @bind="this._model.OwnerWrite" /></td>
-                                <td style="text-align: center;"><input type="checkbox" @bind="this._model.OwnerExecute" /></td>
-                            </tr>
-                            <tr>
-                                <td style="color: var(--foreground2);">Group:</td>
-                                <td style="text-align: center;"><input type="checkbox" @bind="this._model.GroupRead" /></td>
-                                <td style="text-align: center;"><input type="checkbox" @bind="this._model.GroupWrite" /></td>
-                                <td style="text-align: center;"><input type="checkbox" @bind="this._model.GroupExecute" /></td>
-                            </tr>
-                            <tr>
-                                <td style="color: var(--foreground2);">Others:</td>
-                                <td style="text-align: center;"><input type="checkbox" @bind="this._model.OthersRead" /></td>
-                                <td style="text-align: center;"><input type="checkbox" @bind="this._model.OthersWrite" /></td>
-                                <td style="text-align: center;"><input type="checkbox" @bind="this._model.OthersExecute" /></td>
-                            </tr>
-                        </table>
-                    </div>
-
-                    <div style="margin-top: 1lh; color: var(--foreground2);">
-                        Octal: @this.GetOctalString()
-                    </div>
+                    <RadzenRow><RadzenColumn Size="12" SizeMD="6"><RadzenFormField Text="Owner" Component="permissions-owner" Style="width:100%;"><RadzenTextBox id="permissions-owner" Name="permissions-owner" @bind-Value="this._model.Owner" Immediate="true" Style="width:100%;" /></RadzenFormField></RadzenColumn><RadzenColumn Size="12" SizeMD="6"><RadzenFormField Text="Group" Component="permissions-group" Style="width:100%;"><RadzenTextBox id="permissions-group" Name="permissions-group" @bind-Value="this._model.Group" Immediate="true" Style="width:100%;" /></RadzenFormField></RadzenColumn></RadzenRow>
+                    <RadzenTable class="bivium-radzen-permissions" aria-label="Unix permissions">
+                        <RadzenTableHeader>
+                            <RadzenTableHeaderRow><RadzenTableHeaderCell scope="col">Identity</RadzenTableHeaderCell><RadzenTableHeaderCell scope="col">Read</RadzenTableHeaderCell><RadzenTableHeaderCell scope="col">Write</RadzenTableHeaderCell><RadzenTableHeaderCell scope="col">Execute</RadzenTableHeaderCell></RadzenTableHeaderRow>
+                        </RadzenTableHeader>
+                        <RadzenTableBody>
+                            <RadzenTableRow><RadzenTableHeaderCell scope="row">Owner</RadzenTableHeaderCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.OwnerRead" AriaLabel="Owner read" /></RadzenTableCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.OwnerWrite" AriaLabel="Owner write" /></RadzenTableCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.OwnerExecute" AriaLabel="Owner execute" /></RadzenTableCell></RadzenTableRow>
+                            <RadzenTableRow><RadzenTableHeaderCell scope="row">Group</RadzenTableHeaderCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.GroupRead" AriaLabel="Group read" /></RadzenTableCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.GroupWrite" AriaLabel="Group write" /></RadzenTableCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.GroupExecute" AriaLabel="Group execute" /></RadzenTableCell></RadzenTableRow>
+                            <RadzenTableRow><RadzenTableHeaderCell scope="row">Others</RadzenTableHeaderCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.OthersRead" AriaLabel="Others read" /></RadzenTableCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.OthersWrite" AriaLabel="Others write" /></RadzenTableCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.OthersExecute" AriaLabel="Others execute" /></RadzenTableCell></RadzenTableRow>
+                        </RadzenTableBody>
+                    </RadzenTable>
+                    <RadzenText TextStyle="TextStyle.Body1" Text="@("Octal: " + this.GetOctalString())" />
                 }
                 else
                 {
-                    <!-- Windows attributes -->
-                    <table style="width: 100%;">
-                        <tr>
-                            <td style="width: 12ch; color: var(--foreground2);">Owner:</td>
-                            <td>@this._model.Owner</td>
-                        </tr>
-                    </table>
-
-                    <div style="margin-top: 1lh;">
-                        <div><label><input type="checkbox" @bind="this._model.WinReadOnly" /> Read-only</label></div>
-                        <div><label><input type="checkbox" @bind="this._model.WinHidden" /> Hidden</label></div>
-                        <div><label><input type="checkbox" @bind="this._model.WinSystem" /> System</label></div>
-                        <div><label><input type="checkbox" @bind="this._model.WinArchive" /> Archive</label></div>
-                    </div>
+                    <RadzenText TextStyle="TextStyle.Body1" Text="@("Owner: " + this._model.Owner)" />
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center"><RadzenCheckBox Name="permissions-readonly" AriaLabel="Read-only" @bind-Value="this._model.WinReadOnly" /><RadzenLabel Component="permissions-readonly" Text="Read-only" /></RadzenStack>
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center"><RadzenCheckBox Name="permissions-hidden" AriaLabel="Hidden" @bind-Value="this._model.WinHidden" /><RadzenLabel Component="permissions-hidden" Text="Hidden" /></RadzenStack>
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center"><RadzenCheckBox Name="permissions-system" AriaLabel="System" @bind-Value="this._model.WinSystem" /><RadzenLabel Component="permissions-system" Text="System" /></RadzenStack>
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center"><RadzenCheckBox Name="permissions-archive" AriaLabel="Archive" @bind-Value="this._model.WinArchive" /><RadzenLabel Component="permissions-archive" Text="Archive" /></RadzenStack>
                 }
-
                 @if (this._isDirectory)
                 {
-                    <div style="margin-top: 1lh;">
-                        <label><input type="checkbox" @bind="this._recursive" /> Apply recursively</label>
-                    </div>
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem"><RadzenCheckBox Name="permissions-recursive" AriaLabel="Apply recursively" @bind-Value="this._recursive" /><RadzenLabel Component="permissions-recursive" Text="Apply recursively" /></RadzenStack>
                 }
-
                 @if (!string.IsNullOrEmpty(this._errorMessage))
                 {
-                    <div style="margin-top: 1lh; color: red;">@this._errorMessage</div>
+                    <RadzenAlert AlertStyle="AlertStyle.Danger">@this._errorMessage</RadzenAlert>
                 }
-            </div>
-            <div style="display: flex; justify-content: flex-end; gap: 2ch; padding: 0 1ch 1lh 1ch;">
-                <button @onclick="this.HandleCancel">Cancel</button>
-                <button @onclick="this.HandleSave" disabled="@(!this._canSave)">Save</button>
-            </div>
-        </div>
-    </div>
+                <div class="bivium-radzen-dialog-actions"><RadzenButton @ref="this._cancelButton" Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="this.HandleCancel" /><RadzenButton Text="Save" Icon="save" Disabled="@(!this._canSave)" ButtonStyle="ButtonStyle.Primary" Click="this.HandleSave" /></div>
+        </RadzenStack>
+    </PersistentModalShell>
 }

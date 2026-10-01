@@ -1,42 +1,122 @@
-@if (this._isVisible)
-{
-    <div class="context-menu-overlay" @onclick="this.HandleClose">
-        <div class="context-menu" style="position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 44ch;"
-             @onclick:stopPropagation="true">
-            <div style="background-color: var(--background1); padding: 0 1ch; border-bottom: 1px solid var(--foreground2);">
-                About
-            </div>
-            <div style="padding: 1lh 1ch;">
-                <table style="width: 100%;">
-                    <tr>
-                        <td style="width: 12ch; color: var(--foreground2);">Name:</td>
-                        <td><img src="favicon-32x32.png" alt="icon" style="vertical-align: middle; margin-right: 0.5ch;" />Bivium File Manager</td>
-                    </tr>
-                    <tr>
-                        <td style="color: var(--foreground2);">Version:</td>
-                        <td>@this._version</td>
-                    </tr>
-                    <tr>
-                        <td style="color: var(--foreground2);">License:</td>
-                        <td>GNU General Public License v3.0</td>
-                    </tr>
-                    <tr>
-                        <td style="color: var(--foreground2);">Repository:</td>
-                        <td><a href="https://github.com/simonefil/Bivium" target="_blank" style="color: var(--foreground1);">github.com/simonefil/Bivium</a></td>
-                    </tr>
-                    <tr>
-                        <td style="color: var(--foreground2);">Runtime:</td>
-                        <td>@this._runtime</td>
-                    </tr>
-                    <tr>
-                        <td style="color: var(--foreground2);">Platform:</td>
-                        <td>@this._platform</td>
-                    </tr>
-                </table>
-            </div>
-            <div style="display: flex; justify-content: flex-end; gap: 2ch; padding: 0 1ch 1lh 1ch;">
-                <button @ref="this._okButton" @onclick="this.HandleClose">OK</button>
-            </div>
-        </div>
-    </div>
+@namespace Bivium.Components.Shared
+@implements IDisposable
+@inject DialogService DialogService
+@inject ILogger<AboutDialog> Logger
+@using System.Reflection
+@using System.Runtime.InteropServices
+
+@code {
+    /// <summary>
+    /// Callback invocato alla chiusura
+    /// </summary>
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    /// <summary>
+    /// Versione dell'apertura corrente
+    /// </summary>
+    private int _generation;
+
+    /// <summary>
+    /// Tracker dell'apertura posseduta
+    /// </summary>
+    private RadzenDialogLifetime _lifetime;
+
+    /// <summary>
+    /// Inizializza il tracker del dialog
+    /// </summary>
+    protected override void OnInitialized()
+    {
+        this._lifetime = new RadzenDialogLifetime(this.DialogService);
+    }
+
+    /// <summary>
+    /// Apre le informazioni applicative
+    /// </summary>
+    public void Show()
+    {
+        if (this._lifetime.IsDisposed || this._lifetime.IsOpen())
+            return;
+
+        Assembly assembly = Assembly.GetExecutingAssembly();
+        AssemblyInformationalVersionAttribute infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>();
+        string version = infoVersion != null ? infoVersion.InformationalVersion : assembly.GetName().Version?.ToString() ?? "";
+        int generation = ++this._generation;
+        _ = this.ObserveTaskAsync(this.ShowAsync(generation, version, RuntimeInformation.FrameworkDescription, RuntimeInformation.OSDescription), "apertura informazioni");
+    }
+
+    /// <summary>
+    /// Nasconde soltanto l'apertura posseduta quando è in cima allo stack
+    /// </summary>
+    public void Hide()
+    {
+        this._generation++;
+        this._lifetime.RequestClose();
+    }
+
+    /// <summary>
+    /// Apre e attende la chiusura del dialog Radzen
+    /// </summary>
+    /// <param name="generation">Versione dell'apertura</param>
+    /// <param name="version">Versione applicativa</param>
+    /// <param name="runtime">Descrizione del runtime</param>
+    /// <param name="platform">Descrizione della piattaforma</param>
+    private async System.Threading.Tasks.Task ShowAsync(int generation, string version, string runtime, string platform)
+    {
+        DialogOptions options = new DialogOptions
+        {
+            Width = "min(92vw, 48rem)",
+            ShowClose = true,
+            CloseDialogOnEsc = true,
+            CloseDialogOnOverlayClick = true,
+            AutoFocusFirstElement = true,
+            CssClass = "bivium-radzen-service-dialog",
+            WrapperCssClass = "bivium-modal-layer"
+        };
+        this._lifetime.Begin(options);
+        try
+        {
+            await this.DialogService.OpenAsync("About", service => @<RadzenStack Gap="0.5rem">
+                <RadzenRow><RadzenColumn Size="4"><RadzenText TextStyle="TextStyle.Subtitle2" TagName="TagName.Div" class="rz-m-0"><strong>Name</strong></RadzenText></RadzenColumn><RadzenColumn Size="8"><RadzenText TextStyle="TextStyle.Body1" TagName="TagName.Div" class="rz-m-0"><img src="favicon-32x32.png" alt="" /> Bivium File Manager</RadzenText></RadzenColumn></RadzenRow>
+                <RadzenRow><RadzenColumn Size="4"><RadzenText TextStyle="TextStyle.Subtitle2" TagName="TagName.Div" class="rz-m-0"><strong>Version</strong></RadzenText></RadzenColumn><RadzenColumn Size="8"><RadzenText TextStyle="TextStyle.Body1" TagName="TagName.Div" class="rz-m-0">@version</RadzenText></RadzenColumn></RadzenRow>
+                <RadzenRow><RadzenColumn Size="4"><RadzenText TextStyle="TextStyle.Subtitle2" TagName="TagName.Div" class="rz-m-0"><strong>License</strong></RadzenText></RadzenColumn><RadzenColumn Size="8"><RadzenText TextStyle="TextStyle.Body1" TagName="TagName.Div" class="rz-m-0">GNU General Public License v3.0</RadzenText></RadzenColumn></RadzenRow>
+                <RadzenRow><RadzenColumn Size="4"><RadzenText TextStyle="TextStyle.Subtitle2" TagName="TagName.Div" class="rz-m-0"><strong>Repository</strong></RadzenText></RadzenColumn><RadzenColumn Size="8"><RadzenLink Path="https://github.com/simonefil/Bivium" Target="_blank" Text="github.com/simonefil/Bivium" /></RadzenColumn></RadzenRow>
+                <RadzenRow><RadzenColumn Size="4"><RadzenText TextStyle="TextStyle.Subtitle2" TagName="TagName.Div" class="rz-m-0"><strong>Runtime</strong></RadzenText></RadzenColumn><RadzenColumn Size="8"><RadzenText TextStyle="TextStyle.Body1" TagName="TagName.Div" class="rz-m-0">@runtime</RadzenText></RadzenColumn></RadzenRow>
+                <RadzenRow><RadzenColumn Size="4"><RadzenText TextStyle="TextStyle.Subtitle2" TagName="TagName.Div" class="rz-m-0"><strong>Platform</strong></RadzenText></RadzenColumn><RadzenColumn Size="8"><RadzenText TextStyle="TextStyle.Body1" TagName="TagName.Div" class="rz-m-0">@platform</RadzenText></RadzenColumn></RadzenRow>
+                <div class="bivium-radzen-dialog-actions"><RadzenButton Text="OK" ButtonStyle="ButtonStyle.Primary" Click="@(() => service.Close())" /></div>
+            </RadzenStack>, options);
+        }
+        finally
+        {
+            this._lifetime.Complete(options);
+        }
+        if (generation == this._generation)
+            await this.OnClose.InvokeAsync();
+    }
+
+    /// <summary>
+    /// Osserva e registra le eccezioni del task avviato da <see cref="Show"/>
+    /// </summary>
+    /// <param name="task">Task da osservare</param>
+    /// <param name="operation">Descrizione usata nel log</param>
+    private async System.Threading.Tasks.Task ObserveTaskAsync(System.Threading.Tasks.Task task, string operation)
+    {
+        try
+        {
+            await task;
+        }
+        catch (Exception ex)
+        {
+            this.Logger.LogError(ex, "Errore durante {Operation} Radzen", operation);
+        }
+    }
+
+    /// <summary>
+    /// Rilascia il tracker senza chiudere dialog altrui
+    /// </summary>
+    public void Dispose()
+    {
+        this._generation++;
+        this._lifetime?.Dispose();
+    }
 }

@@ -4,7 +4,7 @@
 
 # Bivium File Manager
 
-A web-based dual-panel file manager inspired by Norton Commander and Midnight Commander. Built with Blazor Server on .NET 10, styled with [WebTUI](https://github.com/nicholasgasior/webtui) to look like a classic terminal application.
+A web-based dual-panel file manager inspired by Norton Commander and Midnight Commander. Built with Blazor Server on .NET 10 and Radzen Blazor.
 
 Runs on Linux, Windows and macOS. Accessible from any browser.
 
@@ -181,7 +181,7 @@ Then open `http://your-host:5000` in your browser.
 
 ## Running standalone
 
-Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
+Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) 10.0.401 or newer and the .NET runtime 10.0.12 or newer. The supported build configurations are `Debug` and `Release`; both use the Radzen UI.
 
 ```bash
 dotnet publish Bivium/Bivium.csproj -c Release -o dist
@@ -205,6 +205,10 @@ To build the Docker image:
 docker build -t bivium .
 ```
 
+The pinned Docker build publishes the `Release` configuration with the Radzen UI. Radzen static assets are supplied by the `Radzen.Blazor` package and Monaco Editor is restored locally through LibMan; the application does not depend on a UI CDN at runtime.
+
+The pre-cutover legacy `Release` artifact is preserved at `/var/folders/xg/4kmzds8d53l5y30c_ngfnn5m0000gn/T/opencode/bivium-pre-cutover-release`. To roll back this cutover on the machine where it was produced, stop Bivium and deploy that artifact instead of publishing the current source tree.
+
 ## Authentication
 
 Authentication is disabled by default and no user is created on first start. Open `Settings` -> `Authentication...` to create the single local administrator, enable or disable authentication, change credentials, and optionally configure TOTP 2FA.
@@ -226,7 +230,7 @@ Login sessions last up to 8 hours and are extended while the application is in u
 - [Monaco Editor](https://microsoft.github.io/monaco-editor/) — file editor
 - [Porta.Pty](https://github.com/tomlm/Porta.Pty) 1.0.7 — native PTYs on Windows, macOS and Linux
 - [XTerm.NET](https://github.com/tomlm/XTerm.NET) 2.0.2 — server-side VT terminal model
-- [WebTUI](https://github.com/nicholasgasior/webtui) 0.1.6 — TUI-style CSS
+- [Radzen Blazor](https://blazor.radzen.com/) 11.4.2 — application UI components and themes
 
 ## License
 

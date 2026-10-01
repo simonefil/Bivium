@@ -1,16 +1,3 @@
-/* WebTUI layer ordering - must be first */
-@layer base, utils, components;
-
-/* WebTUI full bundle (base + all components + all utils) */
-@import '../lib/webtui/dist/full.css';
-
-/* WebTUI themes */
-@import '../lib/webtui-theme-nord/dist/index.css';
-@import '../lib/webtui-theme-catppuccin/dist/index.css';
-
-/* Custom themes */
-@import 'themes.css';
-
 /* Application styles */
 @import 'layout.css';
 @import 'tree.css';
@@ -23,7 +10,6 @@
 @import 'renamer.css';
 @import 'upload.css';
 
-/* Global overrides */
 html, body {
     height: 100%;
     width: 100%;
@@ -31,32 +17,292 @@ html, body {
     padding: 0;
     overflow: hidden;
 }
-/* Exclusive browser lease challenge */
+
+body:has(.bivium-radzen) {
+    font-family: var(--rz-text-font-family);
+    font-size: var(--rz-body-font-size);
+    line-height: var(--rz-body-line-height);
+    color: var(--rz-text-color);
+    background-color: var(--rz-body-background-color, var(--rz-base-background-color));
+}
+
+.bivium-radzen {
+    min-height: 100%;
+}
+
+body:has(.bivium-radzen) .rz-context-menu,
+body:has(.bivium-radzen) .rz-menu-popup {
+    z-index: 4000;
+}
+
+.rz-dialog-wrapper.bivium-modal-layer {
+    z-index: 5000;
+}
+
+body:has(.bivium-radzen) .rz-tooltip,
+body:has(.bivium-radzen) .rz-notification {
+    z-index: 6000;
+}
+
+.bivium-radzen-modal {
+    width: min(94vw, 78ch);
+    max-height: 92vh;
+    overflow: auto;
+}
+
+.bivium-radzen-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+
+.bivium-radzen-status-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.bivium-radzen-status-bar {
+    justify-content: space-between;
+}
+
+.bivium-radzen-status-progress {
+    flex: 1;
+    text-align: center;
+}
+
 .workspace-takeover-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 100000;
+    height: 100%;
     display: grid;
     place-items: center;
-    background: color-mix(in srgb, var(--background0) 92%, transparent);
+    padding: 1rem;
+    box-sizing: border-box;
 }
 
 .workspace-takeover-card {
     max-width: 70ch;
-    padding: 2lh 3ch;
-    border: 1px solid var(--foreground0);
-    background: var(--background0);
-    color: var(--foreground0);
-    box-shadow: 2px 2px 0 var(--background3);
-}
-
-.workspace-takeover-card button {
-    margin-top: 1lh;
-    font: inherit;
 }
 
 .workspace-takeover-client {
     margin-top: 0.5lh;
-    color: var(--foreground2);
     overflow-wrap: anywhere;
+}
+
+.radzen-panels-area,
+.radzen-outer-splitter-host,
+.radzen-inner-splitter-host,
+.radzen-file-panel,
+.radzen-panel-tree,
+.radzen-panel-filelist,
+.radzen-file-grid-host {
+    min-width: 0;
+    min-height: 0;
+}
+
+.radzen-panels-area {
+    position: relative;
+    display: block;
+    overflow: hidden;
+}
+
+.radzen-outer-splitter-host,
+.radzen-inner-splitter-host,
+.radzen-file-grid-host {
+    width: 100%;
+    height: 100%;
+}
+
+.radzen-file-panel {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.radzen-panel-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    min-width: 0;
+}
+
+.radzen-path-breadcrumb,
+.radzen-path-editor {
+    flex: 1;
+    min-width: 0;
+}
+
+.radzen-path-breadcrumb {
+    overflow-x: auto;
+    scrollbar-width: thin;
+}
+
+.radzen-panel-tree,
+.radzen-panel-filelist {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+.radzen-panel-tree {
+    overflow: auto;
+}
+
+.radzen-file-grid-host .rz-data-grid,
+.radzen-file-grid-host .rz-data-grid-data {
+    height: 100%;
+}
+
+.radzen-file-grid-host tr.bivium-focused {
+    outline: var(--rz-outline-focus);
+    outline-offset: calc(-1 * var(--rz-outline-width));
+}
+
+.radzen-file-grid-host td > span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.bivium-radzen-upload-dialog {
+    width: min(92vw, 58rem);
+    max-height: 92vh;
+    overflow: auto;
+}
+
+.bivium-radzen-upload-overlay {
+    place-items: center;
+}
+
+.bivium-radzen-renamer-window:not(.visible) {
+    display: none;
+    pointer-events: none;
+}
+
+body:has(.bivium-radzen-service-dialog) .bivium-radzen-renamer-window {
+    pointer-events: none;
+}
+
+.bivium-radzen-editor-window,
+.bivium-radzen-renamer-window {
+    min-width: min(40ch, calc(100vw - 1rem));
+    max-width: calc(100vw - 1rem);
+    max-height: calc(100vh - 1rem);
+    box-sizing: border-box;
+}
+
+.bivium-radzen-upload-hint {
+    margin-top: 0.5rem;
+}
+
+.bivium-radzen-renamer-preview .rz-data-grid,
+.bivium-radzen-renamer-preview .rz-data-grid-data {
+    height: 100%;
+}
+
+.bivium-radzen-renamer-config .rz-dropdown,
+.bivium-radzen-renamer-config .rz-numeric,
+.bivium-radzen-renamer-config .rz-textbox {
+    width: 100%;
+}
+
+.bivium-radzen-terminal-header-shell {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 0.25rem;
+}
+
+.bivium-radzen-terminal-tabs {
+    flex: 1;
+    min-width: 0;
+}
+
+.bivium-radzen-terminal-tabs .rz-tabview-panels {
+    display: none;
+}
+
+/* Native modeless cards retain their stable DOM ids and raw renderer children. */
+.bivium-radzen-terminal-window.rz-card,
+.bivium-radzen-editor-window.rz-card,
+.bivium-radzen-renamer-window.rz-card {
+    overflow: hidden;
+}
+
+.terminal-titlebar,
+.editor-titlebar,
+.renamer-titlebar {
+    box-sizing: border-box;
+    cursor: move;
+    user-select: none;
+    flex-shrink: 0;
+}
+
+.terminal-resize-handle .resize-grip-icon,
+.editor-resize-handle .resize-grip-icon,
+.renamer-resize-handle .resize-grip-icon {
+    display: block;
+    pointer-events: none;
+}
+
+.bivium-radzen .radzen-panels-area .responsive-panel-switch {
+    display: none;
+}
+
+@media (max-width: 1023px) {
+    .bivium-radzen-menu-bar {
+        min-width: 0;
+        overflow-x: auto;
+        touch-action: pan-x;
+    }
+
+    .bivium-radzen .radzen-panels-area .responsive-panel-switch {
+        position: absolute;
+        top: 0.25rem;
+        right: 0.5rem;
+        z-index: 5;
+        display: inline-flex;
+    }
+
+    .radzen-outer-splitter-host > .rz-splitter > .rz-splitter-bar {
+        display: none;
+    }
+
+    .radzen-outer-splitter-host > .rz-splitter {
+        display: block;
+    }
+
+    .radzen-outer-splitter-host > .rz-splitter > .rz-splitter-pane {
+        width: 100% !important;
+        height: 100% !important;
+    }
+
+    .radzen-outer-splitter-host > .rz-splitter > .rz-splitter-pane:has(.radzen-file-panel:not(.active)) {
+        display: none;
+    }
+
+    .radzen-outer-splitter-host > .rz-splitter > .rz-splitter-pane:has(.radzen-file-panel.active) {
+        display: block !important;
+        flex-basis: 100% !important;
+        max-width: 100% !important;
+    }
+
+    .radzen-panel-toolbar {
+        padding-right: 10rem;
+    }
+}
+
+@media (pointer: coarse) {
+    .bivium-radzen .rz-splitter-bar,
+    .terminal-resize-handle,
+    .editor-resize-handle,
+    .renamer-resize-handle {
+        min-width: 44px;
+        min-height: 44px;
+    }
 }

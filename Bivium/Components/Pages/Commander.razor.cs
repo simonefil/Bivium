@@ -2,17 +2,20 @@ using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.Options;
 using Microsoft.JSInterop;
+using System.Text.Json;
 using Bivium.Models;
 using Bivium.Services;
 using Bivium.Components.Shared;
 using Bivium.Components.Panel;
+using Bivium.Components.Tree;
+using Radzen;
 
 namespace Bivium.Components.Pages
 {
     /// <summary>
     /// Main commander page - orchestrates dual-panel file manager
     /// </summary>
-    public partial class Commander : ComponentBase, IDisposable
+    public partial class Commander : ComponentBase, IAsyncDisposable
     {
         #region Injected Services
 
@@ -76,6 +79,16 @@ namespace Bivium.Components.Pages
         [Inject]
         private IHttpContextAccessor _httpContextAccessor { get; set; }
 
+        /// <summary>
+        /// Stato di rendering del tema per il circuito corrente
+        /// </summary>
+        [Inject]
+        private Radzen.ThemeService _themeService { get; set; }
+
+        /// <summary>Servizio scoped per conferme native anche senza lease attiva</summary>
+        [Inject]
+        private DialogService _dialogService { get; set; }
+
         #endregion
 
         #region Constants
@@ -99,6 +112,11 @@ namespace Bivium.Components.Pages
         /// Page jump size used until the browser reports the visible row count
         /// </summary>
         private const int DEFAULT_PAGE_SIZE = 20;
+
+        /// <summary>
+        /// Maximum number of destinations retained in each navigation direction
+        /// </summary>
+        private const int MAX_HISTORY_COUNT = 128;
 
         #endregion
 
@@ -280,6 +298,16 @@ namespace Bivium.Components.Pages
         private bool _singlePanelMode = false;
 
         /// <summary>
+        /// Percentuale persistita occupata dal pannello sinistro nel layout Radzen
+        /// </summary>
+        private double _outerPanelSizePercent = 50;
+
+        /// <summary>
+        /// Indice del pannello compresso nel layout Radzen, oppure -1
+        /// </summary>
+        private int _collapsedPanelIndex = -1;
+
+        /// <summary>
         /// CSS class for the panels area
         /// </summary>
         private string _panelsAreaClass = "panels-area";
@@ -350,9 +378,14 @@ namespace Bivium.Components.Pages
         private bool _panelsInitialized = false;
 
         /// <summary>
-        /// Whether keyboard capture has been initialized
+        /// Whether client interop initialization has started
         /// </summary>
-        private bool _keyboardInitialized = false;
+        private bool _clientInteropInitializationStarted = false;
+
+        /// <summary>
+        /// Whether the unload presence listener owns the current workspace token
+        /// </summary>
+        private bool _presenceInitialized = false;
 
         /// <summary>
         /// Prefix accumulated from recent character keys
@@ -419,6 +452,14 @@ namespace Bivium.Components.Pages
         /// </summary>
         private bool _isDisposed = false;
 
+        /// <summary>Conferma workspace posseduta, anche durante takeover senza lease</summary>
+        private RadzenDialogLifetime _workspaceConfirmationLifetime;
+
+        /// <summary>
+        /// Tema selezionato dal Commander
+        /// </summary>
+        private string _currentTheme = RadzenThemeCatalog.DEFAULT_THEME;
+
         #endregion
 
         #region Overrides
@@ -429,18 +470,21 @@ namespace Bivium.Components.Pages
         protected override async System.Threading.Tasks.Task OnInitializedAsync()
         {
             this._settingsChangeSubscription = this._settings.OnChange(this.HandleSettingsChanged);
+            this._currentTheme = RadzenThemeCatalog.NormalizeOrDefault(this._settings.CurrentValue.DefaultTheme);
+            this._themeService.SetTheme(this._currentTheme);
             await this.RefreshAuthenticationState();
         }
 
         /// <summary>
-        /// Setup keyboard capture after first render
+        /// Initializes browser lifecycle and input interop after the interactive render
         /// </summary>
-        protected override void OnAfterRender(bool firstRender)
+        /// <param name="firstRender">Whether this is the first interactive render</param>
+        protected override async System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender)
         {
-            if (!this._keyboardInitialized && this._canAccess)
+            if (!this._clientInteropInitializationStarted && this._canAccess)
             {
-                this._keyboardInitialized = true;
-                _ = this.InitializeKeyboardCaptureAsync();
+                this._clientInteropInitializationStarted = true;
+                await this.InitializeClientInteropAsync();
             }
 
             // Scroll cursor into view after DOM is ready
@@ -448,9 +492,7 @@ namespace Bivium.Components.Pages
             {
                 this._scrollAfterRender = false;
                 if (this._jsModule != null)
-                {
-                    _ = this._jsModule.InvokeVoidAsync("scrollCursorIntoView", this.GetActivePanel().CursorIndex);
-                }
+                    await this._jsModule.InvokeVoidAsync("scrollCursorIntoView", this.GetActivePanel().CursorIndex);
             }
 
             this.PersistWorkspacePanels();
@@ -484,7 +526,13 @@ namespace Bivium.Components.Pages
         /// <param name="name">Options name</param>
         private void HandleSettingsChanged(CommanderSettings settings, string name)
         {
-            _ = this.InvokeAsync(async () => { await this.RefreshAuthenticationState(); this.StateHasChanged(); });
+            _ = this.InvokeAsync(async () =>
+            {
+                this._currentTheme = RadzenThemeCatalog.NormalizeOrDefault(settings.DefaultTheme);
+                this._themeService.SetTheme(this._currentTheme);
+                await this.RefreshAuthenticationState();
+                this.StateHasChanged();
+            });
         }
 
         #endregion
@@ -537,13 +585,14 @@ namespace Bivium.Components.Pages
             {
                 if (this._isDisposed)
                     return;
-                _ = this.InvokeAsync(() =>
+                _ = this.InvokeAsync(async () =>
                 {
                     if (this._isDisposed)
                         return;
                     this._hasActiveLease = false;
                     this._leaseGeneration = 0;
                     this._panelsInitialized = false;
+                    await this.UpdateWorkspacePresenceLeaseAsync();
                     this.StateHasChanged();
                 });
             });
@@ -559,13 +608,14 @@ namespace Bivium.Components.Pages
 
             string activeIp = this._observedLease?.RemoteIp ?? "unknown";
             string confirmationMessage = "Hai Bivium già aperto da IP " + activeIp + ". Vuoi rendere attiva questa sessione?";
-            bool confirmed = await this.JSRuntime.InvokeAsync<bool>("confirm", confirmationMessage);
-            if (!confirmed)
+            bool confirmed = await this.ConfirmWorkspaceActionAsync("Activate this session", confirmationMessage, "Activate");
+            if (!confirmed || this._isDisposed || !this._clientAttached)
                 return;
 
             long expectedGeneration = this._observedLease?.Generation ?? 0;
             WorkspaceAttachResult result = this._workspaceService.TryTakeover(this._attachmentId, expectedGeneration);
             this.ApplyAttachResult(result);
+            await this.UpdateWorkspacePresenceLeaseAsync();
             if (this._hasActiveLease)
                 this.InitializePanels();
             this.StateHasChanged();
@@ -592,8 +642,9 @@ namespace Bivium.Components.Pages
             this.ConfigureLeaseRevocation();
             if (!hasControl)
                 this._panelsInitialized = false;
-            _ = this.InvokeAsync(() =>
+            _ = this.InvokeAsync(async () =>
             {
+                await this.UpdateWorkspacePresenceLeaseAsync();
                 if (this._hasActiveLease)
                     this.InitializePanels();
                 this.StateHasChanged();
@@ -604,7 +655,7 @@ namespace Bivium.Components.Pages
         /// Receives a browser heartbeat and automatically reacquires an available lease
         /// </summary>
         [JSInvokable]
-        public void OnWorkspaceHeartbeat()
+        public async System.Threading.Tasks.Task OnWorkspaceHeartbeat()
         {
             if (this._isDisposed || !this._clientAttached)
                 return;
@@ -614,6 +665,7 @@ namespace Bivium.Components.Pages
 
             WorkspaceAttachResult result = this._workspaceService.TryReconnectClient(this._attachmentId);
             this.ApplyAttachResult(result);
+            await this.UpdateWorkspacePresenceLeaseAsync();
             if (this._hasActiveLease)
                 this.InitializePanels();
             this.StateHasChanged();
@@ -641,6 +693,23 @@ namespace Bivium.Components.Pages
         private WorkspaceClientToken GetClientToken()
         {
             return new WorkspaceClientToken(this._attachmentId, this._leaseGeneration);
+        }
+
+        /// <summary>
+        /// Updates the unload notification token owned by the active presence registration
+        /// </summary>
+        private async System.Threading.Tasks.Task UpdateWorkspacePresenceLeaseAsync()
+        {
+            if (this._jsModule == null || this._isDisposed)
+                return;
+
+            try
+            {
+                await this._jsModule.InvokeVoidAsync("updateWorkspacePresenceLease", this._attachmentId, this._leaseGeneration);
+            }
+            catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException || ex is ObjectDisposedException)
+            {
+            }
         }
 
         /// <summary>
@@ -690,12 +759,19 @@ namespace Bivium.Components.Pages
             this._leftPanel = this.RestorePanel(workspace.Panels.LeftPanel, homePath, out leftFallback);
             this._rightPanel = this.RestorePanel(workspace.Panels.RightPanel, homePath, out rightFallback);
             this._singlePanelMode = workspace.Panels.SinglePanelMode;
+            this._outerPanelSizePercent = this.ClampOuterPanelSize(workspace.Panels.OuterSizePercent);
+            this._collapsedPanelIndex = workspace.Panels.CollapsedPanelIndex is 0 or 1 ? workspace.Panels.CollapsedPanelIndex : -1;
             this._activePanel = this._singlePanelMode ? 0 : Math.Clamp(workspace.Panels.ActivePanel, 0, 1);
+            if (!this._singlePanelMode && this._collapsedPanelIndex == this._activePanel)
+                this._activePanel = this._activePanel == 0 ? 1 : 0;
             this._panelsAreaClass = this._singlePanelMode ? "panels-area single-panel" : "panels-area";
             this._workspaceRevision = workspace.Revision;
 
             if (leftFallback || rightFallback)
+            {
                 this._progressText = "A saved panel path is unavailable. Opened the home directory instead.";
+                this.NotifyWarning("Workspace restored", this._progressText);
+            }
         }
 
         /// <summary>
@@ -714,6 +790,7 @@ namespace Bivium.Components.Pages
                 path = homePath;
 
             PanelState result = new PanelState(path);
+            this.ConfigurePanelCallbacks(result);
             if (snapshot != null)
             {
                 result.CurrentSort = new SortColumn(snapshot.SortField, snapshot.SortDirection);
@@ -723,6 +800,15 @@ namespace Bivium.Components.Pages
                 result.DateColumnRatio = snapshot.DateColumnRatio;
                 result.AttributesColumnRatio = snapshot.AttributesColumnRatio;
                 result.OwnerColumnRatio = snapshot.OwnerColumnRatio;
+                result.BackHistory = this.RestoreHistory(snapshot.BackHistory, path);
+                result.ForwardHistory = this.RestoreHistory(snapshot.ForwardHistory, path);
+                result.TreeSizePercent = this.ClampTreeSize(snapshot.TreeSizePercent);
+                result.TreeCollapsed = snapshot.TreeCollapsed;
+                for (int i = 0; i < snapshot.Columns.Count; i++)
+                {
+                    FileListColumnSnapshot column = snapshot.Columns[i];
+                    result.Columns.Add(new FileListColumnState(column.Id, column.Width, column.Visible));
+                }
                 for (int i = 0; i < snapshot.ExpandedDirectoryPaths.Count; i++)
                 {
                     if (this.IsRestorableDirectory(snapshot.ExpandedDirectoryPaths[i]))
@@ -749,11 +835,11 @@ namespace Bivium.Components.Pages
             }
 
             int cursorIndex = -1;
-            if (!string.IsNullOrEmpty(snapshot.CursorPath))
+            if (!string.IsNullOrEmpty(snapshot.FocusedPath))
             {
                 for (int i = 0; i < result.Entries.Count; i++)
                 {
-                    if (pathComparer.Equals(result.Entries[i].FullPath, snapshot.CursorPath))
+                    if (pathComparer.Equals(result.Entries[i].FullPath, snapshot.FocusedPath))
                     {
                         cursorIndex = i;
                         break;
@@ -766,9 +852,43 @@ namespace Bivium.Components.Pages
 
             result.CursorIndex = cursorIndex < 0 ? 0 : cursorIndex;
             if (result.Entries.Count > 0)
-                result.SelectionAnchorPath = result.Entries[result.CursorIndex].FullPath;
+                result.FocusedPath = result.Entries[result.CursorIndex].FullPath;
+            if (!string.IsNullOrEmpty(snapshot.SelectionAnchorPath) && availablePaths.Contains(snapshot.SelectionAnchorPath))
+                result.SelectionAnchorPath = snapshot.SelectionAnchorPath;
             if (!availablePaths.Contains(result.ScrollAnchorPath))
                 result.ScrollAnchorPath = result.Entries.Count == 0 ? "" : result.Entries[result.CursorIndex].FullPath;
+            return result;
+        }
+
+        /// <summary>
+        /// Attaches Commander-owned reducers to runtime-only panel callbacks
+        /// </summary>
+        /// <param name="panel">Panel receiving callbacks</param>
+        private void ConfigurePanelCallbacks(PanelState panel)
+        {
+            panel.InteractionRequested = request => this.HandleFileListInteraction(panel, request);
+            panel.ColumnLayoutRequested = columns => this.HandleColumnLayoutRequested(panel, columns);
+        }
+
+        /// <summary>
+        /// Restores safe existing history entries without duplicates or the current path
+        /// </summary>
+        /// <param name="paths">Persisted paths</param>
+        /// <param name="currentPath">Current panel path</param>
+        /// <returns>Filtered history with the nearest destination last</returns>
+        private List<string> RestoreHistory(IReadOnlyList<string> paths, string currentPath)
+        {
+            List<string> result = new List<string>();
+            if (paths == null)
+                return result;
+
+            int start = Math.Max(0, paths.Count - MAX_HISTORY_COUNT);
+            for (int i = start; i < paths.Count; i++)
+            {
+                string path = paths[i];
+                if (this.IsRestorableDirectory(path) && !this.AreSamePath(path, currentPath))
+                    this.AddHistoryPath(result, path);
+            }
             return result;
         }
 
@@ -780,7 +900,7 @@ namespace Bivium.Components.Pages
             if (!this._panelsInitialized)
                 return;
 
-            WorkspacePanelsSnapshot panels = new WorkspacePanelsSnapshot(this.CreatePanelSnapshot(this._leftPanel), this.CreatePanelSnapshot(this._rightPanel), this._activePanel, this._singlePanelMode);
+            WorkspacePanelsSnapshot panels = new WorkspacePanelsSnapshot(this.CreatePanelSnapshot(this._leftPanel), this.CreatePanelSnapshot(this._rightPanel), this._activePanel, this._singlePanelMode, this._outerPanelSizePercent, this._collapsedPanelIndex);
             BiviumWorkspaceSnapshot workspace;
             bool updated;
             try
@@ -827,13 +947,13 @@ namespace Bivium.Components.Pages
         /// <returns>Persistent snapshot</returns>
         private WorkspacePanelSnapshot CreatePanelSnapshot(PanelState panel)
         {
-            string cursorPath = "";
-            if (panel.CursorIndex >= 0 && panel.CursorIndex < panel.Entries.Count)
-                cursorPath = panel.Entries[panel.CursorIndex].FullPath;
+            string focusedPath = panel.FocusedPath;
+            if (string.IsNullOrEmpty(focusedPath) && panel.CursorIndex >= 0 && panel.CursorIndex < panel.Entries.Count)
+                focusedPath = panel.Entries[panel.CursorIndex].FullPath;
 
             List<string> expandedPaths = new List<string>(panel.ExpandedDirectoryPaths);
             expandedPaths.Sort(StringComparer.Ordinal);
-            return new WorkspacePanelSnapshot(panel.CurrentPath, cursorPath, panel.CursorIndex, panel.SelectedPaths, panel.CurrentSort.Field, panel.CurrentSort.Direction, panel.ScrollAnchorPath, expandedPaths, panel.NameColumnRatio, panel.SizeColumnRatio, panel.DateColumnRatio, panel.AttributesColumnRatio, panel.OwnerColumnRatio);
+            return new WorkspacePanelSnapshot(panel.CurrentPath, focusedPath, panel.CursorIndex, panel.SelectedPaths, panel.CurrentSort.Field, panel.CurrentSort.Direction, panel.ScrollAnchorPath, expandedPaths, panel.NameColumnRatio, panel.SizeColumnRatio, panel.DateColumnRatio, panel.AttributesColumnRatio, panel.OwnerColumnRatio, panel.SelectionAnchorPath, panel.BackHistory, panel.ForwardHistory, panel.Columns, panel.TreeSizePercent, panel.TreeCollapsed);
         }
 
         /// <summary>
@@ -896,7 +1016,17 @@ namespace Bivium.Components.Pages
         /// <param name="index">Panel index (0=left, 1=right)</param>
         private void SetActivePanel(int index)
         {
-            this._activePanel = index;
+            if (this.CanMutateWorkspace())
+                this._activePanel = Math.Clamp(index, 0, 1);
+        }
+
+        /// <summary>
+        /// Alterna il pannello visibile nella sola proiezione responsive
+        /// </summary>
+        private void SwitchResponsivePanel()
+        {
+            if (this.CanMutateWorkspace() && !this._singlePanelMode)
+                this._activePanel = this._activePanel == 0 ? 1 : 0;
         }
 
         /// <summary>
@@ -905,12 +1035,7 @@ namespace Bivium.Components.Pages
         /// <param name="path">New directory path</param>
         private void NavigateActivePanel(string path)
         {
-            PanelState active = this.GetActivePanel();
-            active.CurrentPath = path;
-            active.CursorIndex = 0;
-            active.SelectedPaths.Clear();
-            active.SelectionAnchorPath = "";
-            this.LoadPanelContents(active);
+            this.NavigatePanel(this.GetActivePanel(), path, PanelNavigationKind.Ordinary);
         }
 
         /// <summary>
@@ -919,12 +1044,7 @@ namespace Bivium.Components.Pages
         /// <param name="path">New directory path</param>
         private void HandleLeftNavigate(string path)
         {
-            this._leftPanel.CurrentPath = path;
-            this._leftPanel.CursorIndex = 0;
-            this._leftPanel.ScrollAnchorPath = "";
-            this._leftPanel.SelectedPaths.Clear();
-            this._leftPanel.SelectionAnchorPath = "";
-            this.LoadPanelContents(this._leftPanel);
+            this.NavigatePanel(this._leftPanel, path, PanelNavigationKind.Ordinary);
         }
 
         /// <summary>
@@ -933,12 +1053,83 @@ namespace Bivium.Components.Pages
         /// <param name="path">New directory path</param>
         private void HandleRightNavigate(string path)
         {
-            this._rightPanel.CurrentPath = path;
-            this._rightPanel.CursorIndex = 0;
-            this._rightPanel.ScrollAnchorPath = "";
-            this._rightPanel.SelectedPaths.Clear();
-            this._rightPanel.SelectionAnchorPath = "";
-            this.LoadPanelContents(this._rightPanel);
+            this.NavigatePanel(this._rightPanel, path, PanelNavigationKind.Ordinary);
+        }
+
+        /// <summary>
+        /// Centralizes validated directory navigation and history transfer
+        /// </summary>
+        /// <param name="panel">Panel to navigate</param>
+        /// <param name="path">Requested destination for ordinary navigation</param>
+        /// <param name="kind">Navigation direction</param>
+        /// <returns>True when navigation completed</returns>
+        private bool NavigatePanel(PanelState panel, string path, PanelNavigationKind kind)
+        {
+            if (!this.CanMutateWorkspace())
+                return false;
+
+            string destination = path;
+            int historyIndex = -1;
+            List<string> sourceHistory = kind == PanelNavigationKind.Back ? panel.BackHistory : panel.ForwardHistory;
+
+            if (kind != PanelNavigationKind.Ordinary)
+            {
+                for (int i = sourceHistory.Count - 1; i >= 0; i--)
+                {
+                    if (this.IsRestorableDirectory(sourceHistory[i]) && !this.AreSamePath(sourceHistory[i], panel.CurrentPath))
+                    {
+                        destination = sourceHistory[i];
+                        historyIndex = i;
+                        break;
+                    }
+                }
+                if (historyIndex < 0)
+                {
+                    sourceHistory.Clear();
+                    return false;
+                }
+            }
+
+            if (!this.IsRestorableDirectory(destination) || this.AreSamePath(destination, panel.CurrentPath))
+                return false;
+
+            if (kind == PanelNavigationKind.Ordinary)
+            {
+                this.AddHistoryPath(panel.BackHistory, panel.CurrentPath);
+                panel.ForwardHistory.Clear();
+            }
+            else
+            {
+                sourceHistory.RemoveRange(historyIndex, sourceHistory.Count - historyIndex);
+                List<string> destinationHistory = kind == PanelNavigationKind.Back ? panel.ForwardHistory : panel.BackHistory;
+                this.AddHistoryPath(destinationHistory, panel.CurrentPath);
+            }
+
+            panel.CurrentPath = destination;
+            panel.FocusedPath = "";
+            panel.CursorIndex = 0;
+            panel.ScrollAnchorPath = "";
+            panel.SelectedPaths.Clear();
+            panel.SelectionAnchorPath = "";
+            this.LoadPanelContents(panel);
+            return true;
+        }
+
+        /// <summary>
+        /// Adds one unique history destination and enforces the bounded stack size
+        /// </summary>
+        /// <param name="history">History stack</param>
+        /// <param name="path">Path becoming the nearest destination</param>
+        private void AddHistoryPath(List<string> history, string path)
+        {
+            for (int i = history.Count - 1; i >= 0; i--)
+            {
+                if (this.AreSamePath(history[i], path))
+                    history.RemoveAt(i);
+            }
+            history.Add(path);
+            if (history.Count > MAX_HISTORY_COUNT)
+                history.RemoveRange(0, history.Count - MAX_HISTORY_COUNT);
         }
 
         /// <summary>
@@ -965,6 +1156,8 @@ namespace Bivium.Components.Pages
         /// <param name="sort">New sort configuration</param>
         private void HandleLeftSortChanged(SortColumn sort)
         {
+            if (!this.CanMutateWorkspace())
+                return;
             this._leftPanel.CurrentSort = sort;
             this.SortEntries(this._leftPanel);
         }
@@ -975,6 +1168,8 @@ namespace Bivium.Components.Pages
         /// <param name="sort">New sort configuration</param>
         private void HandleRightSortChanged(SortColumn sort)
         {
+            if (!this.CanMutateWorkspace())
+                return;
             this._rightPanel.CurrentSort = sort;
             this.SortEntries(this._rightPanel);
         }
@@ -985,7 +1180,7 @@ namespace Bivium.Components.Pages
         /// <param name="index">New cursor index</param>
         private void HandleLeftCursorChanged(int index)
         {
-            this._leftPanel.CursorIndex = index;
+            this.SetPanelFocusFromIndex(this._leftPanel, index);
         }
 
         /// <summary>
@@ -994,7 +1189,16 @@ namespace Bivium.Components.Pages
         /// <param name="index">New cursor index</param>
         private void HandleRightCursorChanged(int index)
         {
-            this._rightPanel.CursorIndex = index;
+            this.SetPanelFocusFromIndex(this._rightPanel, index);
+        }
+
+        /// <summary>
+        /// Updates semantic focus from a compatibility cursor index
+        /// </summary>
+        private void SetPanelFocusFromIndex(PanelState panel, int index)
+        {
+            panel.CursorIndex = index;
+            panel.FocusedPath = index >= 0 && index < panel.Entries.Count ? panel.Entries[index].FullPath : "";
         }
 
         /// <summary>
@@ -1042,6 +1246,8 @@ namespace Bivium.Components.Pages
         /// <param name="ratios">Five positive finite widths</param>
         private void ApplyColumnRatios(PanelState panel, double[] ratios)
         {
+            if (panel.Columns.Count > 0)
+                return;
             if (ratios == null || ratios.Length != 5)
                 return;
 
@@ -1064,12 +1270,39 @@ namespace Bivium.Components.Pages
         }
 
         /// <summary>
+        /// Accepts only a complete measured layout while this circuit owns workspace mutation
+        /// </summary>
+        /// <param name="panel">Target panel</param>
+        /// <param name="columns">Ordered complete column layout</param>
+        private void HandleColumnLayoutRequested(PanelState panel, IEnumerable<FileListColumnState> columns)
+        {
+            if (!this.CanMutateWorkspace())
+                return;
+
+            List<FileListColumnState> source = columns == null ? new List<FileListColumnState>() : new List<FileListColumnState>(columns);
+            HashSet<FileListColumnId> seen = new HashSet<FileListColumnId>();
+            if (source.Count != Enum.GetValues<FileListColumnId>().Length)
+                return;
+            for (int i = 0; i < source.Count; i++)
+            {
+                FileListColumnState column = source[i];
+                if (column == null || !Enum.IsDefined(column.Id) || !seen.Add(column.Id) || !double.IsFinite(column.Width) || column.Width <= 0 || (column.Id == FileListColumnId.Name && !column.Visible))
+                    return;
+            }
+
+            panel.Columns.Clear();
+            for (int i = 0; i < source.Count; i++)
+                panel.Columns.Add(new FileListColumnState(source[i].Id, source[i].Width, source[i].Visible));
+        }
+
+        /// <summary>
         /// Persists the semantic scroll anchor of the left panel
         /// </summary>
         /// <param name="path">First visible entry path</param>
         private void HandleLeftScrollAnchorChanged(string path)
         {
-            this._leftPanel.ScrollAnchorPath = path;
+            if (this.CanMutateWorkspace())
+                this._leftPanel.ScrollAnchorPath = path;
         }
 
         /// <summary>
@@ -1078,7 +1311,8 @@ namespace Bivium.Components.Pages
         /// <param name="path">First visible entry path</param>
         private void HandleRightScrollAnchorChanged(string path)
         {
-            this._rightPanel.ScrollAnchorPath = path;
+            if (this.CanMutateWorkspace())
+                this._rightPanel.ScrollAnchorPath = path;
         }
 
         /// <summary>
@@ -1116,6 +1350,133 @@ namespace Bivium.Components.Pages
             // EventCallback triggers the render that persists the updated expanded-directory snapshot
         }
 
+        /// <summary>
+        /// Applica una modifica semantica all'albero sinistro dopo la rivalidazione del lease
+        /// </summary>
+        /// <param name="change">Modifica richiesta dalla variante Radzen</param>
+        private void HandleLeftTreeExpansionChanged(DirectoryTreeExpansionChange change)
+        {
+            this.HandleTreeExpansionChanged(this._leftPanel, change);
+        }
+
+        /// <summary>
+        /// Applica una modifica semantica all'albero destro dopo la rivalidazione del lease
+        /// </summary>
+        /// <param name="change">Modifica richiesta dalla variante Radzen</param>
+        private void HandleRightTreeExpansionChanged(DirectoryTreeExpansionChange change)
+        {
+            this.HandleTreeExpansionChanged(this._rightPanel, change);
+        }
+
+        /// <summary>
+        /// Riduce una modifica di espansione nel PanelState autoritativo
+        /// </summary>
+        /// <param name="panel">Pannello destinatario</param>
+        /// <param name="change">Modifica semantica richiesta</param>
+        private void HandleTreeExpansionChanged(PanelState panel, DirectoryTreeExpansionChange change)
+        {
+            if (change == null || string.IsNullOrEmpty(change.Path) || !this.CanMutateWorkspace())
+                return;
+            if (change.Expanded)
+                panel.ExpandedDirectoryPaths.Add(change.Path);
+            else
+                panel.ExpandedDirectoryPaths.Remove(change.Path);
+        }
+
+        /// <summary>
+        /// Applica il layout verticale del pannello sinistro
+        /// </summary>
+        /// <param name="change">Geometria richiesta</param>
+        private void HandleLeftTreeLayoutChanged(PanelTreeLayoutChange change)
+        {
+            this.HandleTreeLayoutChanged(this._leftPanel, change);
+        }
+
+        /// <summary>
+        /// Applica il layout verticale del pannello destro
+        /// </summary>
+        /// <param name="change">Geometria richiesta</param>
+        private void HandleRightTreeLayoutChanged(PanelTreeLayoutChange change)
+        {
+            this.HandleTreeLayoutChanged(this._rightPanel, change);
+        }
+
+        /// <summary>
+        /// Valida e riduce una modifica del layout verticale
+        /// </summary>
+        /// <param name="panel">Pannello destinatario</param>
+        /// <param name="change">Geometria richiesta</param>
+        private void HandleTreeLayoutChanged(PanelState panel, PanelTreeLayoutChange change)
+        {
+            if (change == null || !this.CanMutateWorkspace())
+                return;
+            panel.TreeSizePercent = this.ClampTreeSize(change.SizePercent);
+            panel.TreeCollapsed = change.Collapsed;
+        }
+
+        /// <summary>
+        /// Persiste la nuova proporzione orizzontale dei pannelli
+        /// </summary>
+        /// <param name="args">Dati conclusivi del resize Radzen</param>
+        private void HandleOuterSplitterResize(RadzenSplitterResizeEventArgs args)
+        {
+            if (!this.CanMutateWorkspace())
+                return;
+            double leftSize = args.PaneIndex == 0 ? args.NewSize : 100 - args.NewSize;
+            this._outerPanelSizePercent = this.ClampOuterPanelSize(leftSize);
+        }
+
+        /// <summary>
+        /// Persiste il pannello compresso dall'utente
+        /// </summary>
+        /// <param name="args">Pannello compresso da Radzen</param>
+        private void HandleOuterSplitterCollapse(RadzenSplitterEventArgs args)
+        {
+            if (this.CanMutateWorkspace() && args.PaneIndex is 0 or 1)
+            {
+                this._collapsedPanelIndex = args.PaneIndex;
+                if (this._activePanel == args.PaneIndex)
+                    this._activePanel = args.PaneIndex == 0 ? 1 : 0;
+            }
+        }
+
+        /// <summary>
+        /// Rimuove lo stato di compressione quando il pannello viene espanso
+        /// </summary>
+        /// <param name="args">Pannello espanso da Radzen</param>
+        private void HandleOuterSplitterExpand(RadzenSplitterEventArgs args)
+        {
+            if (this.CanMutateWorkspace() && this._collapsedPanelIndex == args.PaneIndex)
+                this._collapsedPanelIndex = -1;
+        }
+
+        /// <summary>
+        /// Forza il render proprietario dopo una mutazione già passata dal reducer
+        /// </summary>
+        private void HandlePanelUiStateChanged()
+        {
+        }
+
+        /// <summary>
+        /// Limita la geometria orizzontale a valori finiti e utilizzabili
+        /// </summary>
+        /// <param name="value">Percentuale proposta</param>
+        /// <returns>Percentuale valida tra 20 e 80</returns>
+        private double ClampOuterPanelSize(double value)
+        {
+            return double.IsFinite(value) ? Math.Clamp(value, 20, 80) : 50;
+        }
+
+        /// <summary>
+        /// Limita la geometria verticale a valori finiti e utilizzabili
+        /// </summary>
+        /// <param name="value">Percentuale proposta</param>
+        /// <returns>Percentuale valida tra 15 e 85</returns>
+        private double ClampTreeSize(double value)
+        {
+            return double.IsFinite(value) ? Math.Clamp(value, 15, 85) : 30;
+        }
+
         #endregion
 
         #region Panel Data
@@ -1126,9 +1487,11 @@ namespace Bivium.Components.Pages
         /// <param name="panel">Panel to load</param>
         private void LoadPanelContents(PanelState panel)
         {
-            string cursorPath = panel.CursorIndex >= 0 && panel.CursorIndex < panel.Entries.Count ? panel.Entries[panel.CursorIndex].FullPath : "";
+            string focusedPath = panel.FocusedPath;
+            if (string.IsNullOrEmpty(focusedPath) && panel.CursorIndex >= 0 && panel.CursorIndex < panel.Entries.Count)
+                focusedPath = panel.Entries[panel.CursorIndex].FullPath;
             panel.Entries = this._fileSystemService.GetDirectoryContents(panel.CurrentPath);
-            this.SortEntries(panel, cursorPath);
+            this.SortEntries(panel, focusedPath);
         }
 
         /// <summary>
@@ -1145,8 +1508,8 @@ namespace Bivium.Components.Pages
             if (this._leftPanel.CurrentPath == this._rightPanel.CurrentPath)
             {
                 List<FileSystemEntry> entries = this._fileSystemService.GetDirectoryContents(this._leftPanel.CurrentPath);
-                string leftCursorPath = this._leftPanel.CursorIndex >= 0 && this._leftPanel.CursorIndex < this._leftPanel.Entries.Count ? this._leftPanel.Entries[this._leftPanel.CursorIndex].FullPath : "";
-                string rightCursorPath = this._rightPanel.CursorIndex >= 0 && this._rightPanel.CursorIndex < this._rightPanel.Entries.Count ? this._rightPanel.Entries[this._rightPanel.CursorIndex].FullPath : "";
+                string leftCursorPath = this._leftPanel.FocusedPath;
+                string rightCursorPath = this._rightPanel.FocusedPath;
 
                 this._leftPanel.Entries = new List<FileSystemEntry>(entries);
                 this.SortEntries(this._leftPanel, leftCursorPath);
@@ -1201,7 +1564,9 @@ namespace Bivium.Components.Pages
         /// <param name="panel">Panel to sort</param>
         private void SortEntries(PanelState panel, string preservedCursorPath = null)
         {
-            string cursorPath = preservedCursorPath ?? (panel.CursorIndex >= 0 && panel.CursorIndex < panel.Entries.Count ? panel.Entries[panel.CursorIndex].FullPath : "");
+            string cursorPath = preservedCursorPath ?? panel.FocusedPath;
+            if (string.IsNullOrEmpty(cursorPath) && panel.CursorIndex >= 0 && panel.CursorIndex < panel.Entries.Count)
+                cursorPath = panel.Entries[panel.CursorIndex].FullPath;
 
             // Always keep directories first
             List<FileSystemEntry> dirs = new List<FileSystemEntry>();
@@ -1238,11 +1603,20 @@ namespace Bivium.Components.Pages
 
             int cursorIndex = this.FindPanelEntryIndex(panel, cursorPath);
             if (cursorIndex >= 0)
+            {
                 panel.CursorIndex = cursorIndex;
+                panel.FocusedPath = panel.Entries[cursorIndex].FullPath;
+            }
             else if (panel.Entries.Count == 0)
+            {
                 panel.CursorIndex = 0;
+                panel.FocusedPath = "";
+            }
             else
+            {
                 panel.CursorIndex = Math.Clamp(panel.CursorIndex, 0, panel.Entries.Count - 1);
+                panel.FocusedPath = panel.Entries[panel.CursorIndex].FullPath;
+            }
         }
 
         /// <summary>
@@ -1264,6 +1638,142 @@ namespace Bivium.Components.Pages
             }
 
             return -1;
+        }
+
+        /// <summary>
+        /// Restituisce l'entry identificata dal focus semantico, con fallback per il cursore legacy
+        /// </summary>
+        /// <param name="panel">Pannello da consultare</param>
+        /// <returns>Entry focalizzata oppure null se non disponibile</returns>
+        private FileSystemEntry GetFocusedEntry(PanelState panel)
+        {
+            int index = this.FindPanelEntryIndex(panel, panel.FocusedPath);
+            if (index < 0 && string.IsNullOrEmpty(panel.FocusedPath))
+                index = panel.CursorIndex;
+            return index >= 0 && index < panel.Entries.Count ? panel.Entries[index] : null;
+        }
+
+        /// <summary>
+        /// Applica una richiesta atomica mantenendo selezione, focus e anchor sotto il controllo di Commander
+        /// </summary>
+        /// <param name="panel">Pannello destinatario</param>
+        /// <param name="request">Interazione richiesta dalla superficie UI</param>
+        private void HandleFileListInteraction(PanelState panel, FileListInteractionRequest request)
+        {
+            if (panel == null || request == null || !this.CanMutateWorkspace())
+                return;
+
+            if (request.Intent == FileListInteractionIntent.ClearSelection)
+            {
+                panel.SelectedPaths.Clear();
+                return;
+            }
+            if (request.Intent == FileListInteractionIntent.SelectAll)
+            {
+                panel.SelectedPaths.Clear();
+                for (int i = 0; i < panel.Entries.Count; i++)
+                    panel.SelectedPaths.Add(panel.Entries[i].FullPath);
+                return;
+            }
+            if (panel.Entries.Count == 0)
+                return;
+
+            int focusedIndex = this.FindPanelEntryIndex(panel, panel.FocusedPath);
+            if (focusedIndex < 0)
+                focusedIndex = Math.Clamp(panel.CursorIndex, 0, panel.Entries.Count - 1);
+            int targetIndex;
+            int pageSize = request.PageSize > 0 ? request.PageSize : DEFAULT_PAGE_SIZE;
+            switch (request.Intent)
+            {
+                case FileListInteractionIntent.Click:
+                    targetIndex = this.FindPanelEntryIndex(panel, request.TargetPath);
+                    break;
+                case FileListInteractionIntent.MovePrevious:
+                    targetIndex = Math.Max(0, focusedIndex - 1);
+                    break;
+                case FileListInteractionIntent.MoveNext:
+                    targetIndex = Math.Min(panel.Entries.Count - 1, focusedIndex + 1);
+                    break;
+                case FileListInteractionIntent.MoveFirst:
+                    targetIndex = 0;
+                    break;
+                case FileListInteractionIntent.MoveLast:
+                    targetIndex = panel.Entries.Count - 1;
+                    break;
+                case FileListInteractionIntent.MovePagePrevious:
+                    targetIndex = Math.Max(0, focusedIndex - pageSize);
+                    break;
+                case FileListInteractionIntent.MovePageNext:
+                    targetIndex = (int)Math.Min(panel.Entries.Count - 1L, (long)focusedIndex + pageSize);
+                    break;
+                case FileListInteractionIntent.ToggleFocused:
+                    targetIndex = focusedIndex;
+                    break;
+                case FileListInteractionIntent.ActivateFocused:
+                    FileSystemEntry entry = this.GetFocusedEntry(panel);
+                    if (entry != null)
+                    {
+                        if (entry.IsDirectory)
+                        {
+                            this.NavigatePanel(panel, entry.FullPath, PanelNavigationKind.Ordinary);
+                        }
+                        else
+                        {
+                            this.OpenEditor(entry, true);
+                        }
+                    }
+                    return;
+                case FileListInteractionIntent.Focus:
+                    targetIndex = this.FindPanelEntryIndex(panel, request.TargetPath);
+                    if (targetIndex >= 0)
+                        this.SetPanelFocusFromIndex(panel, targetIndex);
+                    return;
+                default:
+                    return;
+            }
+
+            if (targetIndex < 0)
+                return;
+
+            if (request.Shift)
+            {
+                List<string> previousSelection = request.Control ? new List<string>(panel.SelectedPaths) : null;
+                this.MoveSelectionFocus(panel, targetIndex, true);
+                if (previousSelection != null)
+                {
+                    StringComparer comparer = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+                    HashSet<string> selectedPaths = new HashSet<string>(panel.SelectedPaths, comparer);
+                    for (int i = 0; i < previousSelection.Count; i++)
+                    {
+                        if (selectedPaths.Add(previousSelection[i]))
+                            panel.SelectedPaths.Add(previousSelection[i]);
+                    }
+                }
+            }
+            else if (request.Intent == FileListInteractionIntent.ToggleFocused || (request.Control && request.Intent == FileListInteractionIntent.Click))
+            {
+                string targetPath = panel.Entries[targetIndex].FullPath;
+                int selectedIndex = panel.SelectedPaths.FindIndex(path => this.AreSamePath(path, targetPath));
+                if (selectedIndex >= 0)
+                {
+                    panel.SelectedPaths.RemoveAt(selectedIndex);
+                }
+                else
+                {
+                    panel.SelectedPaths.Add(targetPath);
+                }
+                if (this.FindPanelEntryIndex(panel, panel.SelectionAnchorPath) < 0)
+                    panel.SelectionAnchorPath = targetPath;
+                this.SetPanelFocusFromIndex(panel, targetIndex);
+            }
+            else if (request.Control)
+            {
+                this.SetPanelFocusFromIndex(panel, targetIndex);
+            }
+            else
+            {
+                this.MoveSelectionFocus(panel, targetIndex, false);
+            }
         }
 
         /// <summary>
@@ -1399,18 +1909,21 @@ namespace Bivium.Components.Pages
         #region File Operations
 
         /// <summary>
-        /// Opens the selected entry (navigates into directory)
+        /// Activates the focused entry using Explorer directory/editor behavior
         /// </summary>
         private void DoOpen()
         {
             PanelState active = this.GetActivePanel();
-            if (active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count)
+            FileSystemEntry entry = this.GetFocusedEntry(active);
+            if (entry == null)
+                return;
+            if (entry.IsDirectory)
             {
-                FileSystemEntry entry = active.Entries[active.CursorIndex];
-                if (entry.IsDirectory)
-                {
-                    this.NavigateActivePanel(entry.FullPath);
-                }
+                this.NavigateActivePanel(entry.FullPath);
+            }
+            else
+            {
+                this.OpenEditor(entry, true);
             }
         }
 
@@ -1422,46 +1935,49 @@ namespace Bivium.Components.Pages
             PanelState active = this.GetActivePanel();
             FileSystemEntry entry = this.GetSingleTargetEntry(active, "Edit");
             if (entry != null)
-            {
-                // Only edit files, not directories
-                if (!entry.IsDirectory)
-                {
-                    // Check extension is in editable list
-                    string ext = Path.GetExtension(entry.Name).ToLowerInvariant();
-                    List<string> editableExtensions = this._settings.CurrentValue.EditableExtensions;
-                    bool isEditable = false;
-                    for (int i = 0; i < editableExtensions.Count; i++)
-                    {
-                        if (editableExtensions[i].ToLowerInvariant() == ext)
-                        {
-                            isEditable = true;
-                            break;
-                        }
-                    }
+                this.OpenEditor(entry, false);
+        }
 
-                    if (!isEditable)
-                    {
-                        this._confirmDialog.Show("Edit", "Extension '" + ext + "' is not in the editable extensions list.", "OK", "");
-                    }
-                    else if (entry.SizeBytes > MAX_EDITOR_SIZE)
-                    {
-                        this._confirmDialog.Show("Edit", "File is too large to edit (max 5 MB).", "OK", "");
-                    }
-                    else
-                    {
-                        // Read file content and open editor
-                        FileTextResult readResult = this._fileOperationService.ReadFileText(entry.FullPath, MAX_EDITOR_SIZE);
-                        if (readResult.Success)
-                        {
-                            this._editorDialog.Show(entry.FullPath, readResult.Content);
-                        }
-                        else
-                        {
-                            this._confirmDialog.Show("Edit", readResult.ErrorMessage, "OK", "");
-                        }
-                    }
+        /// <summary>
+        /// Opens an editable file while optionally suppressing activation policy messages
+        /// </summary>
+        /// <param name="entry">File entry to open</param>
+        /// <param name="silentPolicyRejection">Whether unsupported and oversized files silently no-op</param>
+        private void OpenEditor(FileSystemEntry entry, bool silentPolicyRejection)
+        {
+            if (entry == null || entry.IsDirectory)
+                return;
+
+            string extension = Path.GetExtension(entry.Name).ToLowerInvariant();
+            List<string> editableExtensions = this._settings.CurrentValue.EditableExtensions;
+            bool isEditable = false;
+            for (int i = 0; i < editableExtensions.Count; i++)
+            {
+                if (editableExtensions[i].ToLowerInvariant() == extension)
+                {
+                    isEditable = true;
+                    break;
                 }
             }
+
+            if (!isEditable)
+            {
+                if (!silentPolicyRejection)
+                    this._confirmDialog.Show("Edit", "Extension '" + extension + "' is not in the editable extensions list.", "OK", "");
+                return;
+            }
+            if (entry.SizeBytes > MAX_EDITOR_SIZE)
+            {
+                if (!silentPolicyRejection)
+                    this._confirmDialog.Show("Edit", "File is too large to edit (max 5 MB).", "OK", "");
+                return;
+            }
+
+            FileTextResult readResult = this._fileOperationService.ReadFileText(entry.FullPath, MAX_EDITOR_SIZE);
+            if (readResult.Success)
+                this._editorDialog.Show(entry.FullPath, readResult.Content);
+            else
+                this._confirmDialog.Show("Edit", readResult.ErrorMessage, "OK", "");
         }
 
         /// <summary>
@@ -1611,10 +2127,18 @@ namespace Bivium.Components.Pages
 
                     this.RefreshVisiblePanels();
 
-                    if (!result.Success && !cancellationToken.IsCancellationRequested)
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        this.NotifyWarning(isCut ? "Move cancelled" : "Copy cancelled", this._progressText);
+                    }
+                    else if (!result.Success)
                     {
                         this._pendingOperation = "";
-                        this._confirmDialog.Show("Error", result.ErrorMessage, "OK", "");
+                        this.ShowOperationError(isCut ? "Move failed" : "Copy failed", result.ErrorMessage);
+                    }
+                    else
+                    {
+                        this.NotifySuccess(isCut ? "Move completed" : "Copy completed", operationPaths.Count + " item(s) processed.");
                     }
 
                     this.StateHasChanged();
@@ -1788,11 +2312,7 @@ namespace Bivium.Components.Pages
         private void DoSelectAll()
         {
             PanelState active = this.GetActivePanel();
-            active.SelectedPaths.Clear();
-            for (int i = 0; i < active.Entries.Count; i++)
-            {
-                active.SelectedPaths.Add(active.Entries[i].FullPath);
-            }
+            this.HandleFileListInteraction(active, new FileListInteractionRequest { Intent = FileListInteractionIntent.SelectAll });
         }
 
         /// <summary>
@@ -1975,11 +2495,11 @@ namespace Bivium.Components.Pages
         /// <summary>
         /// Toggles the terminal panel
         /// </summary>
-        private void DoToggleTerminal()
+        private async System.Threading.Tasks.Task DoToggleTerminalAsync()
         {
             if (this._terminalPanel != null)
             {
-                this._terminalPanel.Toggle();
+                await this._terminalPanel.ToggleAsync();
             }
         }
 
@@ -1999,6 +2519,43 @@ namespace Bivium.Components.Pages
         private bool IsTerminalMinimized()
         {
             return this._terminalPanel != null && this._terminalPanel.IsMinimized();
+        }
+
+        /// <summary>
+        /// Valida, persiste e applica il tema scelto nella variante Radzen
+        /// </summary>
+        /// <param name="theme">Nome del tema scelto</param>
+        private async System.Threading.Tasks.Task DoThemeChange(string theme)
+        {
+            if (!this.CanMutateWorkspace())
+                return;
+
+            string normalizedTheme;
+            if (!RadzenThemeCatalog.TryNormalize(theme, out normalizedTheme))
+                return;
+
+            if (this._jsModule == null)
+            {
+                this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260922-file-columns-v1");
+            }
+
+            string json = JsonSerializer.Serialize(normalizedTheme);
+            JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("putJsonResult", "/api/Settings/theme", json, this._attachmentId, this._leaseGeneration);
+            if (!response.Ok)
+            {
+                this._progressText = response.Status == 409 ? "Theme change rejected: this browser no longer controls the workspace." : "Unable to save theme.";
+                this.NotifyError("Theme not changed", this._progressText);
+                this.StateHasChanged();
+                return;
+            }
+
+            if (!this.CanMutateWorkspace())
+                return;
+
+            this._currentTheme = normalizedTheme;
+            this._themeService.SetTheme(normalizedTheme);
+            this.NotifySuccess("Theme changed", normalizedTheme);
+            this.StateHasChanged();
         }
 
         /// <summary>
@@ -2056,9 +2613,11 @@ namespace Bivium.Components.Pages
         /// </summary>
         private async System.Threading.Tasks.Task DoResetWorkspace()
         {
+            if (!this.CanMutateWorkspace())
+                return;
             const string message = "Reset workspace? This terminates every terminal process and clears saved panel and window state.";
-            bool confirmed = await this.JSRuntime.InvokeAsync<bool>("confirm", message);
-            if (!confirmed)
+            bool confirmed = await this.ConfirmWorkspaceActionAsync("Reset workspace", message, "Reset");
+            if (!confirmed || this._isDisposed || !this.CanMutateWorkspace())
                 return;
 
             WorkspaceClientToken token = this.GetClientToken();
@@ -2068,7 +2627,44 @@ namespace Bivium.Components.Pages
             this._panelsInitialized = false;
             this.InitializePanels();
             this._progressText = "Workspace reset completed.";
+            this.NotifySuccess("Workspace reset", this._progressText);
             this.StateHasChanged();
+        }
+
+        /// <summary>Attende una conferma nativa con ownership limitata all'apertura corrente</summary>
+        /// <param name="title">Titolo del dialog</param>
+        /// <param name="message">Messaggio da confermare</param>
+        /// <param name="confirmText">Etichetta dell'azione confermata</param>
+        /// <returns>True soltanto per conferma esplicita</returns>
+        private async System.Threading.Tasks.Task<bool> ConfirmWorkspaceActionAsync(string title, string message, string confirmText)
+        {
+            if (this._isDisposed || this._workspaceConfirmationLifetime != null)
+                return false;
+            ConfirmOptions options = new ConfirmOptions
+            {
+                Width = "min(92vw, 48rem)",
+                WrapperCssClass = "bivium-modal-layer",
+                CloseDialogOnEsc = true,
+                CloseDialogOnOverlayClick = true,
+                AutoFocusFirstElement = true,
+                OkButtonText = confirmText,
+                CancelButtonText = "Cancel"
+            };
+            using (RadzenDialogLifetime lifetime = new RadzenDialogLifetime(this._dialogService))
+            {
+                this._workspaceConfirmationLifetime = lifetime;
+                lifetime.Begin(options);
+                try
+                {
+                    object result = await this._dialogService.Confirm(message, title, options);
+                    lifetime.Complete(options);
+                    return result is bool confirmed && confirmed;
+                }
+                finally
+                {
+                    this._workspaceConfirmationLifetime = null;
+                }
+            }
         }
 
         /// <summary>
@@ -2083,7 +2679,7 @@ namespace Bivium.Components.Pages
 
             if (archivePaths.Count == 0)
             {
-                this._confirmDialog.Show("Extract", "Selected file is not a supported archive.", "OK", "");
+                this.ShowOperationWarning("Extract unavailable", "Selected file is not a supported archive.");
                 return;
             }
 
@@ -2124,10 +2720,18 @@ namespace Bivium.Components.Pages
                     this._progressText = cancellationToken.IsCancellationRequested ? "Operation cancelled, completed items kept." : "";
                     this.RefreshVisiblePanels();
 
-                    if (!result.Success && !cancellationToken.IsCancellationRequested)
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        this.NotifyWarning("Extraction cancelled", this._progressText);
+                    }
+                    else if (!result.Success)
                     {
                         this._pendingOperation = "";
-                        this._confirmDialog.Show("Error", result.ErrorMessage, "OK", "");
+                        this.ShowOperationError("Extraction failed", result.ErrorMessage);
+                    }
+                    else
+                    {
+                        this.NotifySuccess("Extraction completed", archivePaths.Count + " archive(s) processed.");
                     }
 
                     this.StateHasChanged();
@@ -2150,7 +2754,7 @@ namespace Bivium.Components.Pages
 
             if (archivePaths.Count == 0)
             {
-                this._confirmDialog.Show("Extract", "Selected file is not a supported archive.", "OK", "");
+                this.ShowOperationWarning("Extract unavailable", "Selected file is not a supported archive.");
                 return;
             }
 
@@ -2191,10 +2795,18 @@ namespace Bivium.Components.Pages
                     this._progressText = cancellationToken.IsCancellationRequested ? "Operation cancelled, completed items kept." : "";
                     this.RefreshVisiblePanels();
 
-                    if (!result.Success && !cancellationToken.IsCancellationRequested)
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        this.NotifyWarning("Extraction cancelled", this._progressText);
+                    }
+                    else if (!result.Success)
                     {
                         this._pendingOperation = "";
-                        this._confirmDialog.Show("Error", result.ErrorMessage, "OK", "");
+                        this.ShowOperationError("Extraction failed", result.ErrorMessage);
+                    }
+                    else
+                    {
+                        this.NotifySuccess("Extraction completed", archivePaths.Count + " archive(s) processed.");
                     }
 
                     this.StateHasChanged();
@@ -2605,6 +3217,7 @@ namespace Bivium.Components.Pages
             if (confirmed && this._pendingOperation == "delete" && this.CanMutateWorkspace())
             {
                 PanelState active = this.GetActivePanel();
+                int deleteCount = active.SelectedPaths.Count;
                 CancellationToken cancellationToken = this._workspaceService.GetRevocationToken(this.GetClientToken());
                 FileOperationResult result;
                 try
@@ -2635,7 +3248,11 @@ namespace Bivium.Components.Pages
                 if (!result.Success)
                 {
                     this._pendingOperation = "";
-                    this._confirmDialog.Show("Error", result.ErrorMessage, "OK", "");
+                    this.ShowOperationError("Delete failed", result.ErrorMessage);
+                }
+                else
+                {
+                    this.NotifySuccess("Delete completed", deleteCount + " item(s) deleted.");
                 }
             }
 
@@ -2648,6 +3265,12 @@ namespace Bivium.Components.Pages
         /// <param name="choice">Overwrite choice</param>
         private void HandleOverwriteDialogClose(OverwriteChoice choice)
         {
+            if (!this.CanMutateWorkspace())
+            {
+                this.ClearPendingPaste();
+                return;
+            }
+
             if (this._pendingPasteConflictPaths.Count == 0 || this._pendingPasteConflictIndex >= this._pendingPasteConflictPaths.Count)
             {
                 this.ClearPendingPaste();
@@ -2687,6 +3310,7 @@ namespace Bivium.Components.Pages
         {
             if (!string.IsNullOrEmpty(value) && this.CanMutateWorkspace())
             {
+                string pendingOperation = this._pendingOperation;
                 PanelState active = this.GetActivePanel();
                 FileOperationResult result = new FileOperationResult();
 
@@ -2716,7 +3340,7 @@ namespace Bivium.Components.Pages
                     {
                         if (active.Entries[i].Name == value)
                         {
-                            active.CursorIndex = i;
+                            this.SetPanelFocusFromIndex(active, i);
                             active.SelectedPaths.Clear();
                             active.SelectedPaths.Add(active.Entries[i].FullPath);
                             this._scrollAfterRender = true;
@@ -2728,7 +3352,12 @@ namespace Bivium.Components.Pages
                 if (!result.Success && !string.IsNullOrEmpty(result.ErrorMessage))
                 {
                     this._pendingOperation = "";
-                    this._confirmDialog.Show("Error", result.ErrorMessage, "OK", "");
+                    this.ShowOperationError("File operation failed", result.ErrorMessage);
+                }
+                else if (result.Success)
+                {
+                    string summary = pendingOperation == "rename" ? "Rename completed" : pendingOperation == "mkdir" ? "Folder created" : "File created";
+                    this.NotifySuccess(summary, value);
                 }
             }
 
@@ -2750,10 +3379,11 @@ namespace Bivium.Components.Pages
         private void HandlePermissionsDialogClose(bool saved)
         {
             // Refresh active panel to reflect permission changes
-            if (saved)
+            if (saved && this.CanMutateWorkspace())
             {
                 PanelState active = this.GetActivePanel();
                 this.LoadPanelContents(active);
+                this.NotifySuccess("Permissions updated", active.Entries.Count + " item(s) reloaded.");
             }
         }
 
@@ -2771,10 +3401,11 @@ namespace Bivium.Components.Pages
         private void HandleEditorDialogClose(bool saved)
         {
             // Refresh active panel to reflect any saved changes
-            if (saved)
+            if (saved && this.CanMutateWorkspace())
             {
                 PanelState active = this.GetActivePanel();
                 this.LoadPanelContents(active);
+                this.NotifySuccess("File saved", "The active panel has been refreshed.");
             }
         }
 
@@ -2785,9 +3416,10 @@ namespace Bivium.Components.Pages
         private void HandleUploadDialogClose(bool uploaded)
         {
             // Refresh both panels after upload
-            if (uploaded)
+            if (uploaded && this.CanMutateWorkspace())
             {
                 this.RefreshVisiblePanels();
+                this.NotifySuccess("Upload completed", "Visible panels have been refreshed.");
                 this.StateHasChanged();
             }
         }
@@ -2812,7 +3444,7 @@ namespace Bivium.Components.Pages
             string outputName = result.OutputName.Trim();
             if (!this.IsValidOutputFileName(outputName))
             {
-                this._confirmDialog.Show("Compress", "Archive name must be a file name, not a path.", "OK", "");
+                this.ShowOperationWarning("Compression not started", "Archive name must be a file name, not a path.");
                 return;
             }
 
@@ -2854,10 +3486,18 @@ namespace Bivium.Components.Pages
                     this._progressText = cancellationToken.IsCancellationRequested ? "Operation cancelled, incomplete archive kept." : "";
                     this.RefreshVisiblePanels();
 
-                    if (!opResult.Success && !cancellationToken.IsCancellationRequested)
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        this.NotifyWarning("Compression cancelled", this._progressText);
+                    }
+                    else if (!opResult.Success)
                     {
                         this._pendingOperation = "";
-                        this._confirmDialog.Show("Error", opResult.ErrorMessage, "OK", "");
+                        this.ShowOperationError("Compression failed", opResult.ErrorMessage);
+                    }
+                    else
+                    {
+                        this.NotifySuccess("Compression completed", outputName);
                     }
 
                     this.StateHasChanged();
@@ -2904,9 +3544,10 @@ namespace Bivium.Components.Pages
         /// <param name="renamed">True if files were renamed</param>
         private void HandleRenamerDialogClose(bool renamed)
         {
-            if (renamed)
+            if (renamed && this.CanMutateWorkspace())
             {
                 this.RefreshVisiblePanels();
+                this.NotifySuccess("Rename completed", "Visible panels have been refreshed.");
                 this.StateHasChanged();
             }
         }
@@ -2932,15 +3573,25 @@ namespace Bivium.Components.Pages
         #region Keyboard Handling
 
         /// <summary>
-        /// Initializes the JS keyboard capture
+        /// Registers unload presence before exposing the interactive workspace
         /// </summary>
-        private async System.Threading.Tasks.Task InitializeKeyboardCaptureAsync()
+        private async System.Threading.Tasks.Task InitializeClientInteropAsync()
         {
-            this._dotNetRef = DotNetObjectReference.Create(this);
             this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260922-file-columns-v1");
+            if (this._isDisposed)
+            {
+                await this._jsModule.DisposeAsync();
+                this._jsModule = null;
+                return;
+            }
+            this._dotNetRef = DotNetObjectReference.Create(this);
+            await this._jsModule.InvokeVoidAsync("startWorkspacePresence", this._dotNetRef, this._attachmentId, this._leaseGeneration);
+            if (this._isDisposed)
+                return;
+            this._presenceInitialized = true;
+            this.StateHasChanged();
             await this._jsModule.InvokeVoidAsync("captureKeyboard", this._dotNetRef);
             await this._jsModule.InvokeVoidAsync("initLongPress");
-            await this._jsModule.InvokeVoidAsync("startWorkspacePresence", this._dotNetRef);
         }
 
         /// <summary>
@@ -2951,7 +3602,7 @@ namespace Bivium.Components.Pages
         /// <param name="shift">Shift key held</param>
         /// <param name="alt">Alt key held</param>
         [JSInvokable]
-        public void OnKeyDown(string key, bool ctrl, bool shift, bool alt)
+        public async System.Threading.Tasks.Task OnKeyDown(string key, bool ctrl, bool shift, bool alt)
         {
             if (!this._hasActiveLease || !this._workspaceService.ValidateMutation(this.GetClientToken()))
                 return;
@@ -2967,7 +3618,7 @@ namespace Bivium.Components.Pages
             // F12: toggle terminal
             if (key == "F12" && !ctrl && !shift && !alt)
             {
-                this.DoToggleTerminal();
+                await this.DoToggleTerminalAsync();
                 this.StateHasChanged();
                 return;
             }
@@ -3271,7 +3922,7 @@ namespace Bivium.Components.Pages
 
             if (!extendRange)
             {
-                panel.CursorIndex = targetIndex;
+                this.SetPanelFocusFromIndex(panel, targetIndex);
                 panel.SelectionAnchorPath = panel.Entries[targetIndex].FullPath;
                 panel.SelectedPaths.Clear();
                 panel.SelectedPaths.Add(panel.SelectionAnchorPath);
@@ -3285,7 +3936,7 @@ namespace Bivium.Components.Pages
                 panel.SelectionAnchorPath = panel.Entries[anchorIndex].FullPath;
             }
 
-            panel.CursorIndex = targetIndex;
+            this.SetPanelFocusFromIndex(panel, targetIndex);
             panel.SelectedPaths.Clear();
             int start = Math.Min(anchorIndex, targetIndex);
             int end = Math.Max(anchorIndex, targetIndex);
@@ -3345,48 +3996,167 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void StateHasChangedAndScroll()
         {
+            this._scrollAfterRender = true;
             this.StateHasChanged();
+        }
 
-            // Scroll cursor into view after render
-            if (this._jsModule != null)
-            {
-                _ = this._jsModule.InvokeVoidAsync("scrollCursorIntoView", this.GetActivePanel().CursorIndex);
-            }
+        /// <summary>
+        /// Mostra l'esito positivo conclusivo senza sostituire il testo della status bar
+        /// </summary>
+        /// <param name="summary">Titolo sintetico</param>
+        /// <param name="detail">Dettaglio dell'esito</param>
+        private void NotifySuccess(string summary, string detail)
+        {
+            this.NotificationService.Notify(NotificationSeverity.Success, summary, detail, 4000);
+        }
+
+        /// <summary>
+        /// Mostra un warning conclusivo senza sostituire il testo della status bar
+        /// </summary>
+        /// <param name="summary">Titolo sintetico</param>
+        /// <param name="detail">Dettaglio del warning</param>
+        private void NotifyWarning(string summary, string detail)
+        {
+            this.NotificationService.Notify(NotificationSeverity.Warning, summary, detail, 6000);
+        }
+
+        /// <summary>
+        /// Mostra un errore conclusivo senza sostituire il testo della status bar
+        /// </summary>
+        /// <param name="summary">Titolo sintetico</param>
+        /// <param name="detail">Dettaglio dell'errore</param>
+        private void NotifyError(string summary, string detail)
+        {
+            this.NotificationService.Notify(NotificationSeverity.Error, summary, detail, 8000);
+        }
+
+        /// <summary>
+        /// Presenta un warning conclusivo con il canale previsto dalla variante UI
+        /// </summary>
+        /// <param name="summary">Titolo sintetico</param>
+        /// <param name="detail">Dettaglio del warning</param>
+        private void ShowOperationWarning(string summary, string detail)
+        {
+            this.NotifyWarning(summary, detail);
+        }
+
+        /// <summary>
+        /// Presenta un errore conclusivo con il canale previsto dalla variante UI
+        /// </summary>
+        /// <param name="summary">Titolo sintetico</param>
+        /// <param name="detail">Dettaglio dell'errore</param>
+        private void ShowOperationError(string summary, string detail)
+        {
+            this.NotifyError(summary, detail);
         }
 
         #endregion
 
-        #region IDisposable
+        #region IAsyncDisposable
 
         /// <summary>
         /// Cleanup JS interop references
         /// </summary>
-        public void Dispose()
+        public async ValueTask DisposeAsync()
         {
             if (this._isDisposed)
                 return;
             this._isDisposed = true;
-            this.PersistWorkspacePanels();
-            this._leaseRevocationRegistration.Dispose();
-            this._workspaceChangeSubscription?.Dispose();
-            this._workspaceChangeSubscription = null;
-            if (this._clientAttached)
+            this._workspaceConfirmationLifetime?.Dispose();
+
+            try
             {
-                this._workspaceService.DetachClient(this._attachmentId);
-                this._clientAttached = false;
-            }
-            if (this._dotNetRef != null)
-            {
+                try
+                {
+                    this.PersistWorkspacePanels();
+                }
+                finally
+                {
+                    this._leaseRevocationRegistration.Dispose();
+                    try
+                    {
+                        this._workspaceChangeSubscription?.Dispose();
+                        this._workspaceChangeSubscription = null;
+                    }
+                    finally
+                    {
+                        if (this._clientAttached)
+                        {
+                            this._workspaceService.DetachClient(this._attachmentId);
+                            this._clientAttached = false;
+                        }
+                    }
+                }
+
                 if (this._jsModule != null)
-                    _ = this._jsModule.InvokeVoidAsync("stopWorkspacePresence");
-                this._dotNetRef.Dispose();
+                {
+                    try
+                    {
+                        try
+                        {
+                            await this._jsModule.InvokeVoidAsync("stopWorkspacePresence");
+                        }
+                        finally
+                        {
+                            try
+                            {
+                                await this._jsModule.InvokeVoidAsync("disposeKeyboardCapture");
+                            }
+                            finally
+                            {
+                                try
+                                {
+                                    await this._jsModule.InvokeVoidAsync("disposeLongPress");
+                                }
+                                finally
+                                {
+                                    await this._jsModule.DisposeAsync();
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException)
+                    {
+                    }
+                }
             }
-            if (this._settingsChangeSubscription != null)
+            finally
             {
-                this._settingsChangeSubscription.Dispose();
+                if (this._dotNetRef != null)
+                {
+                    this._dotNetRef.Dispose();
+                    this._dotNetRef = null;
+                }
+
+                if (this._settingsChangeSubscription != null)
+                {
+                    this._settingsChangeSubscription.Dispose();
+                    this._settingsChangeSubscription = null;
+                }
             }
         }
 
         #endregion
+
+        /// <summary>
+        /// Distingue la navigazione ordinaria dai trasferimenti tra gli stack della cronologia
+        /// </summary>
+        private enum PanelNavigationKind
+        {
+            /// <summary>
+            /// Nuova destinazione
+            /// </summary>
+            Ordinary,
+
+            /// <summary>
+            /// Destinazione precedente
+            /// </summary>
+            Back,
+
+            /// <summary>
+            /// Destinazione successiva
+            /// </summary>
+            Forward
+        }
     }
 }

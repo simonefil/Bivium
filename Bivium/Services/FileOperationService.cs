@@ -1,4 +1,5 @@
 using Bivium.Models;
+using System.Runtime.InteropServices;
 
 namespace Bivium.Services
 {
@@ -7,6 +8,30 @@ namespace Bivium.Services
     /// </summary>
     public class FileOperationService : IFileOperationService
     {
+        #region Constants
+
+        /// <summary>
+        /// Windows share flags used while reading a volume identity
+        /// </summary>
+        private const uint WINDOWS_FILE_SHARE_ALL = 0x00000001 | 0x00000002 | 0x00000004;
+
+        /// <summary>
+        /// Opens an existing Windows filesystem entry
+        /// </summary>
+        private const uint WINDOWS_OPEN_EXISTING = 3;
+
+        /// <summary>
+        /// Allows CreateFile to open directories and follows reparse points by default
+        /// </summary>
+        private const uint WINDOWS_FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
+
+        /// <summary>
+        /// GetFileInformationByHandleEx class for FILE_ID_INFO
+        /// </summary>
+        private const int WINDOWS_FILE_ID_INFO_CLASS = 18;
+
+        #endregion
+
         #region Class Variables
 
         /// <summary>
@@ -223,116 +248,8 @@ namespace Bivium.Services
         /// <returns>Operation result</returns>
         public FileOperationResult MoveEntries(List<string> sourcePaths, string destinationDir, List<string> overwritePaths = null)
         {
-            int processed = 0;
-            int failed = 0;
-            string lastError = "";
-
-            for (int i = 0; i < sourcePaths.Count; i++)
-            {
-                string source = sourcePaths[i];
-
-                if (!this._securityService.ArePathsSafe(source, destinationDir))
-                {
-                    failed++;
-                    lastError = "Invalid path: " + source;
-                    continue;
-                }
-
-                try
-                {
-                    bool overwrite = this.IsOverwriteRequested(source, overwritePaths);
-                    string destName = Path.GetFileName(source);
-                    string destPath = Path.Combine(destinationDir, destName);
-                    string validationError = this.GetTransferValidationError(source, destPath, true);
-                    if (!string.IsNullOrEmpty(validationError))
-                    {
-                        failed++;
-                        lastError = validationError;
-                        continue;
-                    }
-
-                    if (Directory.Exists(source))
-                    {
-                        if (File.Exists(destPath))
-                        {
-                            failed++;
-                            lastError = "Cannot overwrite file with directory: " + destPath;
-                            continue;
-                        }
-
-                        if (Directory.Exists(destPath) && !overwrite)
-                        {
-                            failed++;
-                            lastError = "Destination already exists: " + destPath;
-                            continue;
-                        }
-
-                        if (Directory.Exists(destPath))
-                        {
-                            this.CopyDirectoryRecursive(source, destPath);
-                            Directory.Delete(source, true);
-                        }
-                        else
-                        {
-                            Directory.Move(source, destPath);
-                        }
-
-                        processed++;
-                    }
-                    else if (File.Exists(source))
-                    {
-                        if (Directory.Exists(destPath))
-                        {
-                            failed++;
-                            lastError = "Cannot overwrite directory with file: " + destPath;
-                            continue;
-                        }
-
-                        if (File.Exists(destPath) && !overwrite)
-                        {
-                            failed++;
-                            lastError = "Destination already exists: " + destPath;
-                            continue;
-                        }
-
-                        File.Move(source, destPath, overwrite);
-                        processed++;
-                    }
-                    else
-                    {
-                        failed++;
-                        lastError = "Source not found: " + source;
-                    }
-                }
-                catch (UnauthorizedAccessException ex)
-                {
-                    failed++;
-                    lastError = "Access denied: " + ex.Message;
-                }
-                catch (IOException ex)
-                {
-                    // Check whether the move succeeded despite the exception
-                    string destName2 = Path.GetFileName(source);
-                    string destPath2 = Path.Combine(destinationDir, destName2);
-                    bool movedAnyway = (File.Exists(destPath2) || Directory.Exists(destPath2)) && !File.Exists(source) && !Directory.Exists(source);
-
-                    if (movedAnyway)
-                    {
-                        processed++;
-                    }
-                    else
-                    {
-                        failed++;
-                        lastError = "I/O error: " + ex.Message;
-                    }
-                }
-            }
-
-            FileOperationResult result = new FileOperationResult();
-            result.Success = failed == 0;
-            result.FilesProcessed = processed;
-            result.FilesFailed = failed;
-            result.ErrorMessage = lastError;
+            Action<int, int, string> ignoreProgress = (current, total, name) => { };
+            FileOperationResult result = this.MoveEntriesWithProgress(sourcePaths, destinationDir, ignoreProgress, overwritePaths);
             return result;
         }
 
@@ -374,6 +291,59 @@ namespace Bivium.Services
                     {
                         failed++;
                         lastError = validationError;
+                        continue;
+                    }
+
+                    bool sourceIsDirectory = Directory.Exists(source);
+                    bool sourceIsFile = File.Exists(source);
+                    if (sourceIsDirectory && File.Exists(destPath))
+                    {
+                        failed++;
+                        lastError = "Cannot overwrite file with directory: " + destPath;
+                        continue;
+                    }
+
+                    if (sourceIsDirectory && Directory.Exists(destPath) && !overwrite)
+                    {
+                        failed++;
+                        lastError = "Destination already exists: " + destPath;
+                        continue;
+                    }
+
+                    if (sourceIsFile && Directory.Exists(destPath))
+                    {
+                        failed++;
+                        lastError = "Cannot overwrite directory with file: " + destPath;
+                        continue;
+                    }
+
+                    if (sourceIsFile && File.Exists(destPath) && !overwrite)
+                    {
+                        failed++;
+                        lastError = "Destination already exists: " + destPath;
+                        continue;
+                    }
+
+                    if (!this.IsSamePhysicalVolume(source, destinationDir))
+                    {
+                        Action<int, int, string> ignoreCopyProgress = (current, total, name) => { };
+                        FileOperationResult copyResult = this.CopyEntriesWithProgress(new List<string> { source }, destinationDir, ignoreCopyProgress, overwritePaths, cancellationToken);
+                        if (!copyResult.Success)
+                        {
+                            failed++;
+                            lastError = copyResult.ErrorMessage;
+                            continue;
+                        }
+
+                        // Source removal begins only after a complete, metadata-preserving copy
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (Directory.Exists(source))
+                            Directory.Delete(source, true);
+                        else
+                            File.Delete(source);
+
+                        processed++;
+                        onProgress(i + 1, totalEntries, destName);
                         continue;
                     }
 
@@ -458,6 +428,102 @@ namespace Bivium.Services
                         lastError = "I/O error: " + ex.Message;
                     }
                 }
+            }
+
+            FileOperationResult result = new FileOperationResult();
+            result.Success = failed == 0;
+            result.FilesProcessed = processed;
+            result.FilesFailed = failed;
+            result.ErrorMessage = lastError;
+            return result;
+        }
+
+        /// <summary>
+        /// Resolves the Explorer-style default mode from physical filesystem identities
+        /// </summary>
+        /// <param name="sourcePath">Existing server-side source path</param>
+        /// <param name="destinationDir">Existing server-side destination directory</param>
+        /// <returns>Move on the same physical volume; Copy on different or unresolvable volumes</returns>
+        public FileTransferMode ResolveDefaultTransferMode(string sourcePath, string destinationDir)
+        {
+            FileTransferMode result = FileTransferMode.Copy;
+
+            if (this._securityService.ArePathsSafe(sourcePath, destinationDir)
+                && (File.Exists(sourcePath) || Directory.Exists(sourcePath))
+                && Directory.Exists(destinationDir)
+                && this.IsSamePhysicalVolume(sourcePath, destinationDir))
+            {
+                result = FileTransferMode.Move;
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Transfers mixed entries through the existing copy and move implementations
+        /// </summary>
+        /// <param name="entries">Server-side source entries</param>
+        /// <param name="destinationDir">Existing destination directory</param>
+        /// <param name="onProgress">Callback invoked after each completed entry</param>
+        /// <param name="modeOverride">Mode forced for every entry, or null to use each entry/default</param>
+        /// <param name="overwritePaths">Source paths approved for overwrite</param>
+        /// <param name="cancellationToken">Cancellation token for lease revocation</param>
+        /// <returns>Aggregated operation result</returns>
+        public FileOperationResult TransferEntriesWithProgress(List<FileTransferEntry> entries, string destinationDir, Action<int, int, string> onProgress, FileTransferMode? modeOverride = null, List<string> overwritePaths = null, CancellationToken cancellationToken = default)
+        {
+            int processed = 0;
+            int failed = 0;
+            string lastError = "";
+            Action<int, int, string> ignoreInnerProgress = (current, total, name) => { };
+
+            for (int i = 0; i < entries.Count; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                FileTransferEntry entry = entries[i];
+                if (entry == null || string.IsNullOrWhiteSpace(entry.SourcePath))
+                {
+                    failed++;
+                    lastError = "Invalid transfer entry";
+                    continue;
+                }
+
+                string sourcePath = entry.SourcePath;
+                if (!this._securityService.ArePathsSafe(sourcePath, destinationDir) || !Directory.Exists(destinationDir))
+                {
+                    failed++;
+                    lastError = "Invalid path: " + sourcePath;
+                    continue;
+                }
+
+                if (!File.Exists(sourcePath) && !Directory.Exists(sourcePath))
+                {
+                    failed++;
+                    lastError = "Source not found: " + sourcePath;
+                    continue;
+                }
+
+                FileTransferMode mode = modeOverride ?? entry.Mode ?? this.ResolveDefaultTransferMode(sourcePath, destinationDir);
+                string sourceParent = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(Path.GetFullPath(sourcePath))) ?? "";
+                if (mode == FileTransferMode.Move && this.AreSamePath(sourceParent, Path.GetFullPath(destinationDir)))
+                {
+                    onProgress?.Invoke(i + 1, entries.Count, Path.GetFileName(sourcePath));
+                    continue;
+                }
+
+                List<string> sourcePaths = new List<string> { sourcePath };
+                FileOperationResult itemResult = mode == FileTransferMode.Copy
+                    ? this.CopyEntriesWithProgress(sourcePaths, destinationDir, ignoreInnerProgress, overwritePaths, cancellationToken)
+                    : this.MoveEntriesWithProgress(sourcePaths, destinationDir, ignoreInnerProgress, overwritePaths, cancellationToken);
+
+                processed += itemResult.FilesProcessed;
+                failed += itemResult.FilesFailed;
+                if (!itemResult.Success)
+                {
+                    lastError = itemResult.ErrorMessage;
+                    continue;
+                }
+
+                onProgress?.Invoke(i + 1, entries.Count, Path.GetFileName(sourcePath));
             }
 
             FileOperationResult result = new FileOperationResult();
@@ -834,6 +900,120 @@ namespace Bivium.Services
         #region Private Methods
 
         /// <summary>
+        /// Compares physical volume identities without relying on path roots
+        /// </summary>
+        /// <param name="sourcePath">Existing source path</param>
+        /// <param name="destinationDir">Existing destination directory</param>
+        /// <returns>True only when both native identities were resolved and match</returns>
+        private bool IsSamePhysicalVolume(string sourcePath, string destinationDir)
+        {
+            ulong sourceVolume;
+            ulong destinationVolume;
+            bool result = this.TryGetPhysicalVolumeId(sourcePath, out sourceVolume)
+                && this.TryGetPhysicalVolumeId(destinationDir, out destinationVolume)
+                && sourceVolume == destinationVolume;
+            return result;
+        }
+
+        /// <summary>
+        /// Gets the platform-native physical volume identity
+        /// </summary>
+        /// <param name="path">Existing file or directory path</param>
+        /// <param name="volumeId">Resolved volume identifier</param>
+        /// <returns>True when the native lookup succeeded</returns>
+        private bool TryGetPhysicalVolumeId(string path, out ulong volumeId)
+        {
+            bool result;
+            volumeId = 0;
+
+            if (OperatingSystem.IsWindows())
+                result = this.TryGetWindowsVolumeId(path, out volumeId);
+            else if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+                result = this.TryGetUnixVolumeId(path, out volumeId);
+            else
+                result = false;
+
+            return result;
+        }
+
+        /// <summary>
+        /// Reads FILE_ID_INFO from an entry handle so mounted volumes are distinguished physically
+        /// </summary>
+        /// <param name="path">Existing file or directory path</param>
+        /// <param name="volumeId">Windows volume serial number</param>
+        /// <returns>True when the handle and metadata lookup succeeded</returns>
+        private bool TryGetWindowsVolumeId(string path, out ulong volumeId)
+        {
+            bool result = false;
+            IntPtr handle = new IntPtr(-1);
+            volumeId = 0;
+
+            try
+            {
+                handle = CreateFile(path, 0, WINDOWS_FILE_SHARE_ALL, IntPtr.Zero, WINDOWS_OPEN_EXISTING, WINDOWS_FILE_FLAG_BACKUP_SEMANTICS, IntPtr.Zero);
+                if (handle.ToInt64() != -1)
+                {
+                    WindowsFileIdInfo fileIdInfo;
+                    if (GetFileInformationByHandleEx(handle, WINDOWS_FILE_ID_INFO_CLASS, out fileIdInfo, (uint)Marshal.SizeOf<WindowsFileIdInfo>()))
+                    {
+                        volumeId = fileIdInfo.VolumeSerialNumber;
+                        result = true;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Native lookup failures conservatively classify the transfer as cross-volume
+                result = false;
+            }
+            finally
+            {
+                if (handle.ToInt64() != -1)
+                    CloseHandle(handle);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Reads stat.st_dev, which identifies the mounted filesystem containing an entry
+        /// </summary>
+        /// <param name="path">Existing file or directory path</param>
+        /// <param name="volumeId">Unix device identifier</param>
+        /// <returns>True when stat succeeded</returns>
+        private bool TryGetUnixVolumeId(string path, out ulong volumeId)
+        {
+            bool result = false;
+            IntPtr statBuffer = IntPtr.Zero;
+            volumeId = 0;
+
+            try
+            {
+                // 512 bytes exceeds the supported macOS and Linux stat structures
+                statBuffer = Marshal.AllocHGlobal(512);
+                if (Stat(path, statBuffer) == 0)
+                {
+                    volumeId = OperatingSystem.IsMacOS()
+                        ? unchecked((uint)Marshal.ReadInt32(statBuffer))
+                        : unchecked((ulong)Marshal.ReadInt64(statBuffer));
+                    result = true;
+                }
+            }
+            catch (Exception)
+            {
+                // Native lookup failures conservatively classify the transfer as cross-volume
+                result = false;
+            }
+            finally
+            {
+                if (statBuffer != IntPtr.Zero)
+                    Marshal.FreeHGlobal(statBuffer);
+            }
+
+            return result;
+        }
+
+        /// <summary>
         /// Builds a unique destination path for copy operations
         /// </summary>
         /// <param name="sourcePath">Source file or directory path</param>
@@ -1158,6 +1338,58 @@ namespace Bivium.Services
 
             cancellationToken.ThrowIfCancellationRequested();
             Directory.Delete(directoryPath, false);
+        }
+
+        /// <summary>
+        /// Opens an existing Windows filesystem entry
+        /// </summary>
+        [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr CreateFile(string fileName, uint desiredAccess, uint shareMode, IntPtr securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
+
+        /// <summary>
+        /// Reads extended metadata from an open Windows filesystem handle
+        /// </summary>
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetFileInformationByHandleEx(IntPtr fileHandle, int fileInformationClass, out WindowsFileIdInfo fileInformation, uint bufferSize);
+
+        /// <summary>
+        /// Closes a native Windows handle
+        /// </summary>
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseHandle(IntPtr handle);
+
+        /// <summary>
+        /// Reads Unix filesystem metadata while following symbolic links
+        /// </summary>
+        [DllImport("libc", EntryPoint = "stat", SetLastError = true)]
+        private static extern int Stat(string path, IntPtr statBuffer);
+
+        #endregion
+
+        #region Structures
+
+        /// <summary>
+        /// Native Windows FILE_ID_INFO layout
+        /// </summary>
+        [StructLayout(LayoutKind.Sequential)]
+        private struct WindowsFileIdInfo
+        {
+            /// <summary>
+            /// Serial number of the volume containing the entry
+            /// </summary>
+            public ulong VolumeSerialNumber;
+
+            /// <summary>
+            /// Low half of the 128-bit file identifier
+            /// </summary>
+            public ulong FileIdLow;
+
+            /// <summary>
+            /// High half of the 128-bit file identifier
+            /// </summary>
+            public ulong FileIdHigh;
         }
 
         #endregion

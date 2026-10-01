@@ -1,126 +1,75 @@
+@namespace Bivium.Components.Shared
 @inject IJSRuntime JSRuntime
 
 @if (this._isVisible)
 {
-    <div class="context-menu-overlay" @onclick="this.HandleCancel">
-        <div class="context-menu" style="position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 72ch; outline: none;"
-             tabindex="0"
-             @ref="this._dialogElement"
-             @onclick:stopPropagation="true">
-            <div style="background-color: var(--background1); padding: 0 1ch; border-bottom: 1px solid var(--foreground2);">
-                Default Creation Permissions
-            </div>
-            <div style="padding: 1lh 1ch;">
-                <div style="margin-bottom: 1lh;">
-                    <label><input type="checkbox" @bind="this._useSystemDefaults" /> Use system defaults</label>
-                </div>
-
-                <table style="width: 100%;">
-                    <tr>
-                        <td style="width: 12ch; color: var(--foreground2);">Owner:</td>
-                        <td><input type="text" @bind="this._model.Owner" disabled="@this._useSystemDefaults" style="width: 28ch; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2); padding: 0 0.5ch;" /></td>
-                    </tr>
+    <PersistentModalShell Label="Default Creation Permissions" OnCancel="this.HandleCancel" CanClose="@(!this._isSaving)" OnContentRendered="this.HandleContentRenderedAsync">
+        <RadzenStack class="bivium-radzen-modal" Gap="1rem" Style="width:100%;max-height:calc(100dvh - 9rem);box-sizing:border-box;">
+            <fieldset disabled="@this._isSaving" inert="@this._isSaving" style="border:0;margin:0;padding:0;min-width:0;">
+            <RadzenStack Gap="1rem">
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem"><RadzenCheckBox Name="creation-system-defaults" AriaLabel="Use system defaults" @bind-Value="this._useSystemDefaults" /><RadzenLabel Component="creation-system-defaults" Text="Use system defaults" /></RadzenStack>
+                <RadzenRow>
+                    <RadzenColumn Size="12" SizeMD="6"><RadzenFormField Text="Owner" Component="creation-owner" Style="width:100%;"><RadzenTextBox id="creation-owner" Name="creation-owner" @bind-Value="this._model.Owner" Immediate="true" Disabled="@this._useSystemDefaults" Style="width:100%;" /></RadzenFormField></RadzenColumn>
                     @if (this._isUnix)
                     {
-                        <tr>
-                            <td style="color: var(--foreground2);">Group:</td>
-                            <td><input type="text" @bind="this._model.Group" disabled="@this._useSystemDefaults" style="width: 28ch; background-color: var(--background1); color: var(--foreground0); border: 1px solid var(--foreground2); padding: 0 0.5ch;" /></td>
-                        </tr>
+                        <RadzenColumn Size="12" SizeMD="6"><RadzenFormField Text="Group" Component="creation-group" Style="width:100%;"><RadzenTextBox id="creation-group" Name="creation-group" @bind-Value="this._model.Group" Immediate="true" Disabled="@this._useSystemDefaults" Style="width:100%;" /></RadzenFormField></RadzenColumn>
                     }
-                </table>
-
+                </RadzenRow>
                 @if (this._isUnix)
                 {
-                    <div style="display: flex; gap: 3ch; margin-top: 1lh;">
-                        <div style="flex: 1;">
-                            <div style="color: var(--foreground2); margin-bottom: 0.5lh;">Files (@this.GetOctalString(this._model.FilePermissions))</div>
-                            <table style="width: 100%;">
-                                <tr>
-                                    <td style="width: 10ch;"></td>
-                                    <td style="width: 6ch; text-align: center; color: var(--foreground2);">Read</td>
-                                    <td style="width: 6ch; text-align: center; color: var(--foreground2);">Write</td>
-                                    <td style="width: 6ch; text-align: center; color: var(--foreground2);">Exec</td>
-                                </tr>
-                                <tr>
-                                    <td style="color: var(--foreground2);">Owner:</td>
-                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.FilePermissions.OwnerRead" disabled="@this._useSystemDefaults" /></td>
-                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.FilePermissions.OwnerWrite" disabled="@this._useSystemDefaults" /></td>
-                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.FilePermissions.OwnerExecute" disabled="@this._useSystemDefaults" /></td>
-                                </tr>
-                                <tr>
-                                    <td style="color: var(--foreground2);">Group:</td>
-                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.FilePermissions.GroupRead" disabled="@this._useSystemDefaults" /></td>
-                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.FilePermissions.GroupWrite" disabled="@this._useSystemDefaults" /></td>
-                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.FilePermissions.GroupExecute" disabled="@this._useSystemDefaults" /></td>
-                                </tr>
-                                <tr>
-                                    <td style="color: var(--foreground2);">Others:</td>
-                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.FilePermissions.OthersRead" disabled="@this._useSystemDefaults" /></td>
-                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.FilePermissions.OthersWrite" disabled="@this._useSystemDefaults" /></td>
-                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.FilePermissions.OthersExecute" disabled="@this._useSystemDefaults" /></td>
-                                </tr>
-                            </table>
-                        </div>
-                        <div style="flex: 1;">
-                            <div style="color: var(--foreground2); margin-bottom: 0.5lh;">Folders (@this.GetOctalString(this._model.DirectoryPermissions))</div>
-                            <table style="width: 100%;">
-                                <tr>
-                                    <td style="width: 10ch;"></td>
-                                    <td style="width: 6ch; text-align: center; color: var(--foreground2);">Read</td>
-                                    <td style="width: 6ch; text-align: center; color: var(--foreground2);">Write</td>
-                                    <td style="width: 6ch; text-align: center; color: var(--foreground2);">Exec</td>
-                                </tr>
-                                <tr>
-                                    <td style="color: var(--foreground2);">Owner:</td>
-                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.DirectoryPermissions.OwnerRead" disabled="@this._useSystemDefaults" /></td>
-                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.DirectoryPermissions.OwnerWrite" disabled="@this._useSystemDefaults" /></td>
-                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.DirectoryPermissions.OwnerExecute" disabled="@this._useSystemDefaults" /></td>
-                                </tr>
-                                <tr>
-                                    <td style="color: var(--foreground2);">Group:</td>
-                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.DirectoryPermissions.GroupRead" disabled="@this._useSystemDefaults" /></td>
-                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.DirectoryPermissions.GroupWrite" disabled="@this._useSystemDefaults" /></td>
-                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.DirectoryPermissions.GroupExecute" disabled="@this._useSystemDefaults" /></td>
-                                </tr>
-                                <tr>
-                                    <td style="color: var(--foreground2);">Others:</td>
-                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.DirectoryPermissions.OthersRead" disabled="@this._useSystemDefaults" /></td>
-                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.DirectoryPermissions.OthersWrite" disabled="@this._useSystemDefaults" /></td>
-                                    <td style="text-align: center;"><input type="checkbox" @bind="this._model.DirectoryPermissions.OthersExecute" disabled="@this._useSystemDefaults" /></td>
-                                </tr>
-                            </table>
-                        </div>
-                    </div>
+                    <RadzenRow>
+                        <RadzenColumn Size="12" SizeMD="6">
+                            <RadzenText TextStyle="TextStyle.Subtitle1" Text="@("Files (" + this.GetOctalString(this._model.FilePermissions) + ")")" />
+                            <RadzenTable class="bivium-radzen-permissions" aria-label="File creation permissions">
+                                <RadzenTableHeader>
+                                    <RadzenTableHeaderRow><RadzenTableHeaderCell scope="col">Identity</RadzenTableHeaderCell><RadzenTableHeaderCell scope="col">Read</RadzenTableHeaderCell><RadzenTableHeaderCell scope="col">Write</RadzenTableHeaderCell><RadzenTableHeaderCell scope="col">Execute</RadzenTableHeaderCell></RadzenTableHeaderRow>
+                                </RadzenTableHeader>
+                                <RadzenTableBody>
+                                    <RadzenTableRow><RadzenTableHeaderCell scope="row">Owner</RadzenTableHeaderCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.FilePermissions.OwnerRead" Disabled="@this._useSystemDefaults" AriaLabel="Files owner read" /></RadzenTableCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.FilePermissions.OwnerWrite" Disabled="@this._useSystemDefaults" AriaLabel="Files owner write" /></RadzenTableCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.FilePermissions.OwnerExecute" Disabled="@this._useSystemDefaults" AriaLabel="Files owner execute" /></RadzenTableCell></RadzenTableRow>
+                                    <RadzenTableRow><RadzenTableHeaderCell scope="row">Group</RadzenTableHeaderCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.FilePermissions.GroupRead" Disabled="@this._useSystemDefaults" AriaLabel="Files group read" /></RadzenTableCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.FilePermissions.GroupWrite" Disabled="@this._useSystemDefaults" AriaLabel="Files group write" /></RadzenTableCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.FilePermissions.GroupExecute" Disabled="@this._useSystemDefaults" AriaLabel="Files group execute" /></RadzenTableCell></RadzenTableRow>
+                                    <RadzenTableRow><RadzenTableHeaderCell scope="row">Others</RadzenTableHeaderCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.FilePermissions.OthersRead" Disabled="@this._useSystemDefaults" AriaLabel="Files others read" /></RadzenTableCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.FilePermissions.OthersWrite" Disabled="@this._useSystemDefaults" AriaLabel="Files others write" /></RadzenTableCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.FilePermissions.OthersExecute" Disabled="@this._useSystemDefaults" AriaLabel="Files others execute" /></RadzenTableCell></RadzenTableRow>
+                                </RadzenTableBody>
+                            </RadzenTable>
+                        </RadzenColumn>
+                        <RadzenColumn Size="12" SizeMD="6">
+                            <RadzenText TextStyle="TextStyle.Subtitle1" Text="@("Folders (" + this.GetOctalString(this._model.DirectoryPermissions) + ")")" />
+                            <RadzenTable class="bivium-radzen-permissions" aria-label="Folder creation permissions">
+                                <RadzenTableHeader>
+                                    <RadzenTableHeaderRow><RadzenTableHeaderCell scope="col">Identity</RadzenTableHeaderCell><RadzenTableHeaderCell scope="col">Read</RadzenTableHeaderCell><RadzenTableHeaderCell scope="col">Write</RadzenTableHeaderCell><RadzenTableHeaderCell scope="col">Execute</RadzenTableHeaderCell></RadzenTableHeaderRow>
+                                </RadzenTableHeader>
+                                <RadzenTableBody>
+                                    <RadzenTableRow><RadzenTableHeaderCell scope="row">Owner</RadzenTableHeaderCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.DirectoryPermissions.OwnerRead" Disabled="@this._useSystemDefaults" AriaLabel="Folders owner read" /></RadzenTableCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.DirectoryPermissions.OwnerWrite" Disabled="@this._useSystemDefaults" AriaLabel="Folders owner write" /></RadzenTableCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.DirectoryPermissions.OwnerExecute" Disabled="@this._useSystemDefaults" AriaLabel="Folders owner execute" /></RadzenTableCell></RadzenTableRow>
+                                    <RadzenTableRow><RadzenTableHeaderCell scope="row">Group</RadzenTableHeaderCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.DirectoryPermissions.GroupRead" Disabled="@this._useSystemDefaults" AriaLabel="Folders group read" /></RadzenTableCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.DirectoryPermissions.GroupWrite" Disabled="@this._useSystemDefaults" AriaLabel="Folders group write" /></RadzenTableCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.DirectoryPermissions.GroupExecute" Disabled="@this._useSystemDefaults" AriaLabel="Folders group execute" /></RadzenTableCell></RadzenTableRow>
+                                    <RadzenTableRow><RadzenTableHeaderCell scope="row">Others</RadzenTableHeaderCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.DirectoryPermissions.OthersRead" Disabled="@this._useSystemDefaults" AriaLabel="Folders others read" /></RadzenTableCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.DirectoryPermissions.OthersWrite" Disabled="@this._useSystemDefaults" AriaLabel="Folders others write" /></RadzenTableCell><RadzenTableCell><RadzenCheckBox @bind-Value="this._model.DirectoryPermissions.OthersExecute" Disabled="@this._useSystemDefaults" AriaLabel="Folders others execute" /></RadzenTableCell></RadzenTableRow>
+                                </RadzenTableBody>
+                            </RadzenTable>
+                        </RadzenColumn>
+                    </RadzenRow>
                 }
                 else
                 {
-                    <div style="display: flex; gap: 4ch; margin-top: 1lh;">
-                        <div style="flex: 1;">
-                            <div style="color: var(--foreground2); margin-bottom: 0.5lh;">Files</div>
-                            <div><label><input type="checkbox" @bind="this._model.FilePermissions.WinReadOnly" disabled="@this._useSystemDefaults" /> Read-only</label></div>
-                            <div><label><input type="checkbox" @bind="this._model.FilePermissions.WinHidden" disabled="@this._useSystemDefaults" /> Hidden</label></div>
-                            <div><label><input type="checkbox" @bind="this._model.FilePermissions.WinSystem" disabled="@this._useSystemDefaults" /> System</label></div>
-                            <div><label><input type="checkbox" @bind="this._model.FilePermissions.WinArchive" disabled="@this._useSystemDefaults" /> Archive</label></div>
-                        </div>
-                        <div style="flex: 1;">
-                            <div style="color: var(--foreground2); margin-bottom: 0.5lh;">Folders</div>
-                            <div><label><input type="checkbox" @bind="this._model.DirectoryPermissions.WinReadOnly" disabled="@this._useSystemDefaults" /> Read-only</label></div>
-                            <div><label><input type="checkbox" @bind="this._model.DirectoryPermissions.WinHidden" disabled="@this._useSystemDefaults" /> Hidden</label></div>
-                            <div><label><input type="checkbox" @bind="this._model.DirectoryPermissions.WinSystem" disabled="@this._useSystemDefaults" /> System</label></div>
-                            <div><label><input type="checkbox" @bind="this._model.DirectoryPermissions.WinArchive" disabled="@this._useSystemDefaults" /> Archive</label></div>
-                        </div>
-                    </div>
+                    <RadzenRow>
+                        <RadzenColumn Size="12" SizeMD="6"><RadzenFieldset Text="Files"><RadzenStack Gap="0.5rem">
+                            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center"><RadzenCheckBox Name="creation-file-readonly" AriaLabel="Files read-only" @bind-Value="this._model.FilePermissions.WinReadOnly" Disabled="@this._useSystemDefaults" /><RadzenLabel Component="creation-file-readonly" Text="Read-only" /></RadzenStack>
+                            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center"><RadzenCheckBox Name="creation-file-hidden" AriaLabel="Files hidden" @bind-Value="this._model.FilePermissions.WinHidden" Disabled="@this._useSystemDefaults" /><RadzenLabel Component="creation-file-hidden" Text="Hidden" /></RadzenStack>
+                            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center"><RadzenCheckBox Name="creation-file-system" AriaLabel="Files system" @bind-Value="this._model.FilePermissions.WinSystem" Disabled="@this._useSystemDefaults" /><RadzenLabel Component="creation-file-system" Text="System" /></RadzenStack>
+                            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center"><RadzenCheckBox Name="creation-file-archive" AriaLabel="Files archive" @bind-Value="this._model.FilePermissions.WinArchive" Disabled="@this._useSystemDefaults" /><RadzenLabel Component="creation-file-archive" Text="Archive" /></RadzenStack>
+                        </RadzenStack></RadzenFieldset></RadzenColumn>
+                        <RadzenColumn Size="12" SizeMD="6"><RadzenFieldset Text="Folders"><RadzenStack Gap="0.5rem">
+                            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center"><RadzenCheckBox Name="creation-folder-readonly" AriaLabel="Folders read-only" @bind-Value="this._model.DirectoryPermissions.WinReadOnly" Disabled="@this._useSystemDefaults" /><RadzenLabel Component="creation-folder-readonly" Text="Read-only" /></RadzenStack>
+                            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center"><RadzenCheckBox Name="creation-folder-hidden" AriaLabel="Folders hidden" @bind-Value="this._model.DirectoryPermissions.WinHidden" Disabled="@this._useSystemDefaults" /><RadzenLabel Component="creation-folder-hidden" Text="Hidden" /></RadzenStack>
+                            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center"><RadzenCheckBox Name="creation-folder-system" AriaLabel="Folders system" @bind-Value="this._model.DirectoryPermissions.WinSystem" Disabled="@this._useSystemDefaults" /><RadzenLabel Component="creation-folder-system" Text="System" /></RadzenStack>
+                            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center"><RadzenCheckBox Name="creation-folder-archive" AriaLabel="Folders archive" @bind-Value="this._model.DirectoryPermissions.WinArchive" Disabled="@this._useSystemDefaults" /><RadzenLabel Component="creation-folder-archive" Text="Archive" /></RadzenStack>
+                        </RadzenStack></RadzenFieldset></RadzenColumn>
+                    </RadzenRow>
                 }
-
                 @if (!string.IsNullOrEmpty(this._statusText))
                 {
-                    <div style="margin-top: 1lh; color: var(--foreground2);">@this._statusText</div>
+                    <RadzenAlert AlertStyle="AlertStyle.Danger">@this._statusText</RadzenAlert>
                 }
-            </div>
-            <div style="display: flex; justify-content: flex-end; gap: 2ch; padding: 0 1ch 1lh 1ch;">
-                <button @onclick="this.HandleCancel">Cancel</button>
-                <button @onclick="this.HandleSave">Save</button>
-            </div>
-        </div>
-    </div>
+                <div class="bivium-radzen-dialog-actions"><RadzenButton @ref="this._cancelButton" Text="Cancel" Disabled="@this._isSaving" ButtonStyle="ButtonStyle.Light" Click="this.HandleCancel" /><RadzenButton Text="Save" Icon="save" IsBusy="@this._isSaving" ButtonStyle="ButtonStyle.Primary" Click="this.HandleSaveAsync" /></div>
+            </RadzenStack>
+            </fieldset>
+        </RadzenStack>
+    </PersistentModalShell>
 }

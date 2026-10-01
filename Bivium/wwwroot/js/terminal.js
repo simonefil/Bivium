@@ -1,6 +1,7 @@
 // Bivium terminal renderer - remote paged history with bounded DOM
 
 import { invokeCircuitMethod, isCircuitConnected, registerCircuitParticipant } from './connection.js';
+import { isBlockingModalOpen } from './interop.js';
 
 const terminals = new Map();
 
@@ -1137,9 +1138,9 @@ export function fitTerminal(sessionId) {
 
 export function focusTerminal(sessionId) {
     const state = getState(sessionId);
-    if (!terminalPageVisible || !state || state.disposed) return;
+    if (isBlockingModalOpen() || !terminalPageVisible || !state || state.disposed) return;
     requestAnimationFrame(function () {
-        if (!terminalPageVisible || state.disposed || !isRendererVisible(state)) return;
+        if (isBlockingModalOpen() || !terminalPageVisible || state.disposed || !isRendererVisible(state)) return;
         notifyResize(state);
         scheduleRender(state);
         if (state.input) {

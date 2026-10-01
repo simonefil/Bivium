@@ -1,33 +1,15 @@
-/* Directory tree styles */
-.dir-tree {
-    padding: 0;
-    font-size: var(--font-size);
+/* Official Radzen tree tokens keep the native focus/selection/lazy behaviour. */
+.radzen-panel-tree .bivium-directory-tree {
+    width: 100%;
+    min-height: 100%;
 }
 
-/* Tree node row (clickable) */
-.tree-node-row {
-    cursor: pointer;
-    padding: 0 1ch;
+.radzen-panel-tree .bivium-directory-tree .rz-treenode-label {
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    line-height: 1lh;
 }
 
-/* Toggle icon */
-.tree-toggle {
-    color: var(--foreground2);
-    cursor: pointer;
-    user-select: none;
-}
-
-/* Hover */
-.tree-node-row:hover {
-    background-color: var(--background1);
-}
-
-/* Active/selected node */
-.tree-node-row.tree-active {
-    background-color: var(--background2);
-    color: var(--foreground0);
+.radzen-panel-tree .bivium-tree-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
 }

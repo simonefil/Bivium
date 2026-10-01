@@ -1,13 +1,27 @@
+@namespace Bivium.Components.Shared
 @inject Bivium.Services.IFileSystemService FileSystemService
+@inject TooltipService TooltipService
 
-<div class="status-bar">
-    <span class="status-bar-left">@this._selectionInfo</span>
-    <span class="status-bar-center">
-        @this._progressText
+<div class="bivium-radzen-status-bar rz-p-1" role="status">
+    <span @ref="this._selectionElement" @onmouseenter="@(() => this.ShowTooltip(this._selectionElement, this._selectionInfo))" aria-label="@this._selectionInfo"><RadzenText TagName="TagName.Span" TextStyle="TextStyle.Body2" Text="@this._selectionInfo" class="rz-m-0" /></span>
+    <span class="bivium-radzen-status-progress" @ref="this._progressElement" @onmouseenter="@(() => this.ShowTooltip(this._progressElement, this._progressText))" aria-label="@this._progressText">
+        <RadzenText TagName="TagName.Span" TextStyle="TextStyle.Body2" Text="@this._progressText" class="rz-m-0" />
         @if (this.CanCancelOperation)
         {
-            <button type="button" class="status-bar-cancel" @onclick="this.OnCancelOperation" title="Cancel the running operation">Cancel</button>
+            <RadzenButton ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.ExtraSmall" Icon="cancel" Text="Cancel" Click="this.OnCancelOperation" MouseEnter="@(element => this.ShowTooltip(element, "Cancel the running operation"))" aria-label="Cancel the running operation" />
         }
     </span>
-    <span class="status-bar-right">@this._diskInfo</span>
+    <span @ref="this._diskElement" @onmouseenter="@(() => this.ShowTooltip(this._diskElement, this._diskInfo))" aria-label="@this._diskInfo"><RadzenText TagName="TagName.Span" TextStyle="TextStyle.Body2" Text="@this._diskInfo" class="rz-m-0" /></span>
 </div>
+
+@code {
+    private ElementReference _selectionElement;
+    private ElementReference _progressElement;
+    private ElementReference _diskElement;
+
+    private void ShowTooltip(ElementReference element, string text)
+    {
+        if (!string.IsNullOrEmpty(text))
+            this.TooltipService.Open(element, text, new TooltipOptions { Delay = 500, Duration = 4000, Position = TooltipPosition.Top });
+    }
+}

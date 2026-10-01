@@ -3,9 +3,6 @@
     display: none;
     position: fixed;
     z-index: 2000;
-    border: 1px solid var(--foreground0);
-    background-color: var(--background0);
-    box-shadow: 2px 2px 0 var(--background3);
     flex-direction: column;
     min-width: min(40ch, calc(100vw - 2ch));
     min-height: min(10lh, calc(100vh - 2lh));
@@ -23,10 +20,6 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background-color: var(--foreground0);
-    color: var(--background0);
-    padding: 0 1ch;
-    line-height: 1lh;
     cursor: move;
     user-select: none;
     flex-shrink: 0;
@@ -39,38 +32,11 @@
     white-space: nowrap;
 }
 
-.terminal-titlebar-actions {
-    display: flex;
-    gap: 1ch;
-    flex-shrink: 0;
-}
-
-.terminal-titlebar-btn {
-    cursor: pointer;
-    color: var(--background0);
-    background: none;
-    border: none;
-    font-family: var(--font-family);
-    font-size: var(--font-size);
-    padding: 0 0.5ch;
-    height: 1lh;
-    line-height: 1lh;
-}
-
-.terminal-titlebar-btn:hover {
-    background-color: var(--background2);
-    color: var(--foreground0);
-}
-
 .terminal-tabbar {
     display: flex;
     align-items: center;
     gap: 0;
-    min-height: 1lh;
-    background-color: var(--background1);
-    border-bottom: 1px solid var(--foreground2);
-    overflow-x: auto;
-    overflow-y: hidden;
+    overflow: hidden;
     user-select: none;
     flex-shrink: 0;
 }
@@ -81,54 +47,9 @@
     gap: 0.5ch;
     max-width: 24ch;
     min-width: 8ch;
-    height: 1lh;
-    padding: 0 0.5ch;
-    border-right: 1px solid var(--foreground2);
     cursor: pointer;
-    color: var(--foreground1);
-    background-color: var(--background1);
     box-sizing: border-box;
     flex-shrink: 0;
-}
-
-.terminal-tab:hover {
-    background-color: var(--background2);
-    color: var(--foreground0);
-}
-
-.terminal-tab.active {
-    background-color: var(--background0);
-    color: var(--foreground0);
-}
-
-.terminal-tab.unread:not(.active) {
-    color: var(--foreground0);
-    box-shadow: inset 0 -1px 0 var(--foreground0);
-}
-
-.terminal-tab.attention {
-    box-shadow: inset 0 0 0 1px var(--foreground0);
-    animation: terminal-attention-blink 0.5s steps(1, end) 3;
-}
-
-.terminal-tab-progress {
-    display: inline-block;
-    min-width: 2ch;
-    color: var(--foreground0);
-    text-align: center;
-    flex-shrink: 0;
-}
-
-.terminal-tab-progress.indeterminate {
-    animation: terminal-progress-spin 1s linear infinite;
-}
-
-.terminal-tab-progress.error {
-    color: #ff5f5f;
-}
-
-.terminal-tab-progress.warning {
-    color: #ffd75f;
 }
 
 .terminal-toast-stack {
@@ -144,38 +65,22 @@
 
 .terminal-toast {
     display: flex;
-    padding: 0.5lh 1ch;
-    border: 1px solid var(--foreground0);
-    background: var(--background0);
-    color: var(--foreground0);
-    box-shadow: 2px 2px 0 var(--background3);
-    font-family: var(--font-family);
-    font-size: var(--font-size);
     text-align: left;
     cursor: pointer;
     flex-direction: column;
 }
 
-.terminal-toast-title {
-    font-weight: bold;
+/* Native button children remain phrasing content; only their arrangement is local. */
+.terminal-toast .rz-button-box {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
 }
 
 .terminal-toast-body {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-@keyframes terminal-progress-spin {
-    to { transform: rotate(360deg); }
-}
-
-@keyframes terminal-attention-blink {
-    50% { background-color: var(--foreground0); color: var(--background0); }
-}
-
-.terminal-tab.exited {
-    color: var(--foreground2);
 }
 
 .terminal-tab-label {
@@ -186,51 +91,19 @@
     flex: 1;
 }
 
-.terminal-tab-close {
-    width: 2ch;
-    height: 1lh;
-    line-height: 1lh;
-    text-align: center;
-    color: inherit;
+/* Geometry only: native Radzen controls own colors, focus and interaction. */
+.terminal-tab-strip .rz-tabview-nav {
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.terminal-tab-strip .rz-tabview-nav > li,
+.terminal-titlebar .rz-button {
     flex-shrink: 0;
 }
 
-.terminal-tab-close:hover {
-    background-color: var(--foreground0);
-    color: var(--background0);
-}
-
-.terminal-tab-add {
-    height: 1lh;
-    line-height: 1lh;
-    padding: 0 1ch;
-    border: none;
-    border-right: 1px solid var(--foreground2);
-    background-color: var(--background1);
-    color: var(--foreground0);
-    font-family: var(--font-family);
-    font-size: var(--font-size);
-    cursor: pointer;
-    flex-shrink: 0;
-}
-
-.terminal-tab-add:hover {
-    background-color: var(--background2);
-}
-
-.terminal-tab-rename {
-    min-width: 0;
-    width: 100%;
-    height: 1lh;
-    border: none;
-    outline: none;
-    background-color: var(--background0);
-    color: var(--foreground0);
-    font-family: var(--font-family);
-    font-size: var(--font-size);
-    line-height: 1lh;
-    padding: 0;
-    flex: 1;
+.terminal-tab-close-slot {
+    align-self: stretch;
 }
 
 /* Virtualized remote terminal container */
@@ -324,8 +197,8 @@
 }
 
 .terminal-cell.selected {
-    color: var(--background0) !important;
-    background-color: var(--foreground0) !important;
+    color: var(--rz-base-background-color) !important;
+    background-color: var(--rz-text-color) !important;
 }
 
 .terminal-hyperlink {
@@ -365,26 +238,21 @@
     }
 }
 
-.terminal-persistence-indicator {
-    margin-left: 1ch;
-    color: var(--foreground2);
-    font-size: 0.82em;
-    font-weight: normal;
-}
-
 /* Resize handle (bottom-right corner) */
 .terminal-resize-handle {
     position: absolute;
     bottom: 0;
     right: 0;
-    width: 2ch;
-    height: 1lh;
+    display: flex;
+    align-items: flex-end;
+    justify-content: flex-end;
+    width: 28px;
+    height: 28px;
+    padding: 0 2px 2px 0;
+    box-sizing: border-box;
     z-index: 30;
-    cursor: nwse-resize;
+    cursor: se-resize;
     pointer-events: auto;
     touch-action: none;
-    text-align: right;
-    color: var(--foreground2);
     user-select: none;
-    line-height: 1lh;
 }

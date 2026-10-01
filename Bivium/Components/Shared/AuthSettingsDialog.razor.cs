@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System;
 using Bivium.Models;
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
@@ -23,6 +24,12 @@ namespace Bivium.Components.Shared
 
         [Parameter]
         public long LeaseGeneration { get; set; }
+
+        /// <summary>
+        /// Rivalida l'autorità del browser prima e dopo le modifiche autenticazione
+        /// </summary>
+        [Parameter]
+        public Func<bool> CanInvoke { get; set; }
 
         #endregion
 
@@ -72,6 +79,9 @@ namespace Bivium.Components.Shared
 
         private IJSObjectReference _jsModule;
 
+        /// <summary>Impedisce chiusura e doppi commit durante le richieste non cancellabili</summary>
+        private bool _isSaving;
+
         #endregion
 
         #region Public Methods
@@ -119,6 +129,25 @@ namespace Bivium.Components.Shared
         #endregion
 
         #region Private Methods
+
+        /// <summary>Protegge le azioni di modifica senza alterarne payload e autorità</summary>
+        /// <param name="mutation">Azione esistente da eseguire</param>
+        private async System.Threading.Tasks.Task ExecuteMutationAsync(Func<System.Threading.Tasks.Task> mutation)
+        {
+            if (this._isSaving)
+                return;
+
+            this._isSaving = true;
+            this.StateHasChanged();
+            try
+            {
+                await mutation();
+            }
+            finally
+            {
+                this._isSaving = false;
+            }
+        }
 
         /// <summary>
         /// Ensures the JS module is loaded
@@ -183,6 +212,9 @@ namespace Bivium.Components.Shared
         /// </summary>
         private async System.Threading.Tasks.Task HandleSave()
         {
+            if (!this.CanInvokeMutation())
+                return;
+
             AuthenticationSettingsRequest request = new AuthenticationSettingsRequest();
             request.Enabled = this._enabled;
             if (this._enabled)
@@ -202,6 +234,9 @@ namespace Bivium.Components.Shared
             string json = JsonSerializer.Serialize(request);
             await this.EnsureJsModule();
             JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("putJsonResult", "/api/Settings/authentication", json, this.AttachmentId, this.LeaseGeneration);
+
+            if (!this.CanInvokeMutation())
+                return;
 
             if (response.Ok)
             {
@@ -269,11 +304,17 @@ namespace Bivium.Components.Shared
         /// </summary>
         private async System.Threading.Tasks.Task HandleStartTwoFactorSetup()
         {
+            if (!this.CanInvokeMutation())
+                return;
+
             await this.EnsureJsModule();
             TwoFactorVerifyRequest request = new TwoFactorVerifyRequest();
             request.CurrentPassword = this._mfaPassword;
             string json = JsonSerializer.Serialize(request);
             JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("postJsonResult", "/api/Settings/authentication/twofactor/setup", json, this.AttachmentId, this.LeaseGeneration);
+
+            if (!this.CanInvokeMutation())
+                return;
 
             if (response.Ok && response.Data.ValueKind == JsonValueKind.Object)
             {
@@ -315,6 +356,9 @@ namespace Bivium.Components.Shared
         /// </summary>
         private async System.Threading.Tasks.Task HandleEnableTwoFactor()
         {
+            if (!this.CanInvokeMutation())
+                return;
+
             TwoFactorVerifyRequest request = new TwoFactorVerifyRequest();
             request.CurrentPassword = this._mfaPassword;
             request.Code = this._twoFactorCode;
@@ -322,6 +366,9 @@ namespace Bivium.Components.Shared
             string json = JsonSerializer.Serialize(request);
             await this.EnsureJsModule();
             JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("postJsonResult", "/api/Settings/authentication/twofactor/enable", json, this.AttachmentId, this.LeaseGeneration);
+
+            if (!this.CanInvokeMutation())
+                return;
 
             if (response.Ok)
             {
@@ -353,11 +400,17 @@ namespace Bivium.Components.Shared
         /// </summary>
         private async System.Threading.Tasks.Task HandleDisableTwoFactor()
         {
+            if (!this.CanInvokeMutation())
+                return;
+
             await this.EnsureJsModule();
             TwoFactorVerifyRequest request = new TwoFactorVerifyRequest();
             request.CurrentPassword = this._mfaPassword;
             string json = JsonSerializer.Serialize(request);
             JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("postJsonResult", "/api/Settings/authentication/twofactor/disable", json, this.AttachmentId, this.LeaseGeneration);
+
+            if (!this.CanInvokeMutation())
+                return;
 
             if (response.Ok)
             {
@@ -389,6 +442,9 @@ namespace Bivium.Components.Shared
         /// </summary>
         private async System.Threading.Tasks.Task HandleChangePassword()
         {
+            if (!this.CanInvokeMutation())
+                return;
+
             ChangePasswordRequest request = new ChangePasswordRequest();
             request.CurrentPassword = this._changeCurrentPassword;
             request.NewPassword = this._changeNewPassword;
@@ -397,6 +453,9 @@ namespace Bivium.Components.Shared
             string json = JsonSerializer.Serialize(request);
             await this.EnsureJsModule();
             JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("postJsonResult", "/api/Settings/authentication/password", json, this.AttachmentId, this.LeaseGeneration);
+
+            if (!this.CanInvokeMutation())
+                return;
 
             if (response.Ok)
             {
@@ -425,8 +484,19 @@ namespace Bivium.Components.Shared
         /// </summary>
         private async System.Threading.Tasks.Task HandleCancel()
         {
+            if (this._isSaving)
+                return;
             this._isVisible = false;
             await this.OnClose.InvokeAsync();
+        }
+
+        /// <summary>
+        /// Verifica che il browser conservi l'autorità per una modifica autenticazione
+        /// </summary>
+        /// <returns><see langword="true"/> quando il comando può proseguire</returns>
+        private bool CanInvokeMutation()
+        {
+            return this.CanInvoke == null || this.CanInvoke();
         }
 
         #endregion

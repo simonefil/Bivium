@@ -304,12 +304,16 @@ namespace Bivium.Models
         /// <param name="rightPanel">Right panel state</param>
         /// <param name="activePanel">Active panel index</param>
         /// <param name="singlePanelMode">Whether single-panel mode is active</param>
-        public WorkspacePanelsSnapshot(WorkspacePanelSnapshot leftPanel, WorkspacePanelSnapshot rightPanel, int activePanel, bool singlePanelMode)
+        /// <param name="outerSizePercent">Percentuale occupata dal pannello sinistro</param>
+        /// <param name="collapsedPanelIndex">Indice del pannello compresso, oppure -1</param>
+        public WorkspacePanelsSnapshot(WorkspacePanelSnapshot leftPanel, WorkspacePanelSnapshot rightPanel, int activePanel, bool singlePanelMode, double outerSizePercent = 50, int collapsedPanelIndex = -1)
         {
             this.LeftPanel = leftPanel ?? throw new System.ArgumentNullException(nameof(leftPanel));
             this.RightPanel = rightPanel ?? throw new System.ArgumentNullException(nameof(rightPanel));
             this.ActivePanel = activePanel;
             this.SinglePanelMode = singlePanelMode;
+            this.OuterSizePercent = double.IsFinite(outerSizePercent) ? Math.Clamp(outerSizePercent, 20, 80) : 50;
+            this.CollapsedPanelIndex = collapsedPanelIndex is 0 or 1 ? collapsedPanelIndex : -1;
         }
 
         #endregion
@@ -323,7 +327,7 @@ namespace Bivium.Models
         /// <returns>True when both snapshots represent the same state</returns>
         public bool Equals(WorkspacePanelsSnapshot other)
         {
-            return other != null && this.ActivePanel == other.ActivePanel && this.SinglePanelMode == other.SinglePanelMode && this.LeftPanel == other.LeftPanel && this.RightPanel == other.RightPanel;
+            return other != null && this.ActivePanel == other.ActivePanel && this.SinglePanelMode == other.SinglePanelMode && this.OuterSizePercent == other.OuterSizePercent && this.CollapsedPanelIndex == other.CollapsedPanelIndex && this.LeftPanel == other.LeftPanel && this.RightPanel == other.RightPanel;
         }
 
         /// <summary>
@@ -332,7 +336,7 @@ namespace Bivium.Models
         /// <returns>Snapshot hash</returns>
         public override int GetHashCode()
         {
-            return HashCode.Combine(this.LeftPanel, this.RightPanel, this.ActivePanel, this.SinglePanelMode);
+            return HashCode.Combine(this.LeftPanel, this.RightPanel, this.ActivePanel, this.SinglePanelMode, this.OuterSizePercent, this.CollapsedPanelIndex);
         }
 
         #endregion
@@ -359,7 +363,51 @@ namespace Bivium.Models
         /// </summary>
         public bool SinglePanelMode { get; }
 
+        /// <summary>
+        /// Percentuale occupata dal pannello sinistro nel layout Radzen
+        /// </summary>
+        public double OuterSizePercent { get; }
+
+        /// <summary>
+        /// Indice del pannello compresso nel layout Radzen, oppure -1
+        /// </summary>
+        public int CollapsedPanelIndex { get; }
+
         #endregion
+    }
+
+    /// <summary>
+    /// Immutable Details-view column snapshot
+    /// </summary>
+    public sealed record FileListColumnSnapshot
+    {
+        /// <summary>
+        /// Creates a column snapshot
+        /// </summary>
+        /// <param name="id">Stable column identity</param>
+        /// <param name="width">Measured width in pixels</param>
+        /// <param name="visible">Whether the column is visible</param>
+        public FileListColumnSnapshot(FileListColumnId id, double width, bool visible)
+        {
+            this.Id = id;
+            this.Width = width;
+            this.Visible = visible;
+        }
+
+        /// <summary>
+        /// Stable column identity
+        /// </summary>
+        public FileListColumnId Id { get; }
+
+        /// <summary>
+        /// Measured width in pixels
+        /// </summary>
+        public double Width { get; }
+
+        /// <summary>
+        /// Whether the column is visible
+        /// </summary>
+        public bool Visible { get; }
     }
 
     /// <summary>
@@ -373,7 +421,7 @@ namespace Bivium.Models
         /// Creates a snapshot of persistent panel state
         /// </summary>
         /// <param name="currentPath">Current directory</param>
-        /// <param name="cursorPath">Path of the item under the cursor</param>
+        /// <param name="cursorPath">Semantic path of the focused item</param>
         /// <param name="cursorIndex">Cursor fallback index</param>
         /// <param name="selectedPaths">Selected paths</param>
         /// <param name="sortField">Sort column</param>
@@ -385,18 +433,28 @@ namespace Bivium.Models
         /// <param name="dateColumnRatio">Normalized date-column width</param>
         /// <param name="attributesColumnRatio">Normalized attributes-column width</param>
         /// <param name="ownerColumnRatio">Normalized owner-column width</param>
-        public WorkspacePanelSnapshot(string currentPath, string cursorPath, int cursorIndex, IEnumerable<string> selectedPaths, SortField sortField, SortDirection sortDirection, string scrollAnchorPath = "", IEnumerable<string> expandedDirectoryPaths = null, double? nameColumnRatio = null, double? sizeColumnRatio = null, double? dateColumnRatio = null, double? attributesColumnRatio = null, double? ownerColumnRatio = null)
+        /// <param name="selectionAnchorPath">Stable range-selection anchor path</param>
+        /// <param name="backHistory">Previous directory paths, nearest last</param>
+        /// <param name="forwardHistory">Forward directory paths, nearest last</param>
+        /// <param name="columns">Complete ordered measured column layout</param>
+        /// <param name="treeSizePercent">Percentuale verticale occupata dall'albero</param>
+        /// <param name="treeCollapsed">Indica se l'albero è compresso</param>
+        public WorkspacePanelSnapshot(string currentPath, string cursorPath, int cursorIndex, IEnumerable<string> selectedPaths, SortField sortField, SortDirection sortDirection, string scrollAnchorPath = "", IEnumerable<string> expandedDirectoryPaths = null, double? nameColumnRatio = null, double? sizeColumnRatio = null, double? dateColumnRatio = null, double? attributesColumnRatio = null, double? ownerColumnRatio = null, string selectionAnchorPath = "", IEnumerable<string> backHistory = null, IEnumerable<string> forwardHistory = null, IEnumerable<FileListColumnState> columns = null, double treeSizePercent = 30, bool treeCollapsed = false)
         {
-            List<string> selectedPathCopy = selectedPaths == null ? new List<string>() : new List<string>(selectedPaths);
-            List<string> expandedPathCopy = expandedDirectoryPaths == null ? new List<string>() : new List<string>(expandedDirectoryPaths);
             this.CurrentPath = currentPath ?? "";
-            this.CursorPath = cursorPath ?? "";
-            this.CursorIndex = cursorIndex;
-            this.SelectedPaths = new ReadOnlyCollection<string>(selectedPathCopy);
-            this.SortField = sortField;
-            this.SortDirection = sortDirection;
+            this.FocusedPath = cursorPath ?? "";
+            this.CursorIndex = Math.Max(0, cursorIndex);
+            this.SelectedPaths = CopyDistinctPaths(selectedPaths, int.MaxValue);
+            this.SortField = Enum.IsDefined(sortField) ? sortField : SortField.Name;
+            this.SortDirection = Enum.IsDefined(sortDirection) ? sortDirection : SortDirection.Ascending;
             this.ScrollAnchorPath = scrollAnchorPath ?? "";
-            this.ExpandedDirectoryPaths = new ReadOnlyCollection<string>(expandedPathCopy);
+            this.ExpandedDirectoryPaths = CopyDistinctPaths(expandedDirectoryPaths, int.MaxValue);
+            this.SelectionAnchorPath = selectionAnchorPath ?? "";
+            this.BackHistory = CopyDistinctPaths(backHistory, 128);
+            this.ForwardHistory = CopyDistinctPaths(forwardHistory, 128);
+            this.Columns = CopyValidColumns(columns);
+            this.TreeSizePercent = double.IsFinite(treeSizePercent) ? Math.Clamp(treeSizePercent, 15, 85) : 30;
+            this.TreeCollapsed = treeCollapsed;
             this.SetColumnRatios(nameColumnRatio, sizeColumnRatio, dateColumnRatio, attributesColumnRatio, ownerColumnRatio);
         }
 
@@ -411,10 +469,10 @@ namespace Bivium.Models
         /// <returns>True when both snapshots represent the same state</returns>
         public bool Equals(WorkspacePanelSnapshot other)
         {
-            if (other == null || this.CurrentPath != other.CurrentPath || this.CursorPath != other.CursorPath || this.CursorIndex != other.CursorIndex || this.SortField != other.SortField || this.SortDirection != other.SortDirection || this.ScrollAnchorPath != other.ScrollAnchorPath || this.NameColumnRatio != other.NameColumnRatio || this.SizeColumnRatio != other.SizeColumnRatio || this.DateColumnRatio != other.DateColumnRatio || this.AttributesColumnRatio != other.AttributesColumnRatio || this.OwnerColumnRatio != other.OwnerColumnRatio)
+            if (other == null || !PathEquals(this.CurrentPath, other.CurrentPath) || !PathEquals(this.FocusedPath, other.FocusedPath) || this.CursorIndex != other.CursorIndex || this.SortField != other.SortField || this.SortDirection != other.SortDirection || !PathEquals(this.ScrollAnchorPath, other.ScrollAnchorPath) || !PathEquals(this.SelectionAnchorPath, other.SelectionAnchorPath) || this.NameColumnRatio != other.NameColumnRatio || this.SizeColumnRatio != other.SizeColumnRatio || this.DateColumnRatio != other.DateColumnRatio || this.AttributesColumnRatio != other.AttributesColumnRatio || this.OwnerColumnRatio != other.OwnerColumnRatio || this.TreeSizePercent != other.TreeSizePercent || this.TreeCollapsed != other.TreeCollapsed)
                 return false;
 
-            return PathsEqual(this.SelectedPaths, other.SelectedPaths) && PathsEqual(this.ExpandedDirectoryPaths, other.ExpandedDirectoryPaths);
+            return PathsEqual(this.SelectedPaths, other.SelectedPaths) && PathsEqual(this.ExpandedDirectoryPaths, other.ExpandedDirectoryPaths) && PathsEqual(this.BackHistory, other.BackHistory) && PathsEqual(this.ForwardHistory, other.ForwardHistory) && ColumnsEqual(this.Columns, other.Columns);
         }
 
         /// <summary>
@@ -424,27 +482,108 @@ namespace Bivium.Models
         public override int GetHashCode()
         {
             HashCode hash = new HashCode();
-            hash.Add(this.CurrentPath);
-            hash.Add(this.CursorPath);
+            StringComparer pathComparer = GetPathComparer();
+            hash.Add(this.CurrentPath, pathComparer);
+            hash.Add(this.FocusedPath, pathComparer);
             hash.Add(this.CursorIndex);
             hash.Add(this.SortField);
             hash.Add(this.SortDirection);
-            hash.Add(this.ScrollAnchorPath);
+            hash.Add(this.ScrollAnchorPath, pathComparer);
+            hash.Add(this.SelectionAnchorPath, pathComparer);
             hash.Add(this.NameColumnRatio);
             hash.Add(this.SizeColumnRatio);
             hash.Add(this.DateColumnRatio);
             hash.Add(this.AttributesColumnRatio);
             hash.Add(this.OwnerColumnRatio);
+            hash.Add(this.TreeSizePercent);
+            hash.Add(this.TreeCollapsed);
             for (int i = 0; i < this.SelectedPaths.Count; i++)
-                hash.Add(this.SelectedPaths[i]);
+                hash.Add(this.SelectedPaths[i], pathComparer);
             for (int i = 0; i < this.ExpandedDirectoryPaths.Count; i++)
-                hash.Add(this.ExpandedDirectoryPaths[i]);
+                hash.Add(this.ExpandedDirectoryPaths[i], pathComparer);
+            for (int i = 0; i < this.BackHistory.Count; i++)
+                hash.Add(this.BackHistory[i], pathComparer);
+            for (int i = 0; i < this.ForwardHistory.Count; i++)
+                hash.Add(this.ForwardHistory[i], pathComparer);
+            for (int i = 0; i < this.Columns.Count; i++)
+                hash.Add(this.Columns[i]);
             return hash.ToHashCode();
         }
 
         #endregion
 
         #region Private Methods
+
+        /// <summary>
+        /// Copies, de-duplicates and bounds a path sequence while retaining its most recent values
+        /// </summary>
+        private static IReadOnlyList<string> CopyDistinctPaths(IEnumerable<string> paths, int maximumCount)
+        {
+            List<string> source = paths == null ? new List<string>() : new List<string>(paths);
+            List<string> result = new List<string>();
+            HashSet<string> seen = new HashSet<string>(GetPathComparer());
+            int start = Math.Max(0, source.Count - maximumCount);
+            for (int i = start; i < source.Count; i++)
+            {
+                string path = source[i] ?? "";
+                if (!string.IsNullOrWhiteSpace(path) && seen.Add(path))
+                    result.Add(path);
+            }
+            return new ReadOnlyCollection<string>(result);
+        }
+
+        /// <summary>
+        /// Copies a complete valid column layout or returns the legacy empty representation
+        /// </summary>
+        private static IReadOnlyList<FileListColumnSnapshot> CopyValidColumns(IEnumerable<FileListColumnState> columns)
+        {
+            List<FileListColumnState> source = columns == null ? new List<FileListColumnState>() : new List<FileListColumnState>(columns);
+            List<FileListColumnSnapshot> result = new List<FileListColumnSnapshot>();
+            HashSet<FileListColumnId> seen = new HashSet<FileListColumnId>();
+            if (source.Count != Enum.GetValues<FileListColumnId>().Length)
+                return new ReadOnlyCollection<FileListColumnSnapshot>(result);
+
+            for (int i = 0; i < source.Count; i++)
+            {
+                FileListColumnState column = source[i];
+                if (column == null || !Enum.IsDefined(column.Id) || !seen.Add(column.Id) || !double.IsFinite(column.Width) || column.Width <= 0 || (column.Id == FileListColumnId.Name && !column.Visible))
+                    return new ReadOnlyCollection<FileListColumnSnapshot>(new List<FileListColumnSnapshot>());
+                result.Add(new FileListColumnSnapshot(column.Id, column.Width, column.Visible));
+            }
+
+            return new ReadOnlyCollection<FileListColumnSnapshot>(result);
+        }
+
+        /// <summary>
+        /// Compares complete ordered column layouts
+        /// </summary>
+        private static bool ColumnsEqual(IReadOnlyList<FileListColumnSnapshot> left, IReadOnlyList<FileListColumnSnapshot> right)
+        {
+            if (left == null || right == null || left.Count != right.Count)
+                return false;
+            for (int i = 0; i < left.Count; i++)
+            {
+                if (left[i] != right[i])
+                    return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Returns the platform filesystem path comparer
+        /// </summary>
+        private static StringComparer GetPathComparer()
+        {
+            return OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        }
+
+        /// <summary>
+        /// Compares two semantic paths using platform filesystem rules
+        /// </summary>
+        private static bool PathEquals(string left, string right)
+        {
+            return GetPathComparer().Equals(left ?? "", right ?? "");
+        }
 
         /// <summary>
         /// Accepts and normalizes only a complete positive finite column configuration
@@ -488,7 +627,7 @@ namespace Bivium.Models
 
             for (int i = 0; i < left.Count; i++)
             {
-                if (left[i] != right[i])
+                if (!PathEquals(left[i], right[i]))
                     return false;
             }
 
@@ -507,7 +646,12 @@ namespace Bivium.Models
         /// <summary>
         /// Path of the item under the cursor
         /// </summary>
-        public string CursorPath { get; }
+        public string FocusedPath { get; }
+
+        /// <summary>
+        /// Compatibility alias for the semantic focused path
+        /// </summary>
+        public string CursorPath { get { return this.FocusedPath; } }
 
         /// <summary>
         /// Cursor fallback index
@@ -538,6 +682,36 @@ namespace Bivium.Models
         /// Semantic paths of expanded directories in the tree
         /// </summary>
         public IReadOnlyList<string> ExpandedDirectoryPaths { get; }
+
+        /// <summary>
+        /// Stable range-selection anchor path
+        /// </summary>
+        public string SelectionAnchorPath { get; }
+
+        /// <summary>
+        /// Previous directory paths, nearest last
+        /// </summary>
+        public IReadOnlyList<string> BackHistory { get; }
+
+        /// <summary>
+        /// Forward directory paths, nearest last
+        /// </summary>
+        public IReadOnlyList<string> ForwardHistory { get; }
+
+        /// <summary>
+        /// Complete ordered measured columns, or empty for a legacy layout
+        /// </summary>
+        public IReadOnlyList<FileListColumnSnapshot> Columns { get; }
+
+        /// <summary>
+        /// Percentuale verticale occupata dall'albero
+        /// </summary>
+        public double TreeSizePercent { get; }
+
+        /// <summary>
+        /// Indica se l'albero è compresso
+        /// </summary>
+        public bool TreeCollapsed { get; }
 
         /// <summary>
         /// Normalized name-column width, or null for the legacy layout

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Bivium.Models;
+using System.Collections.Generic;
 
 namespace Bivium.Components.Shared
 {
@@ -16,6 +17,12 @@ namespace Bivium.Components.Shared
         /// </summary>
         [Parameter]
         public EventCallback<(ArchiveFormat Format, string OutputName)> OnClose { get; set; }
+
+        /// <summary>
+        /// Rivalida l'autorità del browser prima di confermare la compressione
+        /// </summary>
+        [Parameter]
+        public Func<bool> CanInvoke { get; set; }
 
         #endregion
 
@@ -44,7 +51,18 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Reference to the output name input for focus
         /// </summary>
-        private ElementReference _outputNameElement;
+        private Radzen.Blazor.RadzenTextBox _outputNameElement;
+
+        /// <summary>Formati esistenti con etichette leggibili per il dropdown</summary>
+        private readonly Dictionary<ArchiveFormat, string> _formats = new Dictionary<ArchiveFormat, string>
+        {
+            { ArchiveFormat.Zip, "ZIP (.zip)" },
+            { ArchiveFormat.TarGz, "TAR.GZ (.tar.gz)" },
+            { ArchiveFormat.TarBz2, "TAR.BZ2 (.tar.bz2)" },
+            { ArchiveFormat.TarXz, "TAR.XZ (.tar.xz)" },
+            { ArchiveFormat.TarZst, "TAR.ZST (.tar.zst)" },
+            { ArchiveFormat.Tar, "TAR (.tar)" }
+        };
 
         #endregion
 
@@ -62,17 +80,16 @@ namespace Bivium.Components.Shared
             this._isVisible = true;
             this.StateHasChanged();
 
-            // Focus the output name input after render
-            _ = this.FocusInputAsync();
         }
 
         /// <summary>
         /// Focuses the output name input after render
         /// </summary>
-        private async System.Threading.Tasks.Task FocusInputAsync()
+        /// <param name="firstRender">Primo mount reale del contenuto</param>
+        private async System.Threading.Tasks.Task HandleContentRenderedAsync(bool firstRender)
         {
-            await System.Threading.Tasks.Task.Delay(50);
-            await this._outputNameElement.FocusAsync();
+            if (firstRender && this._isVisible)
+                await this._outputNameElement.Element.FocusAsync();
         }
 
         /// <summary>
@@ -92,9 +109,9 @@ namespace Bivium.Components.Shared
         /// Handles format dropdown change and updates the file extension
         /// </summary>
         /// <param name="args">Change event args</param>
-        private void HandleFormatChange(ChangeEventArgs args)
+        private void HandleFormatChange(object args)
         {
-            string value = args.Value.ToString();
+            string value = args.ToString();
 
             if (value == "Zip")
             {
@@ -161,6 +178,9 @@ namespace Bivium.Components.Shared
         /// </summary>
         private async System.Threading.Tasks.Task HandleConfirm()
         {
+            if (this.CanInvoke != null && !this.CanInvoke())
+                return;
+
             this._isVisible = false;
             await this.OnClose.InvokeAsync((this._selectedFormat, this._outputName));
         }

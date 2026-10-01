@@ -1,26 +1,18 @@
+@namespace Bivium.Components.Shared
 @inject IJSRuntime JSRuntime
 
-<div id="editor-window" class="editor-window @(this._isVisible ? "visible" : "")">
+<RadzenCard id="editor-window" class="@("editor-window bivium-radzen-editor-window " + (this._isVisible ? "visible" : ""))">
+    <RadzenStack class="editor-titlebar rz-p-2" Gap="0.5rem" id="editor-titlebar" Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween">
+        <RadzenText TextStyle="TextStyle.Subtitle2" class="editor-titlebar-title rz-m-0" Text="@("Edit: " + this._fileName)" />
+        <RadzenButton Icon="close" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" Size="ButtonSize.Small" Click="this.HandleClose" title="Close" aria-label="Close editor" />
+    </RadzenStack>
 
-    <!-- Title bar (draggable) -->
-    <div class="editor-titlebar" id="editor-titlebar">
-        <span class="editor-titlebar-title">Edit: @this._fileName</span>
-        <div class="editor-titlebar-actions">
-            <span class="editor-close" @onclick="this.HandleClose" title="Close">X</span>
-        </div>
-    </div>
-
-    <!-- Monaco editor container -->
     <div id="monaco-container" class="editor-body"></div>
 
-    <!-- Status bar -->
-    <div class="editor-statusbar">
-        <span>@this._statusText</span>
-        <span>
-            <button @onclick="this.HandleSaveAsync">Save</button>
-        </span>
+    <div class="editor-statusbar bivium-radzen-editor-statusbar rz-p-2">
+        <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0" Text="@this._statusText" />
+        <RadzenButton Text="Save" Icon="save" ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Small" Click="this.HandleSaveAsync" />
     </div>
 
-    <!-- Resize handle -->
-    <div class="editor-resize-handle" id="editor-resize-handle">/</div>
-</div>
+     <div class="editor-resize-handle" id="editor-resize-handle"><RadzenIcon Icon="drag_handle" class="resize-grip-icon" aria-hidden="true" /></div>
+</RadzenCard>
