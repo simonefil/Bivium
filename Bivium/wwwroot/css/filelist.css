@@ -1,4 +1,9 @@
 /* Scoped presentation of the native Radzen compact grid. */
+/* Initial metadata: 80 + 132 + 88 + 72px; retain 180px for Name on narrow screens. */
+.radzen-file-grid-host[data-default-column-layout="true"] .rz-grid-table {
+    min-width: 552px;
+}
+
 .radzen-file-grid-host .rz-group-header {
     justify-content: flex-end;
 }

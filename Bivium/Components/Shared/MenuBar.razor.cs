@@ -22,6 +22,10 @@ namespace Bivium.Components.Shared
 
         #region Parameters
 
+        /// <summary>Disponibilità e shortcut calcolati esclusivamente dal Commander</summary>
+        [Parameter]
+        public IReadOnlyList<CommanderCommandState> Commands { get; set; } = Array.Empty<CommanderCommandState>();
+
         /// <summary>
         /// Callback for New File action
         /// </summary>
@@ -204,18 +208,6 @@ namespace Bivium.Components.Shared
         public bool IsMultiSelection { get; set; } = false;
 
         /// <summary>
-        /// Whether the active target can be extracted
-        /// </summary>
-        [Parameter]
-        public bool CanExtract { get; set; } = false;
-
-        /// <summary>
-        /// Whether the active target can be compressed
-        /// </summary>
-        [Parameter]
-        public bool CanCompress { get; set; } = false;
-
-        /// <summary>
         /// Whether logout should be available
         /// </summary>
         [Parameter]
@@ -265,6 +257,24 @@ namespace Bivium.Components.Shared
         #endregion
 
         #region Private Methods
+
+        /// <summary>Consulta la proiezione senza introdurre regole nel renderer</summary>
+        /// <param name="id">Identificatore del comando</param>
+        /// <returns>Descriptor oppure null</returns>
+        private CommanderCommandState GetCommand(string id)
+        {
+            foreach (CommanderCommandState command in this.Commands)
+            {
+                if (command.Id == id)
+                    return command;
+            }
+            return null;
+        }
+
+        /// <summary>Legge la disponibilità già calcolata dal proprietario</summary>
+        /// <param name="id">Identificatore del comando</param>
+        /// <returns>True se abilitato</returns>
+        private bool IsEnabled(string id) => this.GetCommand(id)?.Enabled == true;
 
         /// <summary>
         /// Collega il passaggio hover tra menu dopo la prima apertura a click

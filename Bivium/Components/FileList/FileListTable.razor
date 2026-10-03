@@ -3,7 +3,7 @@
 @inject IJSRuntime JSRuntime
 @using System.Globalization
 
-<div id="@this.HostId" class="radzen-file-grid-host" data-parent-row-count="@(this.HasParentDirectory() ? 1 : 0)" @oncontextmenu="this.HandleBackgroundContextMenuAsync" @oncontextmenu:preventDefault="true" @oncontextmenu:stopPropagation="true">
+<div id="@this.HostId" class="radzen-file-grid-host" data-default-column-layout="@(this.State.Columns.Count == 0 && !this.HasLegacyRatios() ? "true" : "false")" data-parent-row-count="@(this.HasParentDirectory() ? 1 : 0)" @oncontextmenu="this.HandleBackgroundContextMenuAsync" @oncontextmenu:preventDefault="true" @oncontextmenu:stopPropagation="true">
     <RadzenDataGrid @ref="this._grid" Data="@this._rowsRenderSnapshot" TItem="FileListRow"
                     AllowVirtualization="true" VirtualizationOverscanCount="8" Density="Density.Compact" Style="height:100%"
                     AllowSorting="false" AllowColumnResize="true" AllowColumnReorder="true"
@@ -645,7 +645,7 @@
 
         double[] widths = this.HasLegacyRatios()
             ? new[] { this.State.NameColumnRatio.Value * 1000, this.State.SizeColumnRatio.Value * 1000, this.State.DateColumnRatio.Value * 1000, this.State.AttributesColumnRatio.Value * 1000, this.State.OwnerColumnRatio.Value * 1000 }
-            : new[] { 360d, 120d, 180d, 120d, 160d };
+            : new[] { 180d, 80d, 132d, 88d, 72d };
         FileListColumnId[] ids = Enum.GetValues<FileListColumnId>();
         List<FileListColumnState> result = new List<FileListColumnState>();
         for (int i = 0; i < ids.Length; i++)
@@ -654,13 +654,13 @@
     }
 
     /// <summary>
-    /// Lascia a Radzen il fit iniziale, preservando larghezze persistite e rapporti legacy
+    /// Riserva ai metadata default compatti e lascia a Name lo spazio residuo iniziale
     /// </summary>
     /// <param name="column">Colonna da proiettare</param>
-    /// <returns>Larghezza fissata oppure null per il layout automatico iniziale</returns>
+    /// <returns>Larghezza fissata oppure null per il fit iniziale di Name, senza alterare layout salvati</returns>
     private string GetColumnWidth(FileListColumnState column)
     {
-        if (this.State.Columns.Count == 0 && !this.HasLegacyRatios())
+        if (column.Id == FileListColumnId.Name && this.State.Columns.Count == 0 && !this.HasLegacyRatios())
             return null;
         return column.Width.ToString("0.##", CultureInfo.InvariantCulture) + "px";
     }

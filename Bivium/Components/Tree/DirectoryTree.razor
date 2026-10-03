@@ -1,14 +1,19 @@
 @namespace Bivium.Components.Tree
+@implements IAsyncDisposable
+@using System
+@using System.Collections.Generic
+@using System.IO
+@using System.Linq
+@using System.Threading.Tasks
 @inject Bivium.Services.IFileSystemService FileSystemService
+@inject IJSRuntime JSRuntime
 
-<RadzenTree class="bivium-directory-tree" Value="@this.CurrentPath" AriaLabel="Directory tree"
-            Expand="this.HandleExpand" Collapse="this.HandleCollapse" Change="this.HandleChange">
-    @foreach (DirectoryTreeItem root in this._roots)
-    {
-        <RadzenTreeItem Text="@root.Name" Value="@root.FullPath" HasChildren="@root.IsDirectory"
-                        Expanded="@this.IsExpanded(root)" Selected="@this.IsSelected(root)" Template="@this.DirectoryTemplate" />
-    }
-</RadzenTree>
+<div @ref="this._host" class="bivium-tree-host">
+    <RadzenTree class="bivium-directory-tree" Value="@this._currentPath" AriaLabel="Directory tree"
+                Expand="this.HandleExpandAsync" Collapse="this.HandleCollapseAsync" Change="this.HandleChangeAsync">
+        @this.RenderNodes(this._roots)
+    </RadzenTree>
+</div>
 
 @code {
     /// <summary>
@@ -47,56 +52,149 @@
     private List<DirectoryTreeItem> _roots = new List<DirectoryTreeItem>();
 
     /// <summary>
-    /// Radice osservata nell'ultimo caricamento
+    /// Snapshot di espansione usato esclusivamente dalla proiezione UI
     /// </summary>
-    private string _previousRootPath = "";
+    private HashSet<string> _expandedPaths = new HashSet<string>();
+
+    /// <summary>
+    /// Espansioni automatiche ancora da inoltrare al proprietario
+    /// </summary>
+    private HashSet<string> _pendingExpansions = new HashSet<string>();
+
+    /// <summary>
+    /// Percorso normalizzato osservato nell'ultimo render
+    /// </summary>
+    private string _currentPath = "";
+
+    /// <summary>
+    /// Nodo selezionato nella gerarchia della radice filesystem
+    /// </summary>
+    private DirectoryTreeItem _selectedNode;
+
+    /// <summary>
+    /// Stato transitorio del caricamento e dello scroll
+    /// </summary>
+    private bool _initialized, _scrollPending, _publishingExpansions, _isDisposed;
+
+    /// <summary>
+    /// Host DOM e modulo stateless dello scroll locale
+    /// </summary>
+    private ElementReference _host;
+    private IJSObjectReference _jsModule;
+
+    /// <summary>
+    /// Import condiviso tra render sovrapposti e atteso anche dal cleanup
+    /// </summary>
+    private Task<IJSObjectReference> _moduleImport;
 
     /// <summary>
     /// Proietta l'icona directory e il percorso completo lasciando a Radzen gli eventi del nodo
     /// </summary>
-    private RenderFragment<RadzenTreeItem> DirectoryTemplate => item => @<span class="bivium-tree-name" title="@item.Value">
+    private RenderFragment<RadzenTreeItem> DirectoryTemplate => item => @<span class="bivium-tree-name" title="@item.Value" data-directory-path="@item.Value">
         <RadzenIcon Icon="folder" aria-hidden="true" /><span>@item.Text</span>
     </span>;
 
     /// <summary>
-    /// Carica le radici iniziali
-    /// </summary>
-    protected override void OnInitialized()
-    {
-        this.LoadRoots();
-    }
-
-    /// <summary>
-    /// Ricarica le radici soltanto quando cambia il volume
+    /// Riproietta lo snapshot e rivela gli antenati soltanto al cambio percorso
     /// </summary>
     protected override void OnParametersSet()
     {
-        string currentRoot = Path.GetPathRoot(this.RootPath);
-        string previousRoot = Path.GetPathRoot(this._previousRootPath);
-        if (!string.Equals(currentRoot, previousRoot, StringComparison.OrdinalIgnoreCase))
-            this.LoadRoots();
-        this._previousRootPath = this.RootPath;
+        bool initializeUnixRoot = !this._initialized && !OperatingSystem.IsWindows();
+        if (!this._initialized)
+        {
+            this._initialized = true;
+            if (OperatingSystem.IsWindows())
+            {
+                this._roots = this.FileSystemService.GetDriveRoots().OrderBy(entry => entry.Name, StringComparer.OrdinalIgnoreCase).Select(entry => new DirectoryTreeItem(entry)).ToList();
+            }
+            else
+            {
+                FileSystemEntry root = this.FileSystemService.GetEntryInfo("/");
+                if (root.IsDirectory && !string.IsNullOrEmpty(root.FullPath))
+                {
+                    root.Name = "/";
+                    this._roots.Add(new DirectoryTreeItem(root));
+                }
+            }
+        }
+
+        StringComparer comparer = this.GetPathComparison() == StringComparison.Ordinal ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
+        this._expandedPaths = new HashSet<string>(this.ExpandedDirectoryPaths.Select(this.NormalizePath), comparer);
+        this._expandedPaths.UnionWith(this._pendingExpansions);
+        if (initializeUnixRoot && this._roots.Count > 0 && this._expandedPaths.Add(this._roots[0].FullPath))
+            this._pendingExpansions.Add(this._roots[0].FullPath);
+        string path = this.NormalizePath(this.CurrentPath);
+        if (!string.Equals(path, this._currentPath, this.GetPathComparison()))
+        {
+            this._currentPath = path;
+            this.RevealCurrentPath();
+            this._scrollPending = true;
+        }
+        this.LoadExpandedBranches(this._roots);
     }
 
     /// <summary>
-    /// Materializza i figli del nodo espanso usando il payload lazy Radzen
+    /// Pubblica le richieste automatiche e scorre senza spostare il focus DOM
+    /// </summary>
+    /// <param name="firstRender">True al primo render interattivo</param>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (this._isDisposed)
+            return;
+
+        if (!this._publishingExpansions)
+        {
+            this._publishingExpansions = true;
+            try
+            {
+                foreach (string path in this._pendingExpansions.ToArray())
+                {
+                    if (this._pendingExpansions.Contains(path))
+                        await this.OnExpansionChanged.InvokeAsync(new DirectoryTreeExpansionChange { Path = path, Expanded = true });
+                    this._pendingExpansions.Remove(path);
+                }
+            }
+            finally
+            {
+                this._publishingExpansions = false;
+            }
+        }
+
+        if (this._scrollPending && !this._isDisposed)
+        {
+            this._scrollPending = false;
+            if (this._jsModule == null)
+            {
+                if (this._moduleImport == null)
+                    this._moduleImport = this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/directory-tree.js").AsTask();
+                IJSObjectReference module = await this._moduleImport;
+                if (this._isDisposed)
+                    return;
+                this._jsModule = module;
+            }
+            if (!this._isDisposed)
+            {
+                string path = this._selectedNode?.FullPath ?? this._currentPath;
+                bool revealed = await this._jsModule.InvokeAsync<bool>("revealDirectory", this._host, path);
+                if (string.Equals(path, this._currentPath, this.GetPathComparison()))
+                    this._scrollPending = !revealed;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Materializza il ramo richiesto senza delegare a Radzen identità dei data item
     /// </summary>
     /// <param name="args">Nodo richiesto da Radzen</param>
-    private async System.Threading.Tasks.Task HandleExpand(TreeExpandEventArgs args)
+    private async Task HandleExpandAsync(TreeExpandEventArgs args)
     {
-        string path = args.Value?.ToString() ?? "";
-        List<DirectoryTreeItem> children = string.IsNullOrEmpty(path) ? new List<DirectoryTreeItem>() : this.FileSystemService.GetSubDirectories(path).Select(entry => new DirectoryTreeItem(entry)).ToList();
-        args.Children = new TreeItemSettings
-        {
-            Data = children,
-            TextProperty = nameof(DirectoryTreeItem.Name),
-            Template = this.DirectoryTemplate,
-            HasChildren = this.HasChildren,
-            Expanded = this.IsExpanded,
-            Selected = this.IsSelected
-        };
-
-        if (!string.IsNullOrEmpty(path) && !this.ExpandedDirectoryPaths.Contains(path))
+        string path = args.Value as string ?? "";
+        DirectoryTreeItem node = this.FindNode(this._roots, path);
+        if (node == null)
+            return;
+        bool wasExpanded = this._expandedPaths.Contains(path);
+        this.LoadChildren(node, !wasExpanded);
+        if (this._expandedPaths.Add(path))
             await this.OnExpansionChanged.InvokeAsync(new DirectoryTreeExpansionChange { Path = path, Expanded = true });
     }
 
@@ -104,10 +202,11 @@
     /// Inoltra al proprietario la compressione di un nodo
     /// </summary>
     /// <param name="args">Nodo compresso da Radzen</param>
-    private async System.Threading.Tasks.Task HandleCollapse(TreeEventArgs args)
+    private async Task HandleCollapseAsync(TreeEventArgs args)
     {
-        string path = args.Value?.ToString() ?? "";
-        if (!string.IsNullOrEmpty(path) && this.ExpandedDirectoryPaths.Contains(path))
+        string path = args.Value as string ?? "";
+        this._pendingExpansions.Remove(path);
+        if (this._expandedPaths.Remove(path))
             await this.OnExpansionChanged.InvokeAsync(new DirectoryTreeExpansionChange { Path = path, Expanded = false });
     }
 
@@ -115,41 +214,144 @@
     /// Inoltra la selezione del nodo come navigazione semantica
     /// </summary>
     /// <param name="args">Nodo selezionato</param>
-    private async System.Threading.Tasks.Task HandleChange(TreeEventArgs args)
+    private async Task HandleChangeAsync(TreeEventArgs args)
     {
-        string path = args.Value?.ToString() ?? "";
-        if (!string.IsNullOrEmpty(path))
+        string path = args.Value as string ?? "";
+        // Radzen notifica Change anche quando Selected viene proiettato dai parametri
+        if (!string.IsNullOrEmpty(path) && !string.Equals(path, this._currentPath, this.GetPathComparison()))
             await this.OnDirectorySelected.InvokeAsync(path);
     }
 
     /// <summary>
-    /// Indica a Radzen che una directory può essere espansa senza anticiparne la lettura
+    /// Renderizza soltanto i nodi materializzati con Value stringa e chiave fullpath
     /// </summary>
-    /// <param name="item">Entry associata al nodo</param>
-    /// <returns>True per le directory</returns>
-    private bool HasChildren(object item)
+    /// <param name="nodes">Nodi del livello</param>
+    /// <returns>Componenti ufficiali Radzen del livello</returns>
+    private RenderFragment RenderNodes(List<DirectoryTreeItem> nodes)
     {
-        return item is DirectoryTreeItem entry && entry.IsDirectory;
+        return builder =>
+        {
+            foreach (DirectoryTreeItem node in nodes)
+            {
+                builder.OpenComponent<RadzenTreeItem>(0);
+                builder.SetKey(node.FullPath);
+                builder.AddAttribute(1, nameof(RadzenTreeItem.Text), node.Name);
+                builder.AddAttribute(2, nameof(RadzenTreeItem.Value), node.FullPath);
+                builder.AddAttribute(3, nameof(RadzenTreeItem.HasChildren), node.IsDirectory);
+                builder.AddAttribute(4, nameof(RadzenTreeItem.Expanded), this._expandedPaths.Contains(node.FullPath));
+                builder.AddAttribute(5, nameof(RadzenTreeItem.Selected), ReferenceEquals(node, this._selectedNode));
+                builder.AddAttribute(6, nameof(RadzenTreeItem.Template), this.DirectoryTemplate);
+                if (node.Children != null && node.Children.Count > 0)
+                    builder.AddAttribute(7, nameof(RadzenTreeItem.ChildContent), this.RenderNodes(node.Children));
+                builder.CloseComponent();
+            }
+        };
     }
 
     /// <summary>
-    /// Ripristina lo stato espanso in base al percorso completo
+    /// Materializza gli antenati dalla radice filesystem, senza consultare i mount
     /// </summary>
-    /// <param name="item">Entry associata al nodo</param>
-    /// <returns>True quando il percorso è nello snapshot semantico</returns>
-    private bool IsExpanded(object item)
+    private void RevealCurrentPath()
     {
-        return item is DirectoryTreeItem entry && this.ExpandedDirectoryPaths.Contains(entry.FullPath);
+        this._selectedNode = null;
+        if (string.IsNullOrEmpty(this._currentPath))
+            return;
+
+        List<string> descendants = new List<string>();
+        string rootPath = this.NormalizePath(Path.GetPathRoot(this._currentPath));
+        DirectoryTreeItem node = this._roots.FirstOrDefault(root => string.Equals(root.FullPath, rootPath, this.GetPathComparison()));
+        if (node == null)
+            return;
+
+        // La radice Unix mostra le sue cartelle anche quando CurrentPath coincide con /
+        if (!OperatingSystem.IsWindows() && this._expandedPaths.Add(node.FullPath))
+            this._pendingExpansions.Add(node.FullPath);
+        DirectoryInfo directory = new DirectoryInfo(this._currentPath);
+        while (directory != null)
+        {
+            string path = this.NormalizePath(directory.FullName);
+            if (string.Equals(path, rootPath, this.GetPathComparison()))
+                break;
+            descendants.Add(path);
+            directory = directory.Parent;
+        }
+        descendants.Reverse();
+        foreach (string path in descendants)
+        {
+            if (node == null)
+                break;
+            this.LoadChildren(node);
+            if (this._expandedPaths.Add(node.FullPath))
+                this._pendingExpansions.Add(node.FullPath);
+            DirectoryTreeItem next = node.Children.FirstOrDefault(child => string.Equals(child.FullPath, path, this.GetPathComparison()));
+            if (next == null)
+            {
+                // Una cartella appena creata può non essere ancora nella cache del padre
+                this.LoadChildren(node, true);
+                next = node.Children.FirstOrDefault(child => string.Equals(child.FullPath, path, this.GetPathComparison()));
+            }
+            node = next;
+        }
+        this._selectedNode = node;
     }
 
     /// <summary>
-    /// Evidenzia il nodo che corrisponde al percorso corrente
+    /// Carica o aggiorna un solo livello, conservando i nodi e i rami ancora presenti
     /// </summary>
-    /// <param name="item">Entry associata al nodo</param>
-    /// <returns>True quando il percorso coincide con quello corrente</returns>
-    private bool IsSelected(object item)
+    /// <param name="node">Nodo da materializzare</param>
+    /// <param name="reload">True per rileggere anche un livello già materializzato</param>
+    private void LoadChildren(DirectoryTreeItem node, bool reload = false)
     {
-        return item is DirectoryTreeItem entry && string.Equals(entry.FullPath, this.CurrentPath, this.GetPathComparison());
+        if (node.Children != null && !reload)
+            return;
+
+        StringComparer comparer = this.GetPathComparison() == StringComparison.Ordinal ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
+        Dictionary<string, DirectoryTreeItem> previous = node.Children == null ? new Dictionary<string, DirectoryTreeItem>(comparer) : node.Children.ToDictionary(child => child.FullPath, comparer);
+        List<DirectoryTreeItem> children = new List<DirectoryTreeItem>();
+        foreach (FileSystemEntry entry in this.FileSystemService.GetSubDirectories(node.FullPath))
+        {
+            string path = this.NormalizePath(entry.FullPath);
+            if (previous.TryGetValue(path, out DirectoryTreeItem child))
+                children.Add(child);
+            else
+                children.Add(new DirectoryTreeItem(entry));
+        }
+        node.Children = children;
+    }
+
+    /// <summary>
+    /// Ripristina solo i rami richiesti dallo snapshot, senza una scansione del filesystem
+    /// </summary>
+    /// <param name="nodes">Livello già materializzato</param>
+    private void LoadExpandedBranches(List<DirectoryTreeItem> nodes)
+    {
+        foreach (DirectoryTreeItem node in nodes)
+        {
+            if (this._expandedPaths.Contains(node.FullPath))
+            {
+                this.LoadChildren(node);
+                this.LoadExpandedBranches(node.Children);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Cerca soltanto nella cache UI, senza effettuare letture filesystem
+    /// </summary>
+    /// <param name="nodes">Livello della cache</param>
+    /// <param name="path">Identità richiesta</param>
+    /// <returns>Nodo trovato oppure null</returns>
+    private DirectoryTreeItem FindNode(List<DirectoryTreeItem> nodes, string path)
+    {
+        foreach (DirectoryTreeItem node in nodes)
+        {
+            if (string.Equals(node.FullPath, path, this.GetPathComparison()))
+                return node;
+            DirectoryTreeItem match = node.Children == null ? null : this.FindNode(node.Children, path);
+            if (match != null)
+                return match;
+        }
+        return null;
     }
 
     /// <summary>
@@ -162,11 +364,34 @@
     }
 
     /// <summary>
-    /// Legge le radici filesystem tramite il servizio esistente
+    /// Normalizza separatori finali senza trasformare la radice in un percorso vuoto
     /// </summary>
-    private void LoadRoots()
+    /// <param name="path">Percorso semantico</param>
+    /// <returns>Percorso completo normalizzato</returns>
+    private string NormalizePath(string path)
     {
-        this._roots = this.FileSystemService.GetDriveRoots().Select(entry => new DirectoryTreeItem(entry)).ToList();
+        return string.IsNullOrEmpty(path) ? "" : Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+    }
+
+    /// <summary>
+    /// Rilascia il modulo di scroll, che non registra listener o observer
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (this._isDisposed)
+            return;
+        this._isDisposed = true;
+        try
+        {
+            IJSObjectReference module = this._jsModule;
+            if (module == null && this._moduleImport != null)
+                module = await this._moduleImport;
+            if (module != null)
+                await module.DisposeAsync();
+        }
+        catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException)
+        {
+        }
     }
 
     /// <summary>
@@ -181,7 +406,7 @@
         public DirectoryTreeItem(FileSystemEntry entry)
         {
             this.Name = entry.Name;
-            this.FullPath = entry.FullPath;
+            this.FullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(entry.FullPath));
             this.IsDirectory = entry.IsDirectory;
         }
 
@@ -201,12 +426,8 @@
         public bool IsDirectory { get; }
 
         /// <summary>
-        /// Espone FullPath agli eventi Radzen che restituiscono il data item come Value
+        /// Figli materializzati nella cache UI, null fino alla prima espansione
         /// </summary>
-        /// <returns>Percorso completo</returns>
-        public override string ToString()
-        {
-            return this.FullPath;
-        }
+        public List<DirectoryTreeItem> Children { get; set; }
     }
 }

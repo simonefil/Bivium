@@ -1,4 +1,9 @@
 /* Official Radzen tree tokens keep the native focus/selection/lazy behaviour. */
+.radzen-panel-tree .bivium-tree-host {
+    min-width: 100%;
+    width: max-content;
+}
+
 .radzen-panel-tree .bivium-directory-tree {
     width: 100%;
     min-height: 100%;

@@ -34,9 +34,11 @@ else if (!this._clientAttached || !this._hasActiveLease)
 }
 else
 {
+    System.Collections.Generic.IReadOnlyList<Bivium.Components.Shared.CommanderCommandState> commands = this.GetCommandStates();
 <RadzenLayout class="commander-layout">
     <RadzenHeader>
     <Bivium.Components.Shared.MenuBar
+        Commands="@commands"
         OnNewFile="this.DoNewFile" OnNewFolder="this.DoNewFolder" OnDownload="this.DoDownload" OnUpload="this.DoUpload"
         OnExit="this.DoExit" OnResetWorkspace="this.DoResetWorkspace" OnCopy="this.DoCopy" OnCut="this.DoCut" OnPaste="this.DoPaste"
         OnDelete="this.DoDelete" OnRename="this.DoRename" OnSelectAll="this.DoSelectAll" OnAdvancedRename="this.DoAdvancedRename"
@@ -47,9 +49,9 @@ else
         OnExtract="this.DoExtract" OnCompress="this.DoCompress" OnToggleSinglePanel="this.DoToggleSinglePanel"
         ThemeOptions="@RadzenThemeCatalog.GetThemes()" CurrentTheme="@this._currentTheme" OnThemeChanged="this.DoThemeChange"
         OnLogout="this.DoLogout" SinglePanelMode="@this._singlePanelMode" IsMultiSelection="@(this.GetActivePanel().SelectedPaths.Count > 1)"
-        CanExtract="@this.CanExtractActiveTarget()" CanCompress="@this.CanCompressActiveTarget()" CanLogout="@this._authStatus.Authenticated"
+        CanLogout="@this._authStatus.Authenticated"
         CanManageAuthenticationSettings="@this._authStatus.CanManageSettings" CanInvoke="this.CanMutateWorkspace"
-        OnAbout="() => this._aboutDialog.Show()" />
+        OnAbout="this.DoAbout" />
     </RadzenHeader>
     <RadzenBody>
     <div class="radzen-panels-area @this._panelsAreaClass">
@@ -95,6 +97,7 @@ else
     </RadzenBody>
     <RadzenFooter>
     <Bivium.Components.Shared.StatusBar SelectedPaths="@this.GetActivePanel().SelectedPaths" CurrentPath="@this.GetActivePanel().CurrentPath"
+        Commands="@commands"
         Entries="@this.GetActivePanel().Entries" ProgressText="@this.GetStatusCenterText()" CanCancelOperation="@(this._operationCancellation != null)"
         OnCancelOperation="this.CancelActiveOperation" />
 

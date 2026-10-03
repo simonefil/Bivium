@@ -400,7 +400,76 @@ export function initResizer(splitterId, direction, cssVarName) {
 export function captureKeyboard(dotNetRef) {
     disposeKeyboardCapture();
     const eventController = new AbortController();
+    let disposed = false;
+    let contextFrame = 0;
+    let lastContext = '';
+    let pendingContext = Promise.resolve();
+    const semanticControlSelector = '[role="combobox"], [role="listbox"], [role="spinbutton"], [role="slider"], [role="tab"], .rz-column-picker';
+    const nativeOwnerSelector = 'button, a, input, textarea, select, [contenteditable], [role="button"], [role="menu"], [role="menuitem"], [role="tree"], [role="treeitem"], .rz-tree, .radzen-panel-tree, .rz-menu, .rz-menu-popup, .rz-navigation-item, ' + semanticControlSelector;
+    const dialogSelector = '[aria-modal="true"], .context-menu-overlay, .rz-dialog-wrapper, .rz-dialog-mask, .rz-context-menu, .rz-menu-popup';
+
+    function reportContext() {
+        contextFrame = 0;
+        if (disposed || !isCircuitConnected()) return;
+        const activeEl = document.activeElement;
+        const modal = isBlockingModalOpen();
+        const terminalWindow = document.getElementById('terminal-window');
+        const editorWindow = document.getElementById('editor-window');
+        const inTerminal = terminalWindow && terminalWindow.classList.contains('visible') &&
+            (terminalWindow.contains(activeEl) || activeEl?.closest?.('.terminal-body'));
+        const inEditor = editorWindow && editorWindow.classList.contains('visible') &&
+            (editorWindow.contains(activeEl) || activeEl?.closest?.('#monaco-container'));
+        const hasDialog = Array.from(document.querySelectorAll(dialogSelector)).some(isVisibleElement);
+        const semanticOwner = activeEl?.closest?.(semanticControlSelector);
+        const nativeOwner = activeEl?.closest?.(nativeOwnerSelector);
+        const fileSurface = activeEl?.closest?.('.radzen-panel-filelist, .panel-filelist, .radzen-file-grid-host');
+        const workspaceBody = (!activeEl || activeEl === document.body) && document.querySelector('.radzen-file-panel.active, .file-panel.active');
+        const input = activeEl && ['INPUT', 'TEXTAREA'].includes(activeEl.tagName);
+        const inputInDialog = input && (activeEl.closest('.context-menu') || activeEl.closest('.renamer-window'));
+        const available = !modal && !inTerminal && !inEditor && !hasDialog && !semanticOwner;
+        const general = Boolean(available && !input);
+        const control = Boolean(available && (!input || !inputInDialog));
+        const navigation = Boolean(general && !nativeOwner && (fileSurface || workspaceBody));
+        const panelSwitch = Boolean(general && !nativeOwner && activeEl?.closest?.('.radzen-panel-filelist, .panel-filelist'));
+        const values = [general, control, navigation, panelSwitch, !modal, modal];
+        const signature = values.join('|');
+        if (signature === lastContext) return;
+        lastContext = signature;
+        // Serialize notifications; a callback already in flight cannot overtake a newer context.
+        pendingContext = pendingContext.then(function () {
+            if (disposed || !isCircuitConnected()) return;
+            return invokeCircuitMethod(dotNetRef, 'OnKeyboardContextChanged', ...values);
+        }).catch(function () { });
+    }
+
+    function scheduleContext() {
+        if (!disposed && !contextFrame) contextFrame = requestAnimationFrame(reportContext);
+    }
+
+    document.addEventListener('focusin', scheduleContext, { signal: eventController.signal });
+    document.addEventListener('focusout', scheduleContext, { signal: eventController.signal });
+    const contextLayerSelector = dialogSelector + ', dialog, .terminal-window, .editor-window, .renamer-window';
+    const contextObserver = new MutationObserver(function (records) {
+        if (records.some(function (record) {
+            if (record.type === 'attributes') return record.target.matches(contextLayerSelector);
+            return [...record.addedNodes, ...record.removedNodes].some(function (node) {
+                return node.nodeType === 1 && (node.matches(contextLayerSelector) || node.querySelector(contextLayerSelector) || node.contains(document.activeElement));
+            });
+        })) scheduleContext();
+    });
+    contextObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'open', 'aria-modal'] });
+    const unregisterContext = registerCircuitParticipant({
+        phase: 'presence',
+        recover: async function (isCurrent) {
+            if (disposed || !isCurrent()) return;
+            lastContext = '';
+            scheduleContext();
+        }
+    });
+    scheduleContext();
     document.addEventListener('keydown', function (e) {
+        if (disposed) return;
+        scheduleContext();
         const key = e.key;
         const ctrl = e.ctrlKey;
         const shift = e.shiftKey;
@@ -448,7 +517,7 @@ export function captureKeyboard(dotNetRef) {
         }
 
         // If a dialog overlay is visible, let the dialog handle keyboard events
-        const hasDialog = Array.from(document.querySelectorAll('[aria-modal="true"], .context-menu-overlay, .rz-dialog-wrapper, .rz-dialog-mask, .rz-context-menu, .rz-menu-popup')).some(function (element) {
+        const hasDialog = Array.from(document.querySelectorAll(dialogSelector)).some(function (element) {
             const style = globalThis.getComputedStyle(element);
             return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
         });
@@ -456,8 +525,6 @@ export function captureKeyboard(dotNetRef) {
             return;
         }
 
-        const semanticControlSelector = '[role="combobox"], [role="listbox"], [role="spinbutton"], [role="slider"], [role="tab"], .rz-column-picker';
-        const nativeOwnerSelector = 'button, a, input, textarea, select, [contenteditable], [role="button"], [role="menu"], [role="menuitem"], [role="tree"], [role="treeitem"], .rz-tree, .radzen-panel-tree, .rz-menu, .rz-menu-popup, .rz-navigation-item, ' + semanticControlSelector;
         const nativeOwner = activeEl?.closest?.(nativeOwnerSelector);
         // Semantic input widgets own their keys (including Ctrl chords), after reserved F12.
         if (activeEl?.closest?.(semanticControlSelector)) return;
@@ -544,7 +611,15 @@ export function captureKeyboard(dotNetRef) {
         // Send key event to .NET
         invokeCircuitMethod(dotNetRef, 'OnKeyDown', key, ctrl, shift, alt).catch(function () { });
     }, { capture: true, signal: eventController.signal });
-    keyboardCaptureRegistration = { dispose: function () { eventController.abort(); } };
+    keyboardCaptureRegistration = {
+        dispose: function () {
+            disposed = true;
+            cancelAnimationFrame(contextFrame);
+            eventController.abort();
+            contextObserver.disconnect();
+            unregisterContext();
+        }
+    };
 }
 
 export function disposeKeyboardCapture() {

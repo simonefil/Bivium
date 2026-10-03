@@ -3,6 +3,14 @@
     min-width: 0;
 }
 
+.bivium-menu-command-label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    flex: 1;
+    gap: 1rem;
+}
+
 /* The menu bar drops down; only nested menu items use Radzen flyouts. */
 .bivium-radzen-menu-bar .rz-menu > .rz-navigation-item > .rz-navigation-menu {
     top: 100%;

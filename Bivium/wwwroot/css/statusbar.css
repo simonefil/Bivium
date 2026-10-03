@@ -1,4 +1,56 @@
 /* Status-only footer: domain strings stay owned by the existing adapter. */
+.bivium-radzen-status-bar {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    min-width: 0;
+    max-width: 100%;
+    flex-wrap: nowrap;
+}
+
+.bivium-radzen-status-bar > .bivium-radzen-status-progress {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    flex: 0 1 auto;
+}
+
+.bivium-radzen-status-progress > .rz-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.bivium-radzen-status-progress > .rz-button {
+    flex-shrink: 0;
+}
+
+.bivium-radzen-status-bar > .bivium-status-shortcuts {
+    display: flex;
+    flex: 1 1 0;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: safe center;
+    min-width: 0;
+    max-width: 100%;
+    gap: .25rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.bivium-status-shortcut {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: .25rem;
+    white-space: nowrap;
+}
+
+.bivium-status-shortcut > .rz-badge,
+.bivium-status-shortcut > .rz-text {
+    flex: 0 0 auto;
+}
+
 .bivium-radzen-status-bar > span {
     min-width: 0;
     overflow: hidden;
@@ -6,14 +58,18 @@
     white-space: nowrap;
 }
 
-.bivium-radzen-status-bar > span:first-child,
-.bivium-radzen-status-bar > span:last-child {
-    flex: 1;
+.bivium-radzen-status-bar > .bivium-status-selection,
+.bivium-radzen-status-bar > .bivium-status-disk {
+    flex: 0 1 auto;
 }
 
-.bivium-radzen-status-bar > span:last-child { text-align: right; }
+.bivium-radzen-status-bar > .bivium-status-disk {
+    text-align: right;
+    margin-inline-start: auto;
+}
 
 @media (max-width: 767px) {
     .bivium-radzen-status-bar { flex-wrap: wrap; }
-    .bivium-radzen-status-progress { flex-basis: 100%; order: 1; }
+    .bivium-radzen-status-bar > .bivium-status-shortcuts { flex-basis: 100%; order: 2; }
+    .bivium-radzen-status-bar > .bivium-radzen-status-progress { flex-basis: 100%; order: 1; }
 }

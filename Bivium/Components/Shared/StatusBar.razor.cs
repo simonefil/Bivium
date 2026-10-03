@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Components;
 using Bivium.Models;
 using Bivium.Services;
+using System.Collections.Generic;
 
 namespace Bivium.Components.Shared
 {
@@ -10,6 +11,10 @@ namespace Bivium.Components.Shared
     public partial class StatusBar : ComponentBase
     {
         #region Parameters
+
+        /// <summary>Disponibilità e shortcut calcolati esclusivamente dal Commander</summary>
+        [Parameter]
+        public IReadOnlyList<CommanderCommandState> Commands { get; set; } = new List<CommanderCommandState>();
 
         /// <summary>
         /// List of selected file paths
@@ -52,6 +57,23 @@ namespace Bivium.Components.Shared
         #region Class Variables
 
         /// <summary>
+        /// Identificatori delle azioni mostrate nella legenda, nell'ordine storico
+        /// </summary>
+        private static readonly IReadOnlyList<string> s_shortcutIds = new List<string>
+        {
+            "copy",
+            "cut",
+            "paste",
+            "delete",
+            "rename",
+            "new-folder",
+            "refresh",
+            "properties",
+            "terminal",
+            "about"
+        };
+
+        /// <summary>
         /// Formatted selection info string
         /// </summary>
         private string _selectionInfo = "Ready";
@@ -88,6 +110,35 @@ namespace Bivium.Components.Shared
         #endregion
 
         #region Private Methods
+
+        /// <summary>
+        /// Finds a command projection by its identifier
+        /// </summary>
+        /// <param name="commandId">Identifier of the command to find</param>
+        /// <returns>The matching command projection, or null when it is not received</returns>
+        private CommanderCommandState GetCommand(string commandId)
+        {
+            for (int i = 0; i < this.Commands.Count; i++)
+            {
+                if (this.Commands[i].Id == commandId)
+                    return this.Commands[i];
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Returns the legacy visual shortcut text without changing the command mapping
+        /// </summary>
+        /// <param name="command">Command projection received from the Commander</param>
+        /// <returns>Shortcut text for the legend keycap</returns>
+        private string GetVisualShortcut(CommanderCommandState command)
+        {
+            if (command.Id == "delete")
+                return "Del";
+
+            return command.Shortcut;
+        }
 
         /// <summary>
         /// Updates the selection info text

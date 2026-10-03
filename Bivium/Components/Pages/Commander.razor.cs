@@ -9,6 +9,9 @@ using Bivium.Components.Shared;
 using Bivium.Components.Panel;
 using Bivium.Components.Tree;
 using Radzen;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace Bivium.Components.Pages
 {
@@ -460,6 +463,15 @@ namespace Bivium.Components.Pages
         /// </summary>
         private string _currentTheme = RadzenThemeCatalog.DEFAULT_THEME;
 
+        /// <summary>Workflow modal occupato prima dell'apertura e fino al callback conclusivo</summary>
+        private bool _commandDialogOpen;
+
+        /// <summary>Disponibilità del solo contesto tastiera comunicata dal browser</summary>
+        private bool _keyboardGeneral, _keyboardControl, _keyboardNavigation, _keyboardPanelSwitch, _keyboardTerminal;
+
+        /// <summary>Modal DOM bloccante, distinto dalle finestre modeless e dai popup menu</summary>
+        private bool _keyboardModal;
+
         #endregion
 
         #region Overrides
@@ -565,6 +577,8 @@ namespace Bivium.Components.Pages
         private void ApplyAttachResult(WorkspaceAttachResult result)
         {
             this._hasActiveLease = result != null && result.HasControl;
+            if (!this._hasActiveLease)
+                this._commandDialogOpen = false;
             this._observedLease = result?.ActiveLease;
             this._leaseGeneration = this._hasActiveLease && result.ActiveLease != null ? result.ActiveLease.Generation : 0;
             if (result != null)
@@ -590,6 +604,7 @@ namespace Bivium.Components.Pages
                     if (this._isDisposed)
                         return;
                     this._hasActiveLease = false;
+                    this._commandDialogOpen = false;
                     this._leaseGeneration = 0;
                     this._panelsInitialized = false;
                     await this.UpdateWorkspacePresenceLeaseAsync();
@@ -641,7 +656,10 @@ namespace Bivium.Components.Pages
             this._leaseGeneration = hasControl ? lease.Generation : 0;
             this.ConfigureLeaseRevocation();
             if (!hasControl)
+            {
                 this._panelsInitialized = false;
+                this._commandDialogOpen = false;
+            }
             _ = this.InvokeAsync(async () =>
             {
                 await this.UpdateWorkspacePresenceLeaseAsync();
@@ -683,6 +701,7 @@ namespace Bivium.Components.Pages
             WorkspaceClientToken token = this.GetClientToken();
             this._workspaceService.MarkClientDisconnected(token);
             this._hasActiveLease = false;
+            this._commandDialogOpen = false;
             this._leaseGeneration = 0;
             this._panelsInitialized = false;
         }
@@ -722,6 +741,7 @@ namespace Bivium.Components.Pages
             if (!result)
             {
                 this._hasActiveLease = false;
+                this._commandDialogOpen = false;
                 this._leaseGeneration = 0;
             }
 
@@ -1016,7 +1036,7 @@ namespace Bivium.Components.Pages
         /// <param name="index">Panel index (0=left, 1=right)</param>
         private void SetActivePanel(int index)
         {
-            if (this.CanMutateWorkspace())
+            if (this.IsCommandWorkflowAvailable() && this.CanMutateWorkspace())
                 this._activePanel = Math.Clamp(index, 0, 1);
         }
 
@@ -1025,7 +1045,7 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void SwitchResponsivePanel()
         {
-            if (this.CanMutateWorkspace() && !this._singlePanelMode)
+            if (this.IsCommandWorkflowAvailable() && this.CanMutateWorkspace() && !this._singlePanelMode)
                 this._activePanel = this._activePanel == 0 ? 1 : 0;
         }
 
@@ -1065,7 +1085,7 @@ namespace Bivium.Components.Pages
         /// <returns>True when navigation completed</returns>
         private bool NavigatePanel(PanelState panel, string path, PanelNavigationKind kind)
         {
-            if (!this.CanMutateWorkspace())
+            if (!this.IsCommandWorkflowAvailable() || !this.CanMutateWorkspace())
                 return false;
 
             string destination = path;
@@ -1660,7 +1680,7 @@ namespace Bivium.Components.Pages
         /// <param name="request">Interazione richiesta dalla superficie UI</param>
         private void HandleFileListInteraction(PanelState panel, FileListInteractionRequest request)
         {
-            if (panel == null || request == null || !this.CanMutateWorkspace())
+            if (panel == null || request == null || !this.IsCommandWorkflowAvailable() || !this.CanMutateWorkspace())
                 return;
 
             if (request.Intent == FileListInteractionIntent.ClearSelection)
@@ -1822,6 +1842,8 @@ namespace Bivium.Components.Pages
         /// <param name="panelIndex">Panel index (0=left, 1=right)</param>
         private void HandleContextMenuRequest(ContextMenuEventArgs args, int panelIndex)
         {
+            if (!this.IsCommandWorkflowAvailable() || !this.CanMutateWorkspace())
+                return;
             // Switch focus to the panel that was right-clicked
             this._activePanel = panelIndex;
 
@@ -1908,11 +1930,124 @@ namespace Bivium.Components.Pages
 
         #region File Operations
 
+        /// <summary>Disponibilità pura del workflow, indipendente dal focus modeless</summary>
+        /// <returns>True se un nuovo workflow può iniziare</returns>
+        private bool IsCommandWorkflowAvailable()
+        {
+            return this._canAccess && this._hasActiveLease && this._panelsInitialized && !this._isDisposed
+                && this._operationCancellation == null && !this._commandDialogOpen && this._workspaceConfirmationLifetime == null && !this._keyboardModal;
+        }
+
+        /// <summary>Costruisce l'unica proiezione condivisa usando soltanto stato in memoria</summary>
+        /// <returns>Disponibilità azioni e shortcut esistenti</returns>
+        private IReadOnlyList<CommanderCommandState> GetCommandStates()
+        {
+            PanelState active = this.GetActivePanel();
+            List<string> paths = this.GetSelectedOrCursorPaths(active);
+            FileSystemEntry single = paths.Count == 1 ? this.FindEntryByPath(active, paths[0]) : null;
+            FileSystemEntry focused = this.GetFocusedEntry(active);
+            StringComparer pathComparer = this.GetPathComparison() == StringComparison.OrdinalIgnoreCase ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+            HashSet<string> targetPaths = new HashSet<string>(paths, pathComparer);
+            HashSet<string> availablePaths = new HashSet<string>(pathComparer);
+            bool hasSelectedFile = false;
+            bool allTargetsArchives = true;
+            foreach (FileSystemEntry entry in active.Entries)
+            {
+                availablePaths.Add(entry.FullPath);
+                if (targetPaths.Contains(entry.FullPath))
+                {
+                    if (!entry.IsDirectory)
+                        hasSelectedFile = true;
+                    if (entry.IsDirectory || !this._archiveService.IsArchive(entry.FullPath))
+                        allTargetsArchives = false;
+                }
+            }
+            bool ready = this._canAccess && this._hasActiveLease && this._panelsInitialized && !this._isDisposed;
+            bool idle = this.IsCommandWorkflowAvailable();
+            bool target = paths.Count > 0 && paths.All(availablePaths.Contains);
+            bool editable = this.IsEditableEntry(single);
+            bool renameTargets = single != null || (paths.Count > 1 && hasSelectedFile);
+            bool editorVisible = this._editorDialog?.IsVisible() == true;
+            bool renamerVisible = this._renamerDialog?.IsVisible() == true;
+            List<CommanderCommandState> result = new List<CommanderCommandState>();
+
+            void Add(string id, string label, string shortcut, bool enabled)
+            {
+                bool context = shortcut == "F12" ? this._keyboardTerminal
+                    : shortcut == "Tab" ? this._keyboardPanelSwitch
+                    : shortcut == "Enter" || shortcut == "Alt+Enter" || shortcut == "Delete" ? this._keyboardNavigation
+                    : shortcut.StartsWith("Ctrl+", StringComparison.Ordinal) ? this._keyboardControl
+                    : this._keyboardGeneral;
+                result.Add(new CommanderCommandState(id, label, shortcut, enabled, enabled && context && !string.IsNullOrEmpty(shortcut)));
+            }
+
+            Add("new-file", "New File", "Ctrl+N", idle && !string.IsNullOrEmpty(active.CurrentPath));
+            Add("new-folder", "New Folder", "Ctrl+Shift+N", idle && !string.IsNullOrEmpty(active.CurrentPath));
+            Add("copy", "Copy", "Ctrl+C", idle && target);
+            Add("cut", "Cut", "Ctrl+X", idle && target);
+            Add("paste", "Paste", "Ctrl+V", idle && this._clipboard.HasEntries() && !string.IsNullOrEmpty(active.CurrentPath));
+            Add("delete", "Delete", "Delete", idle && target);
+            Add("rename", "Rename", "F2", idle && single != null);
+            Add("advanced-rename", "Advanced Rename...", "Ctrl+F2", idle && target && renameTargets && !renamerVisible);
+            Add("edit", "Edit", "F4", idle && editable && !editorVisible);
+            Add("permissions", "Permissions", "Ctrl+P", idle && single != null);
+            Add("properties", "Properties", "Alt+Enter", idle && single != null);
+            Add("download", paths.Count > 1 ? "Download as ZIP" : "Download", "", idle && target);
+            Add("upload", "Upload", "", idle && !string.IsNullOrEmpty(active.CurrentPath));
+            Add("compress", "Compress to...", "", idle && target);
+            Add("extract", "Extract Here", "", idle && target && allTargetsArchives);
+            Add("select-all", "Select All", "Ctrl+A", idle && active.Entries.Count > 0);
+            Add("refresh", "Refresh", "F5", idle && !string.IsNullOrEmpty(active.CurrentPath));
+            Add("panels", this._singlePanelMode ? "Dual Panel" : "Single Panel", "Ctrl+O", idle);
+            Add("switch-panel", "Switch panel", "Tab", idle && !this._singlePanelMode);
+            Add("open", "Open", "Enter", idle && focused != null && (focused.IsDirectory || (!editorVisible && this.IsEditableEntry(focused))));
+            Add("parent", "Parent folder", "Backspace", idle && !string.IsNullOrEmpty(active.CurrentPath) && Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(active.CurrentPath)) != null);
+            Add("context-menu", "Context menu", "Shift+F10", idle && focused != null);
+            Add("terminal", "Terminal", "F12", ready && !this._commandDialogOpen && this._workspaceConfirmationLifetime == null && !this._keyboardModal);
+            Add("theme", "Theme", "", idle);
+            Add("editor-extensions", "Editor Extensions...", "", idle);
+            Add("creation-permissions", "Default Permissions...", "", idle);
+            Add("authentication", "Authentication...", "", idle && this._authStatus.CanManageSettings);
+            Add("logout", "Logout", "", idle && this._authStatus.Authenticated);
+            Add("reset", "Reset Workspace...", "", idle);
+            Add("exit", "Exit", "", idle);
+            Add("about", "About", "Ctrl+?", idle);
+            return result;
+        }
+
+        /// <summary>Applica ai dispatch la stessa regola della proiezione e rivalida il lease</summary>
+        /// <param name="id">Comando richiesto</param>
+        /// <returns>True soltanto se eseguibile adesso</returns>
+        private bool CanExecuteCommand(string id)
+        {
+            return this.GetCommandStates().Any(command => command.Id == id && command.Enabled) && this.CanMutateWorkspace();
+        }
+
+        /// <summary>Verifica estensione e dimensione editor senza leggere il filesystem</summary>
+        /// <param name="entry">Entry già caricata</param>
+        /// <returns>True se compatibile con la policy editor esistente</returns>
+        private bool IsEditableEntry(FileSystemEntry entry)
+        {
+            return entry != null && !entry.IsDirectory && entry.SizeBytes <= MAX_EDITOR_SIZE
+                && this._settings.CurrentValue.EditableExtensions.Any(extension => string.Equals(extension, Path.GetExtension(entry.Name), StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>Apre About attraverso lo stesso ingresso usato dalla tastiera</summary>
+        private void DoAbout()
+        {
+            if (!this.CanExecuteCommand("about"))
+                return;
+            this._commandDialogOpen = true;
+            this._aboutDialog.Show();
+        }
+
         /// <summary>
         /// Activates the focused entry using Explorer directory/editor behavior
         /// </summary>
         private void DoOpen()
         {
+            if (!this.CanExecuteCommand("open"))
+                return;
             PanelState active = this.GetActivePanel();
             FileSystemEntry entry = this.GetFocusedEntry(active);
             if (entry == null)
@@ -1932,6 +2067,8 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoEdit()
         {
+            if (!this.CanExecuteCommand("edit"))
+                return;
             PanelState active = this.GetActivePanel();
             FileSystemEntry entry = this.GetSingleTargetEntry(active, "Edit");
             if (entry != null)
@@ -1945,6 +2082,8 @@ namespace Bivium.Components.Pages
         /// <param name="silentPolicyRejection">Whether unsupported and oversized files silently no-op</param>
         private void OpenEditor(FileSystemEntry entry, bool silentPolicyRejection)
         {
+            if (this._editorDialog?.IsVisible() == true || !this.IsCommandWorkflowAvailable() || !this.CanMutateWorkspace())
+                return;
             if (entry == null || entry.IsDirectory)
                 return;
 
@@ -1963,21 +2102,32 @@ namespace Bivium.Components.Pages
             if (!isEditable)
             {
                 if (!silentPolicyRejection)
+                {
+                    this._commandDialogOpen = true;
                     this._confirmDialog.Show("Edit", "Extension '" + extension + "' is not in the editable extensions list.", "OK", "");
+                }
                 return;
             }
             if (entry.SizeBytes > MAX_EDITOR_SIZE)
             {
                 if (!silentPolicyRejection)
+                {
+                    this._commandDialogOpen = true;
                     this._confirmDialog.Show("Edit", "File is too large to edit (max 5 MB).", "OK", "");
+                }
                 return;
             }
 
             FileTextResult readResult = this._fileOperationService.ReadFileText(entry.FullPath, MAX_EDITOR_SIZE);
             if (readResult.Success)
+            {
                 this._editorDialog.Show(entry.FullPath, readResult.Content);
+            }
             else
+            {
+                this._commandDialogOpen = true;
                 this._confirmDialog.Show("Edit", readResult.ErrorMessage, "OK", "");
+            }
         }
 
         /// <summary>
@@ -1985,6 +2135,8 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoCopy()
         {
+            if (!this.CanExecuteCommand("copy"))
+                return;
             PanelState active = this.GetActivePanel();
             this._clipboard.Paths = this.GetSelectedOrCursorPaths(active);
             this._clipboard.IsCut = false;
@@ -1995,6 +2147,8 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoCut()
         {
+            if (!this.CanExecuteCommand("cut"))
+                return;
             PanelState active = this.GetActivePanel();
             this._clipboard.Paths = this.GetSelectedOrCursorPaths(active);
             this._clipboard.IsCut = true;
@@ -2005,6 +2159,8 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoPaste()
         {
+            if (!this.CanExecuteCommand("paste"))
+                return;
             if (this._clipboard.HasEntries())
             {
                 PanelState active = this.GetActivePanel();
@@ -2219,6 +2375,7 @@ namespace Bivium.Components.Pages
                 + "Destination: " + destinationPath + "\n\n"
                 + overwriteQuestion;
 
+            this._commandDialogOpen = true;
             this._overwriteDialog.Show("Overwrite " + entryType, message);
         }
 
@@ -2311,6 +2468,8 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoSelectAll()
         {
+            if (!this.CanExecuteCommand("select-all"))
+                return;
             PanelState active = this.GetActivePanel();
             this.HandleFileListInteraction(active, new FileListInteractionRequest { Intent = FileListInteractionIntent.SelectAll });
         }
@@ -2320,8 +2479,9 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoNewFile()
         {
-            if (!this.CanMutateWorkspace())
+            if (!this.CanExecuteCommand("new-file"))
                 return;
+            this._commandDialogOpen = true;
             this._pendingOperation = "newfile";
             this._inputDialog.Show("New File", "File name:", "");
         }
@@ -2331,8 +2491,9 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoNewFolder()
         {
-            if (!this.CanMutateWorkspace())
+            if (!this.CanExecuteCommand("new-folder"))
                 return;
+            this._commandDialogOpen = true;
             this._pendingOperation = "mkdir";
             this._inputDialog.Show("New Folder", "Folder name:", "");
         }
@@ -2342,7 +2503,7 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoRename()
         {
-            if (!this.CanMutateWorkspace())
+            if (!this.CanExecuteCommand("rename"))
                 return;
             PanelState active = this.GetActivePanel();
             FileSystemEntry entry = this.GetSingleTargetEntry(active, "Rename");
@@ -2357,6 +2518,7 @@ namespace Bivium.Components.Pages
                 }
 
                 this._pendingOperation = "rename";
+                this._commandDialogOpen = true;
                 this._inputDialog.Show("Rename", "New name:", entry.Name, selectionLength);
             }
         }
@@ -2366,7 +2528,7 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoDelete()
         {
-            if (!this.CanMutateWorkspace())
+            if (!this.CanExecuteCommand("delete"))
                 return;
             PanelState active = this.GetActivePanel();
             List<string> paths = this.GetSelectedOrCursorPaths(active);
@@ -2374,6 +2536,7 @@ namespace Bivium.Components.Pages
             {
                 active.SelectedPaths = paths;
                 this._pendingOperation = "delete";
+                this._commandDialogOpen = true;
                 this._confirmDialog.Show("Delete", "Delete " + active.SelectedPaths.Count + " item(s)?", "Delete", "Cancel");
             }
         }
@@ -2383,6 +2546,8 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoDownload()
         {
+            if (!this.CanExecuteCommand("download"))
+                return;
             PanelState active = this.GetActivePanel();
             List<string> paths = this.GetSelectedOrCursorPaths(active);
 
@@ -2432,8 +2597,9 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoUpload()
         {
-            if (!this.CanMutateWorkspace())
+            if (!this.CanExecuteCommand("upload"))
                 return;
+            this._commandDialogOpen = true;
             PanelState active = this.GetActivePanel();
             this._uploadDialog.Show(active.CurrentPath);
         }
@@ -2443,6 +2609,8 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoRefresh()
         {
+            if (!this.CanExecuteCommand("refresh"))
+                return;
             PanelState active = this.GetActivePanel();
             this.LoadPanelContents(active);
         }
@@ -2452,6 +2620,8 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoToggleSinglePanel()
         {
+            if (!this.CanExecuteCommand("panels"))
+                return;
             this._singlePanelMode = !this._singlePanelMode;
 
             // In single panel mode, ensure active panel is always left
@@ -2471,10 +2641,13 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoProperties()
         {
+            if (!this.CanExecuteCommand("properties"))
+                return;
             PanelState active = this.GetActivePanel();
             FileSystemEntry entry = this.GetSingleTargetEntry(active, "Properties");
             if (entry != null)
             {
+                this._commandDialogOpen = true;
                 this._propertiesDialog.Show(entry);
             }
         }
@@ -2484,10 +2657,13 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoPermissions()
         {
+            if (!this.CanExecuteCommand("permissions"))
+                return;
             PanelState active = this.GetActivePanel();
             FileSystemEntry entry = this.GetSingleTargetEntry(active, "Permissions");
             if (entry != null)
             {
+                this._commandDialogOpen = true;
                 this._permissionsDialog.Show(entry);
             }
         }
@@ -2497,6 +2673,8 @@ namespace Bivium.Components.Pages
         /// </summary>
         private async System.Threading.Tasks.Task DoToggleTerminalAsync()
         {
+            if (!this.CanExecuteCommand("terminal"))
+                return;
             if (this._terminalPanel != null)
             {
                 await this._terminalPanel.ToggleAsync();
@@ -2527,7 +2705,7 @@ namespace Bivium.Components.Pages
         /// <param name="theme">Nome del tema scelto</param>
         private async System.Threading.Tasks.Task DoThemeChange(string theme)
         {
-            if (!this.CanMutateWorkspace())
+            if (!this.CanExecuteCommand("theme"))
                 return;
 
             string normalizedTheme;
@@ -2563,6 +2741,9 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoEditorExtensions()
         {
+            if (!this.CanExecuteCommand("editor-extensions"))
+                return;
+            this._commandDialogOpen = true;
             List<string> extensions = this._settings.CurrentValue.EditableExtensions;
             this._settingsDialog.Show(extensions);
         }
@@ -2572,6 +2753,9 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoCreationPermissions()
         {
+            if (!this.CanExecuteCommand("creation-permissions"))
+                return;
+            this._commandDialogOpen = true;
             this._creationPermissionsDialog.Show(this._settings.CurrentValue.DefaultCreationPermissions);
         }
 
@@ -2580,6 +2764,9 @@ namespace Bivium.Components.Pages
         /// </summary>
         private async System.Threading.Tasks.Task DoAuthenticationSettings()
         {
+            if (!this.CanExecuteCommand("authentication"))
+                return;
+            this._commandDialogOpen = true;
             await this._authSettingsDialog.Show();
         }
 
@@ -2588,6 +2775,8 @@ namespace Bivium.Components.Pages
         /// </summary>
         private async System.Threading.Tasks.Task DoLogout()
         {
+            if (!this.CanExecuteCommand("logout"))
+                return;
             if (this._jsModule == null)
             {
                 this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260922-file-columns-v1");
@@ -2605,6 +2794,8 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoExit()
         {
+            if (!this.CanExecuteCommand("exit"))
+                return;
             _ = this.JSRuntime.InvokeVoidAsync("close");
         }
 
@@ -2613,7 +2804,7 @@ namespace Bivium.Components.Pages
         /// </summary>
         private async System.Threading.Tasks.Task DoResetWorkspace()
         {
-            if (!this.CanMutateWorkspace())
+            if (!this.CanExecuteCommand("reset"))
                 return;
             const string message = "Reset workspace? This terminates every terminal process and clears saved panel and window state.";
             bool confirmed = await this.ConfirmWorkspaceActionAsync("Reset workspace", message, "Reset");
@@ -2672,7 +2863,7 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoExtract()
         {
-            if (!this.CanMutateWorkspace())
+            if (!this.CanExecuteCommand("extract"))
                 return;
             PanelState active = this.GetActivePanel();
             List<string> archivePaths = this.GetArchivePathsForOperation(active);
@@ -2747,7 +2938,7 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoExtractToFolder()
         {
-            if (!this.CanMutateWorkspace())
+            if (!this.CanExecuteCommand("extract"))
                 return;
             PanelState active = this.GetActivePanel();
             List<string> archivePaths = this.GetArchivePathsForOperation(active);
@@ -2835,49 +3026,6 @@ namespace Bivium.Components.Pages
         }
 
         /// <summary>
-        /// Checks if the active target can be compressed using in-memory panel state
-        /// </summary>
-        /// <returns>True if a selected or cursor target exists</returns>
-        private bool CanCompressActiveTarget()
-        {
-            PanelState active = this.GetActivePanel();
-            bool result = active.SelectedPaths.Count > 0 || (active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count);
-            return result;
-        }
-
-        /// <summary>
-        /// Checks if the active target can be extracted using in-memory panel state
-        /// </summary>
-        /// <returns>True if selection or cursor contains extractable archives</returns>
-        private bool CanExtractActiveTarget()
-        {
-            PanelState active = this.GetActivePanel();
-            bool result = false;
-
-            if (active.SelectedPaths.Count > 0)
-            {
-                int archiveCount = 0;
-                for (int i = 0; i < active.SelectedPaths.Count; i++)
-                {
-                    FileSystemEntry entry = this.FindEntryByPath(active, active.SelectedPaths[i]);
-                    if (entry != null && !entry.IsDirectory && this._archiveService.IsArchive(entry.FullPath))
-                    {
-                        archiveCount++;
-                    }
-                }
-
-                result = archiveCount == active.SelectedPaths.Count;
-            }
-            else if (active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count)
-            {
-                FileSystemEntry entry = active.Entries[active.CursorIndex];
-                result = !entry.IsDirectory && this._archiveService.IsArchive(entry.FullPath);
-            }
-
-            return result;
-        }
-
-        /// <summary>
         /// Gets a single target entry from selection or cursor
         /// </summary>
         /// <param name="active">Active panel state</param>
@@ -2915,7 +3063,7 @@ namespace Bivium.Components.Pages
 
             for (int i = 0; i < active.Entries.Count; i++)
             {
-                if (active.Entries[i].FullPath == path)
+                if (string.Equals(active.Entries[i].FullPath, path, this.GetPathComparison()))
                 {
                     result = active.Entries[i];
                     active.CursorIndex = i;
@@ -2938,7 +3086,7 @@ namespace Bivium.Components.Pages
 
             for (int i = 0; i < active.Entries.Count; i++)
             {
-                if (active.Entries[i].FullPath == path)
+                if (string.Equals(active.Entries[i].FullPath, path, this.GetPathComparison()))
                 {
                     result = active.Entries[i];
                     break;
@@ -3079,7 +3227,7 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoCompress()
         {
-            if (!this.CanMutateWorkspace())
+            if (!this.CanExecuteCommand("compress"))
                 return;
             PanelState active = this.GetActivePanel();
             List<string> paths = this.GetSelectedOrCursorPaths(active);
@@ -3105,6 +3253,7 @@ namespace Bivium.Components.Pages
                 }
             }
 
+            this._commandDialogOpen = true;
             this._compressDialog.Show(baseName);
         }
 
@@ -3113,7 +3262,7 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void DoAdvancedRename()
         {
-            if (!this.CanMutateWorkspace())
+            if (!this.CanExecuteCommand("advanced-rename"))
                 return;
             PanelState active = this.GetActivePanel();
             List<string> paths = this.GetSelectedOrCursorPaths(active);
@@ -3136,7 +3285,7 @@ namespace Bivium.Components.Pages
 
                 for (int i = 0; i < active.Entries.Count; i++)
                 {
-                    if (active.Entries[i].FullPath == selectedPath && active.Entries[i].IsDirectory)
+                    if (string.Equals(active.Entries[i].FullPath, selectedPath, this.GetPathComparison()) && active.Entries[i].IsDirectory)
                     {
                         isDir = true;
                         break;
@@ -3153,7 +3302,7 @@ namespace Bivium.Components.Pages
                     // Single file
                     for (int i = 0; i < active.Entries.Count; i++)
                     {
-                        if (active.Entries[i].FullPath == selectedPath && !active.Entries[i].IsDirectory)
+                        if (string.Equals(active.Entries[i].FullPath, selectedPath, this.GetPathComparison()) && !active.Entries[i].IsDirectory)
                         {
                             renameEntries.Add(active.Entries[i]);
                             break;
@@ -3164,7 +3313,8 @@ namespace Bivium.Components.Pages
             else
             {
                 // Multiple selection: collect only files (skip directories)
-                HashSet<string> selectedPathSet = new HashSet<string>(active.SelectedPaths);
+                StringComparer pathComparer = this.GetPathComparison() == StringComparison.OrdinalIgnoreCase ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+                HashSet<string> selectedPathSet = new HashSet<string>(active.SelectedPaths, pathComparer);
                 for (int i = 0; i < active.Entries.Count; i++)
                 {
                     if (!active.Entries[i].IsDirectory && selectedPathSet.Contains(active.Entries[i].FullPath))
@@ -3214,6 +3364,7 @@ namespace Bivium.Components.Pages
         /// <param name="confirmed">True if confirmed</param>
         private void HandleConfirmDialogClose(bool confirmed)
         {
+            this._commandDialogOpen = false;
             if (confirmed && this._pendingOperation == "delete" && this.CanMutateWorkspace())
             {
                 PanelState active = this.GetActivePanel();
@@ -3265,6 +3416,7 @@ namespace Bivium.Components.Pages
         /// <param name="choice">Overwrite choice</param>
         private void HandleOverwriteDialogClose(OverwriteChoice choice)
         {
+            this._commandDialogOpen = false;
             if (!this.CanMutateWorkspace())
             {
                 this.ClearPendingPaste();
@@ -3308,6 +3460,7 @@ namespace Bivium.Components.Pages
         /// <param name="value">Input value (empty if cancelled)</param>
         private void HandleInputDialogClose(string value)
         {
+            this._commandDialogOpen = false;
             if (!string.IsNullOrEmpty(value) && this.CanMutateWorkspace())
             {
                 string pendingOperation = this._pendingOperation;
@@ -3369,6 +3522,7 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void HandlePropertiesDialogClose()
         {
+            this._commandDialogOpen = false;
             // Properties is read-only, nothing to do
         }
 
@@ -3378,6 +3532,7 @@ namespace Bivium.Components.Pages
         /// <param name="saved">True if permissions were saved</param>
         private void HandlePermissionsDialogClose(bool saved)
         {
+            this._commandDialogOpen = false;
             // Refresh active panel to reflect permission changes
             if (saved && this.CanMutateWorkspace())
             {
@@ -3392,6 +3547,7 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void HandleAboutDialogClose()
         {
+            this._commandDialogOpen = false;
         }
 
         /// <summary>
@@ -3415,6 +3571,7 @@ namespace Bivium.Components.Pages
         /// <param name="uploaded">True if file was uploaded</param>
         private void HandleUploadDialogClose(bool uploaded)
         {
+            this._commandDialogOpen = false;
             // Refresh both panels after upload
             if (uploaded && this.CanMutateWorkspace())
             {
@@ -3430,6 +3587,7 @@ namespace Bivium.Components.Pages
         /// <param name="result">Tuple of selected format and output file name</param>
         private void HandleCompressDialogClose((ArchiveFormat Format, string OutputName) result)
         {
+            this._commandDialogOpen = false;
             // Empty name means cancelled
             if (string.IsNullOrEmpty(result.OutputName))
             {
@@ -3526,6 +3684,7 @@ namespace Bivium.Components.Pages
         /// </summary>
         private async System.Threading.Tasks.Task HandleSettingsDialogClose()
         {
+            this._commandDialogOpen = false;
             await this.RefreshAuthenticationState();
             this.StateHasChanged();
         }
@@ -3572,6 +3731,30 @@ namespace Bivium.Components.Pages
 
         #region Keyboard Handling
 
+        /// <summary>Riceve solo capacità del contesto DOM, senza trasferire regole di dominio al JS</summary>
+        /// <param name="general">Tasti ordinari inoltrabili</param>
+        /// <param name="control">Combinazioni Ctrl inoltrabili</param>
+        /// <param name="navigation">Tasti della superficie file inoltrabili</param>
+        /// <param name="panelSwitch">Tab inoltrabile</param>
+        /// <param name="terminal">F12 inoltrabile con la precedenza esistente</param>
+        /// <param name="modal">Modal bloccante visibile</param>
+        [JSInvokable]
+        public void OnKeyboardContextChanged(bool general, bool control, bool navigation, bool panelSwitch, bool terminal, bool modal)
+        {
+            if (this._isDisposed)
+                return;
+            if (this._keyboardGeneral == general && this._keyboardControl == control && this._keyboardNavigation == navigation
+                && this._keyboardPanelSwitch == panelSwitch && this._keyboardTerminal == terminal && this._keyboardModal == modal)
+                return;
+            this._keyboardGeneral = general;
+            this._keyboardControl = control;
+            this._keyboardNavigation = navigation;
+            this._keyboardPanelSwitch = panelSwitch;
+            this._keyboardTerminal = terminal;
+            this._keyboardModal = modal;
+            this.StateHasChanged();
+        }
+
         /// <summary>
         /// Registers unload presence before exposing the interactive workspace
         /// </summary>
@@ -3604,13 +3787,13 @@ namespace Bivium.Components.Pages
         [JSInvokable]
         public async System.Threading.Tasks.Task OnKeyDown(string key, bool ctrl, bool shift, bool alt)
         {
-            if (!this._hasActiveLease || !this._workspaceService.ValidateMutation(this.GetClientToken()))
+            if (this._isDisposed || !this._hasActiveLease || !this._workspaceService.ValidateMutation(this.GetClientToken()))
                 return;
 
             // Ctrl+?: about dialog
             if (key == "?" && ctrl && !alt)
             {
-                this._aboutDialog.Show();
+                this.DoAbout();
                 this.StateHasChanged();
                 return;
             }
@@ -3622,6 +3805,9 @@ namespace Bivium.Components.Pages
                 this.StateHasChanged();
                 return;
             }
+
+            if (!this.IsCommandWorkflowAvailable())
+                return;
 
             // Tab: switch panels (only in dual panel mode)
             if (key == "Tab" && !ctrl && !shift && !alt && !this._singlePanelMode)
