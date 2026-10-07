@@ -4,16 +4,16 @@ using System.Collections.ObjectModel;
 
 namespace Bivium.Models
 {
-    /// <summary>Metadati immutabili delle sessioni desktop e clipboard interna</summary>
+    /// <summary>Immutable metadata of the desktop sessions and internal clipboard</summary>
     public sealed record DesktopSessionsSnapshot
     {
-        /// <summary>Crea una proiezione leggera senza contenuto editor o draft renamer</summary>
-        /// <param name="editorId">Identità della sessione editor</param>
-        /// <param name="editorTitle">Titolo editor</param>
-        /// <param name="editorDirty">Documento diverso dalla baseline salvata</param>
-        /// <param name="renamerId">Identità della sessione renamer</param>
-        /// <param name="clipboardPaths">Sorgenti della clipboard interna</param>
-        /// <param name="clipboardIsCut">Modalità cut</param>
+        /// <summary>Creates a lightweight projection without editor content or renamer draft</summary>
+        /// <param name="editorId">Identity of the editor session</param>
+        /// <param name="editorTitle">Editor title</param>
+        /// <param name="editorDirty">Document differing from the saved baseline</param>
+        /// <param name="renamerId">Identity of the renamer session</param>
+        /// <param name="clipboardPaths">Sources of the internal clipboard</param>
+        /// <param name="clipboardIsCut">Cut mode</param>
         public DesktopSessionsSnapshot(Guid editorId = default, string editorTitle = "", bool editorDirty = false, Guid renamerId = default, IEnumerable<string> clipboardPaths = null, bool clipboardIsCut = false)
         {
             this.EditorId = editorId;
@@ -24,61 +24,61 @@ namespace Bivium.Models
             this.ClipboardIsCut = clipboardIsCut;
         }
 
-        /// <summary>Identità editor, vuota se chiuso</summary>
+        /// <summary>Editor identity, empty when closed</summary>
         public Guid EditorId { get; }
-        /// <summary>Titolo derivato dal documento server</summary>
+        /// <summary>Title derived from the server document</summary>
         public string EditorTitle { get; }
-        /// <summary>Stato dirty derivato dal contenuto e dalla baseline</summary>
+        /// <summary>Dirty state derived from the content and the baseline</summary>
         public bool EditorDirty { get; }
-        /// <summary>Identità renamer, vuota se chiuso</summary>
+        /// <summary>Renamer identity, empty when closed</summary>
         public Guid RenamerId { get; }
-        /// <summary>Paths della clipboard, separata dalla clipboard del sistema operativo</summary>
+        /// <summary>Clipboard paths, separate from the operating system clipboard</summary>
         public IReadOnlyList<string> ClipboardPaths { get; }
-        /// <summary>True per cut, false per copy</summary>
+        /// <summary>True for cut, false for copy</summary>
         public bool ClipboardIsCut { get; }
     }
 
-    /// <summary>Documento immutabile letto solo dall'adapter autorizzato, non dallo snapshot globale</summary>
+    /// <summary>Immutable document read only by the authorized adapter, not by the global snapshot</summary>
     public sealed record EditorSessionSnapshot(Guid Id, long Revision, string FilePath, string Content, string SavedContent, string ViewState, long SavedRevision = 0, string ModelEol = "")
     {
-        /// <summary>Dirty calcolato sulla baseline effettivamente committata</summary>
+        /// <summary>Dirty computed against the baseline actually committed</summary>
         public bool IsDirty => !string.Equals(this.Content, this.SavedContent, StringComparison.Ordinal);
     }
 
-    /// <summary>Draft renamer immutabile; JSON materializzato comprende entry, stack, form e preview</summary>
+    /// <summary>Immutable renamer draft; materialized JSON includes entries, stack, form and preview</summary>
     public sealed record RenamerSessionSnapshot(Guid Id, long Revision, string Draft);
 
-    /// <summary>Checkpoint ricevuto attraverso lo streaming JS interop nativo di Blazor</summary>
+    /// <summary>Checkpoint received through Blazor's native JS interop streaming</summary>
     public sealed class EditorCheckpoint
     {
-        /// <summary>Testo corrente</summary>
+        /// <summary>Current text</summary>
         public string Content { get; set; } = "";
-        /// <summary>Viewstate Monaco serializzato</summary>
+        /// <summary>Serialized Monaco viewstate</summary>
         public string ViewState { get; set; } = "";
-        /// <summary>Delta del journal nello stesso commit del contenuto e viewstate</summary>
+        /// <summary>Journal delta in the same commit as the content and viewstate</summary>
         public EditorHistoryMutation[] HistoryMutations { get; set; }
-        /// <summary>Numero di unità applicate dopo i delta</summary>
+        /// <summary>Number of units applied after the deltas</summary>
         public int HistoryCursor { get; set; }
     }
 
-    /// <summary>Payload tipizzato del draft renamer, ricostruito senza ricalcolare la preview</summary>
+    /// <summary>Typed payload of the renamer draft, rebuilt without recomputing the preview</summary>
     public sealed class RenamerDraft
     {
-        /// <summary>Entry originali</summary>
+        /// <summary>Original entries</summary>
         public List<FileSystemEntry> Entries { get; set; } = new List<FileSystemEntry>();
-        /// <summary>Stack ordinato dei metodi</summary>
+        /// <summary>Ordered stack of methods</summary>
         public List<RenameMethod> Methods { get; set; } = new List<RenameMethod>();
-        /// <summary>Preview esatta, inclusi risultati casuali</summary>
+        /// <summary>Exact preview, including random results</summary>
         public List<RenamePreviewItem> Preview { get; set; } = new List<RenamePreviewItem>();
-        /// <summary>Metodo in compilazione</summary>
+        /// <summary>Method being edited</summary>
         public RenameMethod EditingMethod { get; set; } = new RenameMethod();
-        /// <summary>Tipo selezionato</summary>
+        /// <summary>Selected type</summary>
         public RenameMethodType SelectedMethodType { get; set; }
-        /// <summary>Errore dei parametri</summary>
+        /// <summary>Parameter error</summary>
         public string ParamsError { get; set; } = "";
-        /// <summary>Stato visualizzato</summary>
+        /// <summary>Displayed state</summary>
         public string StatusText { get; set; } = "";
-        /// <summary>Esito parziale già prodotto dal workflow esistente</summary>
+        /// <summary>Partial outcome already produced by the existing workflow</summary>
         public bool DidRename { get; set; }
     }
 }

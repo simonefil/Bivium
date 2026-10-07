@@ -37,24 +37,24 @@
 }
 
 @code {
-    /// <summary>Conflitto corrente catturato dal workspace, senza reinvocazione del paste</summary>
+    /// <summary>Current conflict captured by the workspace, without re-invoking the paste</summary>
     [Parameter] public Bivium.Models.WorkspaceWorkflowSnapshot Workflow { get; set; }
-    /// <summary>Attachment dell'adapter corrente</summary>
+    /// <summary>Attachment of the current adapter</summary>
     [Parameter] public string AttachmentId { get; set; } = "";
-    /// <summary>Generazione del lease corrente</summary>
+    /// <summary>Generation of the current lease</summary>
     [Parameter] public long LeaseGeneration { get; set; }
-    /// <summary>Domanda montata e risposta stabile per le ritrasmissioni</summary>
+    /// <summary>Mounted question and stable response for retransmissions</summary>
     private Guid _workspaceQuestionId;
-    /// <summary>Risposta catturata per la sola decisione corrente</summary>
+    /// <summary>Response captured for the current decision only</summary>
     private Bivium.Models.WorkspaceWorkflowResponse _workspaceResponse;
-    /// <summary>Errore di risposta senza retry implicito</summary>
+    /// <summary>Response error without implicit retry</summary>
     private string _workspaceError = "";
-    /// <summary>Dispose non decide No e non cancella l'operazione</summary>
+    /// <summary>Dispose does not decide No and does not cancel the operation</summary>
     private bool _workspaceDisposed;
-    /// <summary>Conflitto corrente; null quando il workflow è già avanzato oltre l'ultima domanda e Radzen ri-renderizza il contenuto prima della chiusura</summary>
+    /// <summary>Current conflict; null when the workflow has already advanced past the last question and Radzen re-renders the content before closing</summary>
     private Bivium.Models.WorkspaceOverwriteQuestion CurrentConflict => this.Workflow == null || this.Workflow.Conflicts.IsDefault || this.Workflow.ConflictIndex >= this.Workflow.Conflicts.Length ? null : this.Workflow.Conflicts[this.Workflow.ConflictIndex];
 
-    /// <summary>Proietta la domanda già materializzata, senza ricalcolare conflitti</summary>
+    /// <summary>Projects the already materialized question, without recomputing conflicts</summary>
     protected override void OnParametersSet()
     {
         if (this.Workflow == null || this._workspaceQuestionId == this.Workflow.QuestionId)
@@ -64,9 +64,9 @@
         this._workspaceError = "";
     }
 
-    /// <summary>Decisione esatta per questa domanda; Escape conserva il No legacy</summary>
-    /// <param name="choice">Decisione esplicita dell'utente</param>
-    /// <returns>Completamento del callback adapter</returns>
+    /// <summary>Exact decision for this question; Escape keeps the legacy No</summary>
+    /// <param name="choice">Explicit user decision</param>
+    /// <returns>Completion of the adapter callback</returns>
     private System.Threading.Tasks.Task RespondWorkspaceAsync(Bivium.Models.OverwriteChoice choice)
     {
         if (this._workspaceDisposed || this.Workflow?.Phase is not (Bivium.Models.WorkspaceWorkflowPhase.AwaitingOverwrite or Bivium.Models.WorkspaceWorkflowPhase.Failed))
@@ -82,9 +82,9 @@
         return System.Threading.Tasks.Task.CompletedTask;
     }
 
-    /// <summary>Verifica la domanda acknowledged senza attendere copy o move</summary>
-    /// <param name="cancellationToken">Lifecycle del drain</param>
-    /// <returns>True per domanda corrente o operazione già ammessa</returns>
+    /// <summary>Verifies the acknowledged question without waiting for copy or move</summary>
+    /// <param name="cancellationToken">Drain lifecycle</param>
+    /// <returns>True for the current question or an already admitted operation</returns>
     internal System.Threading.Tasks.Task<bool> FlushForHandoffAsync(System.Threading.CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -92,7 +92,7 @@
         return System.Threading.Tasks.Task.FromResult(!this._workspaceDisposed && current != null && current.Id == this.Workflow?.Id && ((current.QuestionId == this.Workflow.QuestionId && current.Revision == this.Workflow.Revision) || current.Phase is Bivium.Models.WorkspaceWorkflowPhase.Running or Bivium.Models.WorkspaceWorkflowPhase.Succeeded or Bivium.Models.WorkspaceWorkflowPhase.Cancelled));
     }
 
-    /// <summary>Detach del solo adapter; non decide No e non cancella l'operazione</summary>
+    /// <summary>Detaches the adapter only; neither decides No nor cancels the operation</summary>
     public void Dispose()
     {
         this._workspaceDisposed = true;

@@ -6,33 +6,33 @@ using System.Threading.Tasks;
 
 namespace Bivium.Services
 {
-    /// <summary>Task e cancellazione posseduti dal workspace, mai dal lease del browser</summary>
+    /// <summary>Task and cancellation owned by the workspace, never by the browser lease</summary>
     internal sealed class WorkspaceOperationRuntime
     {
-        /// <summary>Piano immutabile ammesso</summary>
+        /// <summary>Admitted immutable plan</summary>
         internal WorkspaceOperationPlan Plan { get; init; }
-        /// <summary>Stato protetto dal lock workspace</summary>
+        /// <summary>State protected by the workspace lock</summary>
         internal WorkspaceOperationSnapshot Snapshot { get; set; }
-        /// <summary>Cancellazione esplicita o stop workspace, non revoca browser</summary>
+        /// <summary>Explicit cancellation or workspace stop, not browser revocation</summary>
         internal CancellationTokenSource Cancellation { get; init; }
-        /// <summary>Task avviato una sola volta dopo l'ammissione</summary>
+        /// <summary>Task started only once after admission</summary>
         internal Task Work { get; set; }
 
-        /// <summary>Stato two-pass protetto dal lock workspace e indipendente dall'adapter</summary>
+        /// <summary>Two-pass state protected by the workspace lock and independent of the adapter</summary>
         internal List<WorkspaceRenameItemState> RenameState { get; set; } = new List<WorkspaceRenameItemState>();
-        /// <summary>Stesso intervallo di notifica progresso usato dal Commander preesistente</summary>
+        /// <summary>Same progress notification interval used by the pre-existing Commander</summary>
         internal DateTime LastProgressPublicationUtc { get; set; }
-        /// <summary>Conteggi effettivi fra due pubblicazioni coalescenti</summary>
+        /// <summary>Actual counts between two coalesced publications</summary>
         internal int FilesProcessed { get; set; }
-        /// <summary>Radici fallite conservate fra le pubblicazioni</summary>
+        /// <summary>Failed roots preserved between publications</summary>
         internal int FilesFailed { get; set; }
-        /// <summary>Passo effettivo fra due pubblicazioni coalescenti</summary>
+        /// <summary>Actual step between two coalesced publications</summary>
         internal int ProgressCurrent { get; set; }
-        /// <summary>Totale del passo effettivo</summary>
+        /// <summary>Total of the actual step</summary>
         internal int ProgressTotal { get; set; }
-        /// <summary>Etichetta del passo effettivo</summary>
+        /// <summary>Label of the actual step</summary>
         internal string Stage { get; set; } = "";
-        /// <summary>Risultato dettagliato privato del task, pubblicato atomicamente al completamento</summary>
+        /// <summary>Private detailed result of the task, published atomically on completion</summary>
         internal string ResultDraft { get; set; }
     }
 }

@@ -4,14 +4,14 @@ using System.Collections.Generic;
 namespace Bivium.Services
 {
     /// <summary>
-    /// Catalogo dei temi distribuiti da Radzen.Blazor 11.4.2
+    /// Catalog of the themes shipped by Radzen.Blazor 11.4.2
     /// </summary>
     public static class RadzenThemeCatalog
     {
         #region Costanti
 
         /// <summary>
-        /// Tema usato quando la configurazione non è valida
+        /// Theme used when the configuration is not valid
         /// </summary>
         public const string DEFAULT_THEME = "software-dark";
 
@@ -20,7 +20,7 @@ namespace Bivium.Services
         #region Variabili statiche
 
         /// <summary>
-        /// Nomi dei temi ufficiali effettivamente inclusi nel pacchetto
+        /// Names of the official themes actually included in the package
         /// </summary>
         private static readonly string[] s_themes =
         {
@@ -41,7 +41,7 @@ namespace Bivium.Services
         #region Metodi pubblici
 
         /// <summary>
-        /// Restituisce i temi disponibili nell'ordine mostrato dalla UI
+        /// Returns the available themes in the order shown by the UI
         /// </summary>
         public static IReadOnlyList<string> GetThemes()
         {
@@ -49,11 +49,11 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Normalizza un tema supportato
+        /// Normalizes a supported theme
         /// </summary>
-        /// <param name="theme">Nome tema ricevuto</param>
-        /// <param name="normalizedTheme">Nome canonico del tema</param>
-        /// <returns>True quando il tema è supportato</returns>
+        /// <param name="theme">Received theme name</param>
+        /// <param name="normalizedTheme">Canonical theme name</param>
+        /// <returns>True when the theme is supported</returns>
         public static bool TryNormalize(string theme, out string normalizedTheme)
         {
             string candidate = theme?.Trim() ?? "";
@@ -71,10 +71,10 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Restituisce un tema supportato oppure il fallback predefinito
+        /// Returns a supported theme or the default fallback
         /// </summary>
-        /// <param name="theme">Nome tema configurato</param>
-        /// <returns>Nome tema canonico</returns>
+        /// <param name="theme">Configured theme name</param>
+        /// <returns>Canonical theme name</returns>
         public static string NormalizeOrDefault(string theme)
         {
             string normalizedTheme;

@@ -8,7 +8,7 @@ let pendingEditorViewState = null;
 let editorJournal = null;
 let editorTheme = 'vs-dark';
 
-/** Journal applicativo: usa eventi/edit/viewstate pubblici, mai la history nativa Monaco. */
+/** Application journal: uses public events/edit/viewstate, never the native Monaco history. */
 function createEditorJournal(current, hydrated, changed) {
     const units = hydrated.units.map(unit => ({
         GroupId: unit.groupId,
@@ -27,7 +27,7 @@ function createEditorJournal(current, hydrated, changed) {
     let typingKey = false;
     let previousView = JSON.stringify(current.saveViewState());
     let previousSelections = JSON.stringify(current.getSelections());
-    // Il flush esplicito è un confine comando: un nuovo mount non estende gruppi dell'owner precedente
+    // The explicit flush is a command boundary: a new mount does not extend groups of the previous owner
     let group = null;
     const disposables = [];
     const container = current.getDomNode();
@@ -80,7 +80,7 @@ function createEditorJournal(current, hydrated, changed) {
             const end = current.getModel().getPositionAt(offset + removed.length);
             return { range: new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column), text: inserted };
         });
-        // applyEdits non inserisce un'altra operazione nel journal o nella history nativa
+        // applyEdits does not insert another operation into the journal or the native history
         current.getModel().applyEdits(edits);
         text = current.getValue();
     }
@@ -133,7 +133,7 @@ function createEditorJournal(current, hydrated, changed) {
         if (event.reason === monaco.editor.CursorChangeReason.Explicit) boundary();
         if (!transaction) { previousView = view(); previousSelections = selections(); }
     }));
-    // Comandi globali, palette/context e trigger/getAction convergono nello stesso journal
+    // Global commands, palette/context and trigger/getAction converge on the same journal
     for (const [id, redo] of [['undo', false], ['default:undo', false], ['redo', true], ['default:redo', true]]) {
         disposables.push(monaco.editor.registerCommand(id, () => move(redo)));
         disposables.push(current.addAction({ id, label: redo ? 'Redo' : 'Undo', run: () => move(redo) }));
@@ -202,7 +202,7 @@ function createCheckpointPublisher(current, dotNetRef, sessionId, initialRevisio
         }
     }
 
-    // Il journal pubblica soltanto dopo la fine dell'unità composita, mai metà IME
+    // The journal publishes only after the composite unit ends, never mid-IME
     current.onDidChangeCursorSelection(scheduleViewState);
     current.onDidScrollChange(scheduleViewState);
 
@@ -449,7 +449,7 @@ export function layoutEditor(sequence = null) {
  */
 export function setEditorTheme(theme) {
     editorTheme = theme || 'vs-dark';
-    // Il tema Monaco è globale: si applica anche all'istanza già montata
+    // The Monaco theme is global: it also applies to the already mounted instance
     if (globalThis.monaco?.editor) monaco.editor.setTheme(editorTheme);
 }
 

@@ -4,19 +4,19 @@
 @inject IJSRuntime JSRuntime
 
 @code {
-    /// <summary>Apertura materializzata dal Commander</summary>
+    /// <summary>Opening materialized by the Commander</summary>
     [Parameter] public Bivium.Models.WorkspaceContextMenuDraft Draft { get; set; }
-    /// <summary>CAS visuale delegato al proprietario del contesto catturato</summary>
+    /// <summary>Visual CAS delegated to the owner of the captured context</summary>
     [Parameter] public Func<Bivium.Models.WorkspaceContextMenuDraft, long> PublishVisual { get; set; }
-    /// <summary>Lease del mount</summary>
+    /// <summary>Mount lease</summary>
     [CascadingParameter] public Bivium.Models.WorkspaceSurfaceOwner SurfaceOwner { get; set; }
-    /// <summary>Modulo e callback posseduti dall'apertura del portal</summary>
+    /// <summary>Module and callback owned by the portal opening</summary>
     private IJSObjectReference _surfaceModule;
-    /// <summary>Callback rilasciato anche alla disconnessione</summary>
+    /// <summary>Callback released on disconnection as well</summary>
     private DotNetObjectReference<ContextMenu> _surfaceReference;
-    /// <summary>Root reale usata dal cleanup visuale</summary>
+    /// <summary>Real root used by the visual cleanup</summary>
     private ElementReference _surfaceRoot;
-    /// <summary>Disponibilità e shortcut calcolati esclusivamente dal Commander</summary>
+    /// <summary>Availability and shortcuts computed exclusively by the Commander</summary>
     [Parameter] public IReadOnlyList<CommanderCommandState> Commands { get; set; } = Array.Empty<CommanderCommandState>();
     [Parameter] public double X { get; set; }
     [Parameter] public double Y { get; set; }
@@ -49,7 +49,7 @@
 
     private bool _opened;
     private bool _closing;
-    /// <summary>Guardia contro callback dopo il rilascio dell'owner</summary>
+    /// <summary>Guard against callbacks after the owner is released</summary>
     private bool _isDisposed;
 
     protected override void OnInitialized()
@@ -61,7 +61,7 @@
     {
         if (this._isDisposed)
             return System.Threading.Tasks.Task.CompletedTask;
-        // Commander monta il componente solo con un'apertura visibile e lo rimuove alla chiusura
+        // Commander mounts the component only with a visible opening and removes it on close
         if (firstRender)
         {
             this._opened = true;
@@ -145,8 +145,8 @@
         _ = this.InvokeAsync(async () => await this.OnClose.InvokeAsync());
     }
 
-    /// <summary>Installa l'adapter dopo il mount del portal, non dopo un timer</summary>
-    /// <param name="root">Root app realmente montata</param>
+    /// <summary>Installs the adapter after the portal mount, not after a timer</summary>
+    /// <param name="root">App root actually mounted</param>
     private async System.Threading.Tasks.Task HandleSurfaceMountedAsync(ElementReference root)
     {
         this._surfaceRoot = root;
@@ -163,10 +163,10 @@
         await this._surfaceModule.InvokeVoidAsync("installContextSurface", root, this._surfaceReference, this.SurfaceOwner.Generation, this.Draft);
     }
 
-    /// <summary>Posizione/viewport dell'apertura catturata, mai flag ricalcolati</summary>
-    /// <param name="generation">Lease catturata</param>
-    /// <param name="draft">Checkpoint visuale</param>
-    /// <returns>Revisione acknowledged oppure -1</returns>
+    /// <summary>Position/viewport of the captured opening, never recomputed flags</summary>
+    /// <param name="generation">Captured lease</param>
+    /// <param name="draft">Visual checkpoint</param>
+    /// <returns>Acknowledged revision or -1</returns>
     [JSInvokable]
     public long OnContextSurfaceChanged(long generation, Bivium.Models.WorkspaceContextMenuDraft draft)
     {
@@ -175,20 +175,20 @@
         return this.PublishVisual?.Invoke(draft) ?? -1;
     }
 
-    /// <summary>Template condiviso con la menu bar: etichetta seguita dalla shortcut</summary>
-    /// <param name="id">Identificatore nella proiezione ricevuta</param>
-    /// <param name="label">Etichetta mostrata</param>
-    /// <returns>Etichetta semantica senza controlli annidati</returns>
+    /// <summary>Template shared with the menu bar: label followed by the shortcut</summary>
+    /// <param name="id">Identifier in the received projection</param>
+    /// <param name="label">Displayed label</param>
+    /// <returns>Semantic label without nested controls</returns>
     private RenderFragment CommandTemplate(string id, string label) => @<CommandMenuLabel Label="@label" Shortcut="@this.GetCommand(id)?.Shortcut" />;
 
-    /// <summary>Consulta la proiezione senza introdurre regole nel renderer</summary>
-    /// <param name="id">Identificatore del comando</param>
-    /// <returns>Descriptor oppure null</returns>
+    /// <summary>Reads the projection without introducing rules in the renderer</summary>
+    /// <param name="id">Command identifier</param>
+    /// <returns>Descriptor or null</returns>
     private CommanderCommandState GetCommand(string id) => this.Commands.FirstOrDefault(command => command.Id == id);
 
-    /// <summary>Legge la disponibilità già calcolata dal proprietario</summary>
-    /// <param name="id">Identificatore del comando</param>
-    /// <returns>True se abilitato</returns>
+    /// <summary>Reads the availability already computed by the owner</summary>
+    /// <param name="id">Command identifier</param>
+    /// <returns>True if enabled</returns>
     private bool IsEnabled(string id) => this.GetCommand(id)?.Enabled == true;
 
     public async System.Threading.Tasks.ValueTask DisposeAsync()

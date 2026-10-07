@@ -312,7 +312,7 @@ namespace Bivium.Models
         public bool MouseTracking { get; set; }
 
         /// <summary>
-        /// Modalità tastiera negoziata, usata dal browser per i tasti aggiuntivi
+        /// Negotiated keyboard mode, used by the browser for additional keys
         /// </summary>
         public bool KittyKeyboardActive { get; set; }
 
@@ -523,27 +523,27 @@ namespace Bivium.Models
     public sealed class TerminalClientEvent
     {
         /// <summary>
-        /// Identificatore monotono della richiesta transitoria
+        /// Monotonic identifier of the transient request
         /// </summary>
         public long Id { get; set; }
 
         /// <summary>
-        /// Sessione terminale che ha generato la richiesta
+        /// Terminal session that generated the request
         /// </summary>
         public int SessionId { get; set; }
 
         /// <summary>
-        /// Superficie client a cui destinare la richiesta
+        /// Client surface the request is addressed to
         /// </summary>
         public TerminalClientEventType Type { get; set; }
 
         /// <summary>
-        /// Titolo testuale limitato al renderer Razor
+        /// Text title limited to the Razor renderer
         /// </summary>
         public string Title { get; set; } = "";
 
         /// <summary>
-        /// Contenuto testuale della richiesta
+        /// Text content of the request
         /// </summary>
         public string Text { get; set; } = "";
     }

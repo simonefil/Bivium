@@ -24,7 +24,7 @@ namespace Bivium.Components.Shared
         [Parameter]
         public long LeaseGeneration { get; set; }
 
-        /// <summary>Projection autorizzata; mount e hydration non inviano byte</summary>
+        /// <summary>Authorized projection; mount and hydration do not send bytes</summary>
         [Parameter] public WorkspaceUploadSnapshot Upload { get; set; }
         [Inject] private BiviumWorkspaceService WorkspaceService { get; set; }
 
@@ -107,38 +107,38 @@ namespace Bivium.Components.Shared
         /// </summary>
         private Radzen.Blazor.RadzenButton _browseButton;
 
-        /// <summary>Bridge pronto per la selezione nel mount corrente</summary>
+        /// <summary>Bridge ready for selection in the current mount</summary>
         private bool _bridgeReady;
 
-        /// <summary>Generazione locale dell'apertura per scartare inizializzazioni obsolete</summary>
+        /// <summary>Local open generation used to discard stale initializations</summary>
         private long _showGeneration;
 
-        /// <summary>Disponibilità delle sorgenti soltanto nel browser corrente</summary>
+        /// <summary>Source availability in the current browser only</summary>
         private bool _hasLocalSelection;
 
-        /// <summary>Identità del mount per scartare callback tardivi</summary>
+        /// <summary>Mount identity used to discard late callbacks</summary>
         private Guid _sessionId;
 
-        /// <summary>Lease con la quale è stato inizializzato il mount</summary>
+        /// <summary>Lease with which the mount was initialized</summary>
         private long _generation;
 
-        /// <summary>Ultima projection autorizzata, letta dal parametro o dai callback; il parametro non viene mai sovrascritto</summary>
+        /// <summary>Last authorized projection, read from the parameter or the callbacks; the parameter is never overwritten</summary>
         private WorkspaceUploadSnapshot _upload;
 
-        /// <summary>Fase autorevole proiettata dal workspace</summary>
+        /// <summary>Authoritative phase projected by the workspace</summary>
         private WorkspaceUploadPhase _phase = WorkspaceUploadPhase.Selecting;
 
-        /// <summary>Annullamento in corso: Cancel è idempotente finché il servizio non conclude</summary>
+        /// <summary>Cancellation in progress: Cancel is idempotent until the service completes</summary>
         private bool _isCancelling;
 
-        /// <summary>Pausa in corso: il trasporto browser e il writer server devono quietarsi</summary>
+        /// <summary>Pause in progress: the browser transport and the server writer must quiesce</summary>
         private bool _isPausing;
 
         #endregion
 
         #region Lifecycle
 
-        /// <summary>Ripristina destinazione, manifest e progresso dal workspace, non dai callback locali</summary>
+        /// <summary>Restores destination, manifest and progress from the workspace, not from local callbacks</summary>
         protected override void OnParametersSet()
         {
             this.ApplyUpload(this.Upload);
@@ -151,10 +151,10 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Called from JS when files or directories are added to the upload queue
         /// </summary>
-        /// <param name="sessionId">Sessione del mount browser</param>
-        /// <param name="generation">Lease catturata</param>
-        /// <param name="hasSelection">Disponibilità locale delle sorgenti, non stato di dominio</param>
-        /// <returns>True quando l'adapter appartiene ancora alla sessione autorizzata</returns>
+        /// <param name="sessionId">Session of the browser mount</param>
+        /// <param name="generation">Captured lease</param>
+        /// <param name="hasSelection">Local availability of the sources, not domain state</param>
+        /// <returns>True when the adapter still belongs to the authorized session</returns>
         [JSInvokable]
         public bool OnUploadSelectionChanged(string sessionId, long generation, bool hasSelection)
         {
@@ -170,11 +170,11 @@ namespace Bivium.Components.Shared
             return true;
         }
 
-        /// <summary>Errore preflight locale; nessuna mutazione o pubblicazione nel workspace</summary>
-        /// <param name="sessionId">Sessione del mount browser</param>
-        /// <param name="generation">Lease catturata</param>
-        /// <param name="message">Errore della verifica delle sorgenti</param>
-        /// <returns>Aggiornamento del solo dialog del chiamante</returns>
+        /// <summary>Local preflight error; no mutation or publication in the workspace</summary>
+        /// <param name="sessionId">Session of the browser mount</param>
+        /// <param name="generation">Captured lease</param>
+        /// <param name="message">Source verification error</param>
+        /// <returns>Update of the caller's dialog only</returns>
         [JSInvokable]
         public async System.Threading.Tasks.Task OnUploadVerificationFailed(string sessionId, long generation, string message)
         {
@@ -215,10 +215,10 @@ namespace Bivium.Components.Shared
             await this.InvokeAsync(() => this.StateHasChanged());
         }
 
-        /// <summary>Callback del mount obsoleto o della lease revocata non modificano la sessione</summary>
+        /// <summary>Callbacks from a stale mount or a revoked lease do not modify the session</summary>
         private bool IsCurrentCallback(string sessionId, long generation) => !this._isDisposed && Guid.TryParse(sessionId, out Guid id) && id == this._sessionId && generation == this.LeaseGeneration && this.WorkspaceService.ValidatePublication(new WorkspaceClientToken(this.AttachmentId, generation));
 
-        /// <summary>Ferma solo il trasporto browser e aspetta il rollback del chunk corrente, non l'intero upload</summary>
+        /// <summary>Stops only the browser transport and waits for the current chunk rollback, not the whole upload</summary>
         internal async System.Threading.Tasks.Task<bool> FlushForHandoffAsync(CancellationToken cancellationToken)
         {
             if (this._upload?.Visible != true)
@@ -246,7 +246,7 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Initializes JS module and focuses the Browse button
         /// </summary>
-        /// <param name="firstRender">Primo mount reale del contenuto nativo</param>
+        /// <param name="firstRender">First actual mount of the native content</param>
         private async System.Threading.Tasks.Task HandleContentRenderedAsync(bool firstRender)
         {
             if (!firstRender || this._isDisposed || !this._isVisible)
@@ -341,7 +341,7 @@ namespace Bivium.Components.Shared
             }
             catch (Exception ex) when (ex is InvalidOperationException || ex is OperationCanceledException || ex is UnauthorizedAccessException)
             {
-                // La sessione è già stata annullata o revocata: lo stato autorevole arriva dal workspace
+                // The session was already cancelled or revoked: the authoritative state comes from the workspace
             }
             finally
             {
@@ -369,7 +369,7 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Mette in pausa il trasferimento conservando i chunk ricevuti e la selezione locale
+        /// Pauses the transfer preserving the received chunks and the local selection
         /// </summary>
         private async System.Threading.Tasks.Task HandlePause()
         {
@@ -397,9 +397,9 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Applica la projection autorevole senza modificare il parametro ricevuto dal Commander
+        /// Applies the authoritative projection without modifying the parameter received from the Commander
         /// </summary>
-        /// <param name="upload">Projection del workspace</param>
+        /// <param name="upload">Workspace projection</param>
         private void ApplyUpload(WorkspaceUploadSnapshot upload)
         {
             bool changed = this._sessionId != (upload?.Id ?? Guid.Empty) || this._generation != this.LeaseGeneration;
@@ -429,27 +429,27 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Etichetta dell'azione di avvio derivata dalla fase autorevole
+        /// Label of the start action derived from the authoritative phase
         /// </summary>
-        /// <returns>Upload oppure Resume per un trasferimento in pausa o fallito</returns>
+        /// <returns>Upload, or Resume for a paused or failed transfer</returns>
         private string GetStartLabel()
         {
             return this._phase is WorkspaceUploadPhase.Paused or WorkspaceUploadPhase.Failed ? "Resume" : "Upload";
         }
 
         /// <summary>
-        /// Indica se il suggerimento della drop zone deve restare visibile anche senza trascinamento
+        /// Indicates whether the drop zone hint must remain visible even without dragging
         /// </summary>
-        /// <returns>True durante l'upload o quando le sorgenti vanno riselezionate</returns>
+        /// <returns>True during the upload or when the sources must be reselected</returns>
         private bool IsDropHintPersistent()
         {
             return this._isUploading || (this._fileCount > 0 && !this._hasLocalSelection);
         }
 
         /// <summary>
-        /// Testo del suggerimento della drop zone coerente con lo stato corrente
+        /// Drop zone hint text consistent with the current state
         /// </summary>
-        /// <returns>Suggerimento da mostrare</returns>
+        /// <returns>Hint to show</returns>
         private string GetDropHint()
         {
             if (this._isUploading)

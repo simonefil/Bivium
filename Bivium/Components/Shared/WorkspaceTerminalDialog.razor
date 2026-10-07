@@ -46,15 +46,15 @@
     private string _confirmationText = "";
     private bool _writingClipboard;
     private bool _disposed;
-    /// <summary>Campo etichetta del rename, focalizzato al mount</summary>
+    /// <summary>Rename label field, focused on mount</summary>
     private Radzen.Blazor.RadzenTextBox _labelInput;
-    /// <summary>Annullamento, focus sicuro per la chiusura distruttiva</summary>
+    /// <summary>Cancel, safe focus for the destructive close</summary>
     private Radzen.Blazor.RadzenButton _cancelButton;
-    /// <summary>Conferma, focus del gesto Copy</summary>
+    /// <summary>Confirm, focus of the Copy gesture</summary>
     private Radzen.Blazor.RadzenButton _confirmButton;
     internal bool HasNonTransferableWork => this._writingClipboard;
 
-    /// <summary>Il mount non legge o scrive la clipboard OS</summary>
+    /// <summary>The mount does not read or write the OS clipboard</summary>
     protected override void OnParametersSet()
     {
         if (this._binding.Adopt(this.Workflow, this.LeaseGeneration))
@@ -78,12 +78,12 @@
         }
         catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException)
         {
-            // Circuito già rilasciato: nessun modulo da conservare
+            // Circuit already released: no module to keep
         }
     }
 
-    /// <summary>Focus esplicito al mount: campo del rename, Cancel per la chiusura, Copy per la clipboard</summary>
-    /// <param name="firstRender">True soltanto al primo DOM mount</param>
+    /// <summary>Explicit focus on mount: rename field, Cancel for closing, Copy for the clipboard</summary>
+    /// <param name="firstRender">True only on the first DOM mount</param>
     private async System.Threading.Tasks.Task HandleContentRenderedAsync(bool firstRender)
     {
         if (!firstRender || this._disposed || this.Workflow == null)
@@ -99,7 +99,7 @@
     private void PublishDraft() => this._binding.Publish(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this._text);
     private string GetClipboardPreview() => this._text.Length > 4096 ? this._text.Substring(0, 4096) + "\n… preview truncated; the full text will be copied" : this._text;
 
-    /// <summary>Il gesto esplicito consuma prima la risposta; duplicate e hydration non scrivono</summary>
+    /// <summary>The explicit gesture consumes the response first; duplicates and hydration do not write</summary>
     private async System.Threading.Tasks.Task ConfirmAsync()
     {
         if (this._disposed || this._writingClipboard)
@@ -146,7 +146,7 @@
     }
     internal System.Threading.Tasks.Task<bool> FlushForHandoffAsync(CancellationToken cancellationToken) => this._binding.FlushAsync(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this._text, cancellationToken);
 
-    /// <summary>Detach non risponde, non cancella e non esegue la richiesta OS</summary>
+    /// <summary>Detach neither responds, cancels nor executes the OS request</summary>
     public async ValueTask DisposeAsync()
     {
         this._disposed = true;

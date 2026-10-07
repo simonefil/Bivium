@@ -12,15 +12,15 @@ namespace Bivium.Components.Shared
     {
         #region Parameters
 
-        /// <summary>Finestre aperte proiettate dal Commander</summary>
+        /// <summary>Open windows projected by the Commander</summary>
         [Parameter]
         public IReadOnlyList<DesktopWindowState> Windows { get; set; } = new List<DesktopWindowState>();
 
-        /// <summary>Richiesta di ripristino e attivazione della finestra</summary>
+        /// <summary>Request to restore and activate the window</summary>
         [Parameter]
         public EventCallback<string> OnWindowActivate { get; set; }
 
-        /// <summary>Disponibilità corrente dell'attivazione</summary>
+        /// <summary>Current availability of the activation</summary>
         [Parameter]
         public bool CanActivateWindows { get; set; }
 
@@ -85,7 +85,7 @@ namespace Bivium.Components.Shared
         private string _lastDiskInfoPath = "";
 
         /// <summary>
-        /// Ultimo elenco usato per lo spazio libero: un nuovo elenco segue refresh e operazioni
+        /// Last list used for the free space: a new list follows refreshes and operations
         /// </summary>
         private List<FileSystemEntry> _lastDiskInfoEntries;
 

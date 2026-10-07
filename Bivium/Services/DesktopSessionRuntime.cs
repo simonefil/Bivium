@@ -3,33 +3,33 @@ using System.Collections.Generic;
 
 namespace Bivium.Services
 {
-    /// <summary>Contenuti corposi posseduti dal workspace, accessibili soltanto sotto il suo lock</summary>
+    /// <summary>Large contents owned by the workspace, accessible only under its lock</summary>
     internal sealed class DesktopSessionRuntime
     {
-        /// <summary>Documento editor, indipendente dal circuito</summary>
+        /// <summary>Editor document, independent of the circuit</summary>
         internal EditorSessionSnapshot Editor { get; set; }
-        /// <summary>Journal posseduto dalla stessa document session, non dal circuito Monaco</summary>
+        /// <summary>Journal owned by the same document session, not by the Monaco circuit</summary>
         internal EditorHistoryRuntime EditorHistory { get; set; }
-        /// <summary>Path non confermato del pannello sinistro</summary>
+        /// <summary>Unconfirmed path of the left panel</summary>
         internal WorkspacePanelPathDraft LeftPathDraft { get; set; }
-        /// <summary>Path non confermato del pannello destro</summary>
+        /// <summary>Unconfirmed path of the right panel</summary>
         internal WorkspacePanelPathDraft RightPathDraft { get; set; }
-        /// <summary>Menu applicativo visuale, separato dai comandi</summary>
+        /// <summary>Visual application menu, separate from the commands</summary>
         internal WorkspaceMenuDraft Menu { get; set; } = new WorkspaceMenuDraft(0, []);
-        /// <summary>Ultima apertura context menu con sorgenti catturate</summary>
+        /// <summary>Last context menu opening with captured sources</summary>
         internal WorkspaceContextMenuDraft ContextMenu { get; set; }
-        /// <summary>Draft dell'owner dialog corrente; non contiene dati di form</summary>
+        /// <summary>Draft of the current dialog owner; contains no form data</summary>
         internal Dictionary<string, WorkspaceDialogVisualDraft> Dialogs { get; } = new Dictionary<string, WorkspaceDialogVisualDraft>();
-        /// <summary>Draft renamer, indipendente dal circuito</summary>
+        /// <summary>Renamer draft, independent of the circuit</summary>
         internal RenamerSessionSnapshot Renamer { get; set; }
-        /// <summary>Vista browser unica per ciascun terminale, distinta dai dati del runtime terminale</summary>
+        /// <summary>Single browser view for each terminal, distinct from the terminal runtime data</summary>
         internal Dictionary<int, WorkspaceTerminalViewState> TerminalViews { get; } = new Dictionary<int, WorkspaceTerminalViewState>();
-        /// <summary>Vista della strip della finestra terminale</summary>
+        /// <summary>View of the terminal window strip</summary>
         internal WorkspaceTerminalStripViewState TerminalStrip { get; set; } = new WorkspaceTerminalStripViewState(0);
-        /// <summary>Popup della sola sessione Renamer corrente</summary>
+        /// <summary>Popup of the current Renamer session only</summary>
         internal WorkspaceRenamerViewState RenamerView { get; set; }
 
-        /// <summary>Rilascia i contenuti soltanto al reset esplicito o allo stop del workspace</summary>
+        /// <summary>Releases the contents only on explicit reset or workspace stop</summary>
         internal void Clear()
         {
             this.Editor = null;

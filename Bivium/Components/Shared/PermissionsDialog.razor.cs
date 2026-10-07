@@ -30,7 +30,7 @@ namespace Bivium.Components.Shared
         [Parameter] public WorkspaceWorkflowSnapshot Workflow { get; set; }
         private readonly WorkspaceFormBinding _binding = new WorkspaceFormBinding();
 
-        /// <summary>Ripristina il draft e il contesto originale senza rileggere permessi</summary>
+        /// <summary>Restores the draft and the original context without re-reading permissions</summary>
         protected override void OnParametersSet()
         {
             if (this.Workflow == null)
@@ -54,7 +54,7 @@ namespace Bivium.Components.Shared
         private string GetDraft() => System.Text.Json.JsonSerializer.Serialize(new WorkspacePermissionsDraft(this._model, this._recursive));
         private void PublishDraft() => this._binding.Publish(this._workspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this.GetDraft());
 
-        /// <summary>Confronta il checkpoint senza aspettare la ricorsione</summary>
+        /// <summary>Compares the checkpoint without waiting for the recursion</summary>
         internal System.Threading.Tasks.Task<bool> FlushForHandoffAsync(CancellationToken cancellationToken) => this._binding.FlushAsync(this._workspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this.GetDraft(), cancellationToken);
 
         #endregion
@@ -108,20 +108,20 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Focuses the dialog element after render
         /// </summary>
-        /// <param name="firstRender">Primo mount reale del contenuto</param>
+        /// <param name="firstRender">First real mount of the content</param>
         private async System.Threading.Tasks.Task HandleContentRenderedAsync(bool firstRender)
         {
             if (firstRender && this._isVisible)
                 await this._cancelButton.Element.FocusAsync();
         }
 
-        /// <summary>Conferma il draft; permessi e ownership vengono applicati dal workflow server</summary>
+        /// <summary>Confirms the draft; permissions and ownership are applied by the server workflow</summary>
         private void HandleSave()
         {
             this._binding.Respond(this._workspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), false);
         }
 
-        /// <summary>Chiude senza applicare modifiche</summary>
+        /// <summary>Closes without applying changes</summary>
         private void HandleCancel()
         {
             this._binding.Respond(this._workspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), true);
@@ -130,7 +130,7 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Calculates the octal permission string for Unix permissions
         /// </summary>
-        /// <returns>Octal string (and.g. 755)</returns>
+        /// <returns>Octal string (e.g. 755)</returns>
         private string GetOctalString()
         {
             int owner = 0;

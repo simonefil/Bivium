@@ -19,7 +19,7 @@ namespace Bivium.Components.Shared
         [Inject] private Bivium.Services.BiviumWorkspaceService WorkspaceService { get; set; }
         private readonly WorkspaceFormBinding _binding = new WorkspaceFormBinding();
 
-        /// <summary>Hydration senza caricare o salvare impostazioni</summary>
+        /// <summary>Hydration without loading or saving settings</summary>
         protected override void OnParametersSet()
         {
             if (this.Workflow == null)
@@ -36,7 +36,7 @@ namespace Bivium.Components.Shared
 
         private void PublishDraft() => this._binding.Publish(this.WorkspaceService, new Bivium.Models.WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this._extensionsText);
 
-        /// <summary>La barriera attende soltanto il checkpoint del testo</summary>
+        /// <summary>The barrier waits only for the text checkpoint</summary>
         internal System.Threading.Tasks.Task<bool> FlushForHandoffAsync(CancellationToken cancellationToken) => this._binding.FlushAsync(this.WorkspaceService, new Bivium.Models.WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this._extensionsText, cancellationToken);
 
         #endregion
@@ -70,20 +70,20 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Focuses the textarea after render
         /// </summary>
-        /// <param name="firstRender">Primo mount reale del contenuto</param>
+        /// <param name="firstRender">First real mount of the content</param>
         private async System.Threading.Tasks.Task HandleContentRenderedAsync(bool firstRender)
         {
             if (firstRender && this._isVisible)
                 await this._textareaElement.Element.FocusAsync();
         }
 
-        /// <summary>Conferma il draft; il salvataggio delle estensioni appartiene al workflow server</summary>
+        /// <summary>Confirms the draft; saving the extensions belongs to the server workflow</summary>
         private void HandleSave()
         {
             this._binding.Respond(this.WorkspaceService, new Bivium.Models.WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), false);
         }
 
-        /// <summary>Chiude senza salvare</summary>
+        /// <summary>Closes without saving</summary>
         private void HandleCancel()
         {
             this._binding.Respond(this.WorkspaceService, new Bivium.Models.WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), true);

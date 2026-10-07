@@ -70,7 +70,7 @@ else
         <div id="outer-splitter-host" class="radzen-outer-splitter-host">
             @if (!this._singlePanelMode && this._compactLayout && this._activePanel == 1)
             {
-                @* Viewport stretto: un solo pannello, quello attivo; lo switch è nell'header *@
+                @* Narrow viewport: a single panel, the active one; the switch is in the header *@
                 <Bivium.Components.Panel.FilePanel @key="@("right")" State="@this._rightPanel" IsActive="true" PanelId="right" AttachmentId="@this._attachmentId" LeaseGeneration="@this._leaseGeneration"
                     OnNavigate="this.HandleRightNavigate" OnSortChanged="this.HandleRightSortChanged" OnScrollAnchorChanged="this.HandleRightScrollAnchorChanged"
                     OnPageSizeChanged="this.HandleRightPageSizeChanged" OnTreeExpansionChanged="this.HandleRightTreeExpansionChanged"

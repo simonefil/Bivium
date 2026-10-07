@@ -10,28 +10,28 @@ namespace Bivium.Services
     {
         #region Variabili di classe
 
-        /// <summary>Runtime dei draft separato dalla proiezione globale leggera</summary>
+        /// <summary>Draft runtime kept separate from the lightweight global projection</summary>
         private readonly DesktopSessionRuntime _desktopRuntime = new DesktopSessionRuntime();
 
         #endregion
 
         #region Metodi pubblici
 
-        /// <summary>Legge la vista della sessione terminale già verificata dal suo adapter runtime</summary>
-        /// <param name="token">Lease del mount</param>
-        /// <param name="sessionId">Identità stabile terminale</param>
-        /// <returns>Vista oppure default, mai dati del terminale</returns>
+        /// <summary>Reads the view of the terminal session already verified by its runtime adapter</summary>
+        /// <param name="token">Mount lease</param>
+        /// <param name="sessionId">Stable terminal identity</param>
+        /// <returns>View or default, never terminal data</returns>
         internal WorkspaceTerminalViewState GetTerminalViewState(WorkspaceClientToken token, int sessionId)
         {
             lock (this._lock)
                 return this.ValidateLeaseLocked(token) && !this.IsStopped && sessionId > 0 ? this._desktopRuntime.TerminalViews.GetValueOrDefault(sessionId) ?? new WorkspaceTerminalViewState(0, sessionId, 0, false, 0, 0, 0, true) : null;
         }
 
-        /// <summary>CAS browser separato dal journal del terminal runtime, ammesso nel drain</summary>
-        /// <param name="token">Lease publisher</param>
-        /// <param name="draft">Vista catturata</param>
-        /// <param name="owner">Snapshot interno verificato dal runtime, non ricevuto dal browser</param>
-        /// <returns>Revisione acknowledged oppure -1</returns>
+        /// <summary>Browser CAS separate from the terminal runtime journal, allowed during the drain</summary>
+        /// <param name="token">Publisher lease</param>
+        /// <param name="draft">Captured view</param>
+        /// <param name="owner">Internal snapshot verified by the runtime, not received from the browser</param>
+        /// <returns>Acknowledged revision or -1</returns>
         internal long PublishTerminalViewState(WorkspaceClientToken token, WorkspaceTerminalViewState draft, TerminalSessionSnapshot owner)
         {
             lock (this._lock)
@@ -40,8 +40,8 @@ namespace Bivium.Services
                     return -1;
                 if ((this._desktopRuntime.TerminalViews.GetValueOrDefault(draft.SessionId)?.Revision ?? 0) != draft.Revision)
                     return -1;
-                // Il runtime può avanzare o applicare retention mentre il checkpoint è in transito.
-                // Un cambio buffer resta esplicito: sarà l'hydration a scartare gli anchor incompatibili.
+                // The runtime may advance or apply retention while the checkpoint is in transit.
+                // A buffer change stays explicit: hydration will discard the incompatible anchors.
                 if (draft.AlternateBuffer == owner.Screen.AlternateBuffer)
                 {
                     long minimum = draft.AlternateBuffer ? 0 : owner.HistoryStart;
@@ -61,9 +61,9 @@ namespace Bivium.Services
             }
         }
 
-        /// <summary>Rilascia viste di sessioni che il terminal runtime non rappresenta più</summary>
-        /// <param name="token">Lease dell'adapter</param>
-        /// <param name="sessionIds">Identità lette dal runtime, mai dal checkpoint browser</param>
+        /// <summary>Releases views of sessions the terminal runtime no longer represents</summary>
+        /// <param name="token">Adapter lease</param>
+        /// <param name="sessionIds">Identities read from the runtime, never from the browser checkpoint</param>
         internal void ReconcileTerminalViews(WorkspaceClientToken token, int[] sessionIds)
         {
             lock (this._lock)
@@ -75,19 +75,19 @@ namespace Bivium.Services
             }
         }
 
-        /// <summary>Legge lo scroll della strip senza modificare il tab attivo</summary>
-        /// <param name="token">Lease del mount</param>
-        /// <returns>Vista strip oppure null</returns>
+        /// <summary>Reads the strip scroll without changing the active tab</summary>
+        /// <param name="token">Mount lease</param>
+        /// <returns>Strip view or null</returns>
         internal WorkspaceTerminalStripViewState GetTerminalStripViewState(WorkspaceClientToken token)
         {
             lock (this._lock)
                 return this.ValidateLeaseLocked(token) && !this.IsStopped ? this._desktopRuntime.TerminalStrip : null;
         }
 
-        /// <summary>CAS della sola strip; header rimossi verranno clamped nel DOM reale</summary>
-        /// <param name="token">Lease publisher</param>
-        /// <param name="draft">Anchor semantico e scroll</param>
-        /// <returns>Revisione acknowledged oppure -1</returns>
+        /// <summary>CAS of the strip only; removed headers will be clamped in the real DOM</summary>
+        /// <param name="token">Publisher lease</param>
+        /// <param name="draft">Semantic anchor and scroll</param>
+        /// <returns>Acknowledged revision or -1</returns>
         internal long PublishTerminalStripViewState(WorkspaceClientToken token, WorkspaceTerminalStripViewState draft)
         {
             lock (this._lock)
@@ -100,20 +100,20 @@ namespace Bivium.Services
             }
         }
 
-        /// <summary>Hydration dei popup soltanto per la stessa sessione Renamer</summary>
-        /// <param name="token">Lease del mount</param>
-        /// <param name="sessionId">Owner Renamer</param>
-        /// <returns>Vista immutabile oppure null</returns>
+        /// <summary>Popup hydration only for the same Renamer session</summary>
+        /// <param name="token">Mount lease</param>
+        /// <param name="sessionId">Renamer owner</param>
+        /// <returns>Immutable view or null</returns>
         internal WorkspaceRenamerViewState GetRenamerViewState(WorkspaceClientToken token, Guid sessionId)
         {
             lock (this._lock)
                 return this.ValidateLeaseLocked(token) && !this.IsStopped && this._desktopRuntime.Renamer?.Id == sessionId ? this._desktopRuntime.RenamerView?.SessionId == sessionId ? this._desktopRuntime.RenamerView : new WorkspaceRenamerViewState(0, sessionId, [], Scrolls: [], Selections: []) : null;
         }
 
-        /// <summary>CAS dei popup, mai una modifica della form o della preview</summary>
-        /// <param name="token">Lease publisher</param>
-        /// <param name="draft">Popup montati della sessione</param>
-        /// <returns>Revisione acknowledged oppure -1</returns>
+        /// <summary>CAS of the popups, never a change to the form or the preview</summary>
+        /// <param name="token">Publisher lease</param>
+        /// <param name="draft">Popups mounted by the session</param>
+        /// <returns>Acknowledged revision or -1</returns>
         internal long PublishRenamerViewState(WorkspaceClientToken token, WorkspaceRenamerViewState draft)
         {
             lock (this._lock)
@@ -130,19 +130,19 @@ namespace Bivium.Services
             }
         }
 
-        /// <summary>Hydration autorizzata del menu app-owned</summary>
-        /// <param name="token">Lease del mount</param>
-        /// <returns>Draft visuale oppure null</returns>
+        /// <summary>Authorized hydration of the app-owned menu</summary>
+        /// <param name="token">Mount lease</param>
+        /// <returns>Visual draft or null</returns>
         internal WorkspaceMenuDraft GetMenuDraft(WorkspaceClientToken token)
         {
             lock (this._lock)
                 return this.ValidateLeaseLocked(token) && !this.IsStopped ? this._desktopRuntime.Menu : null;
         }
 
-        /// <summary>Checkpoint menu ordinato, ammesso anche durante il drain</summary>
-        /// <param name="token">Lease publisher</param>
-        /// <param name="draft">Identità e contesto visuale osservati</param>
-        /// <returns>Nuova revisione oppure -1, senza retry implicito</returns>
+        /// <summary>Ordered menu checkpoint, also allowed during the drain</summary>
+        /// <param name="token">Publisher lease</param>
+        /// <param name="draft">Observed identity and visual context</param>
+        /// <returns>New revision or -1, with no implicit retry</returns>
         internal long PublishMenuDraft(WorkspaceClientToken token, WorkspaceMenuDraft draft)
         {
             lock (this._lock)
@@ -155,19 +155,19 @@ namespace Bivium.Services
             }
         }
 
-        /// <summary>Legge l'apertura senza rileggere entry o flag dal filesystem</summary>
-        /// <param name="token">Lease del mount</param>
-        /// <returns>Apertura catturata oppure null</returns>
+        /// <summary>Reads the opening without rereading entries or flags from the filesystem</summary>
+        /// <param name="token">Mount lease</param>
+        /// <returns>Captured opening or null</returns>
         internal WorkspaceContextMenuDraft GetContextMenuDraft(WorkspaceClientToken token)
         {
             lock (this._lock)
                 return this.ValidateLeaseLocked(token) && !this.IsStopped ? this._desktopRuntime.ContextMenu : null;
         }
 
-        /// <summary>CAS dell'apertura, chiusura o posizione del context menu</summary>
-        /// <param name="token">Lease publisher</param>
-        /// <param name="draft">Stato catturato dall'owner Commander</param>
-        /// <returns>Draft acknowledged oppure null</returns>
+        /// <summary>CAS of the opening, closing or position of the context menu</summary>
+        /// <param name="token">Publisher lease</param>
+        /// <param name="draft">State captured by the Commander owner</param>
+        /// <returns>Acknowledged draft or null</returns>
         internal WorkspaceContextMenuDraft PublishContextMenuDraft(WorkspaceClientToken token, WorkspaceContextMenuDraft draft)
         {
             lock (this._lock)
@@ -180,10 +180,10 @@ namespace Bivium.Services
             }
         }
 
-        /// <summary>Hydration visuale legata alla domanda/sessione, mai all'ultimo dialog generico</summary>
-        /// <param name="token">Lease del mount</param>
-        /// <param name="draft">Identità della superficie da montare</param>
-        /// <returns>Stato visuale oppure default della stessa identità</returns>
+        /// <summary>Visual hydration tied to the question/session, never to the last generic dialog</summary>
+        /// <param name="token">Mount lease</param>
+        /// <param name="draft">Identity of the surface to mount</param>
+        /// <returns>Visual state or default for the same identity</returns>
         internal WorkspaceDialogVisualDraft GetDialogVisualDraft(WorkspaceClientToken token, WorkspaceDialogVisualDraft draft)
         {
             lock (this._lock)
@@ -194,10 +194,10 @@ namespace Bivium.Services
             }
         }
 
-        /// <summary>CAS del solo stato visuale; non tocca draft form o runner</summary>
-        /// <param name="token">Lease publisher</param>
-        /// <param name="draft">Focus e scroll della superficie proprietaria</param>
-        /// <returns>Nuova revisione oppure -1</returns>
+        /// <summary>CAS of the visual state only; does not touch the form draft or the runner</summary>
+        /// <param name="token">Publisher lease</param>
+        /// <param name="draft">Focus and scroll of the owning surface</param>
+        /// <returns>New revision or -1</returns>
         internal long PublishDialogVisualDraft(WorkspaceClientToken token, WorkspaceDialogVisualDraft draft)
         {
             lock (this._lock)
@@ -211,7 +211,7 @@ namespace Bivium.Services
                     return -1;
                 if (draft.TextareaGeometries != null && draft.TextareaGeometries.Any(geometry => draft.Surface != "extensions" || geometry == null || geometry.Key != "name:editor-extensions-textarea" || !double.IsFinite(geometry.Width) || !double.IsFinite(geometry.Height) || geometry.Width <= 0 || geometry.Height <= 0 || geometry.Resize is not ("vertical" or "horizontal" or "both")))
                     return -1;
-                // Rimuove identità terminate, senza accumulare history di dialog o dati sensibili
+                // Removes terminated identities, without accumulating dialog history or sensitive data
                 foreach (string key in this._desktopRuntime.Dialogs.Where(item => !this.IsDialogVisualOwnerLocked(item.Value)).Select(item => item.Key).ToArray())
                     this._desktopRuntime.Dialogs.Remove(key);
                 this._desktopRuntime.Dialogs[draft.Surface] = draft with { Revision = draft.Revision + 1, TextareaGeometries = draft.TextareaGeometries?.ToArray() };
@@ -220,22 +220,22 @@ namespace Bivium.Services
             }
         }
 
-        /// <summary>Legge il path draft della directory corrente senza eseguire navigazione</summary>
-        /// <param name="token">Lease del mount</param>
-        /// <param name="panelId">Identità left/right esistente</param>
-        /// <returns>Draft tipizzato oppure null senza autorità</returns>
+        /// <summary>Reads the draft path of the current directory without performing navigation</summary>
+        /// <param name="token">Mount lease</param>
+        /// <param name="panelId">Existing left/right identity</param>
+        /// <returns>Typed draft or null when there is no authority</returns>
         internal WorkspacePanelPathDraft GetPanelPathDraft(WorkspaceClientToken token, string panelId)
         {
             lock (this._lock)
                 return this.ValidateLeaseLocked(token) && !this.IsStopped ? this.GetPanelPathDraftLocked(panelId) : null;
         }
 
-        /// <summary>Checkpoint visuale CAS; aggiorna il watermark globale senza rileggere i pannelli</summary>
-        /// <param name="token">Lease del publisher</param>
-        /// <param name="panelId">Identità left/right</param>
-        /// <param name="expectedRevision">Revisione del draft osservato</param>
-        /// <param name="draft">Testo, ciclo e focus del path editor</param>
-        /// <returns>Draft acknowledged oppure null per publisher obsoleto</returns>
+        /// <summary>Visual CAS checkpoint; updates the global watermark without rereading the panels</summary>
+        /// <param name="token">Publisher lease</param>
+        /// <param name="panelId">Left/right identity</param>
+        /// <param name="expectedRevision">Revision of the observed draft</param>
+        /// <param name="draft">Text, cycle and focus of the path editor</param>
+        /// <returns>Acknowledged draft or null for a stale publisher</returns>
         internal WorkspacePanelPathDraft PublishPanelPathDraft(WorkspaceClientToken token, string panelId, long expectedRevision, WorkspacePanelPathDraft draft)
         {
             lock (this._lock)
@@ -246,39 +246,39 @@ namespace Bivium.Services
                 WorkspacePanelPathDraft acknowledged = draft with { Revision = current.Revision + 1 };
                 if (panelId == "left") this._desktopRuntime.LeftPathDraft = acknowledged;
                 else this._desktopRuntime.RightPathDraft = acknowledged;
-                // Il drain vede questa revisione; nessuna notifica provoca un listing per keypress
+                // The drain sees this revision; no notification triggers a listing per keypress
                 this.CommitDesktopLocked(this._snapshot.FloatingWindows);
                 return acknowledged;
             }
         }
 
-        /// <summary>Legge il documento soltanto per il lease attivo</summary>
-        /// <param name="token">Lease del lettore</param>
-        /// <returns>Documento immutabile oppure null</returns>
+        /// <summary>Reads the document only for the active lease</summary>
+        /// <param name="token">Reader lease</param>
+        /// <returns>Immutable document or null</returns>
         internal EditorSessionSnapshot GetEditorSession(WorkspaceClientToken token)
         {
             lock (this._lock)
                 return this.ValidateLeaseLocked(token) ? this._desktopRuntime.Editor : null;
         }
 
-        /// <summary>Hydration history soltanto per la stessa revisione del documento autorizzato</summary>
-        /// <param name="token">Lease del mount</param>
-        /// <param name="id">Documento catturato</param>
-        /// <param name="revision">Revisione catturata insieme al contenuto</param>
-        /// <returns>History coerente oppure null per un mount obsoleto</returns>
+        /// <summary>History hydration only for the same revision of the authorized document</summary>
+        /// <param name="token">Mount lease</param>
+        /// <param name="id">Captured document</param>
+        /// <param name="revision">Revision captured together with the content</param>
+        /// <returns>Consistent history or null for a stale mount</returns>
         internal EditorHistorySnapshot GetEditorHistory(WorkspaceClientToken token, Guid id, long revision)
         {
             lock (this._lock)
                 return this.ValidateLeaseLocked(token) && this._desktopRuntime.Editor?.Id == id && this._desktopRuntime.Editor.Revision == revision ? this._desktopRuntime.EditorHistory?.Capture() : null;
         }
 
-        /// <summary>Concorda la base Monaco prima degli edit, senza creare undo o sporcare la baseline</summary>
-        /// <param name="token">Lease del mount</param>
-        /// <param name="id">Documento del modello appena creato</param>
-        /// <param name="revision">Revisione della hydration</param>
-        /// <param name="content">getValue pubblico del modello</param>
-        /// <param name="eol">getEOL pubblico effettivo</param>
-        /// <returns>Sessione inizializzata oppure null per una base incoerente</returns>
+        /// <summary>Agrees the Monaco base before edits, without creating undo or dirtying the baseline</summary>
+        /// <param name="token">Mount lease</param>
+        /// <param name="id">Document of the newly created model</param>
+        /// <param name="revision">Hydration revision</param>
+        /// <param name="content">Public getValue of the model</param>
+        /// <param name="eol">Effective public getEOL</param>
+        /// <returns>Initialized session or null for an inconsistent base</returns>
         internal EditorSessionSnapshot InitializeEditorModel(WorkspaceClientToken token, Guid id, long revision, string content, string eol)
         {
             lock (this._lock)
@@ -290,27 +290,27 @@ namespace Bivium.Services
                     return session.ModelEol == eol && session.Content == content ? session : null;
                 if (session.Revision != 0 || session.Content != session.SavedContent || content != NormalizeEditorEol(session.Content, eol))
                     return null;
-                // È una concordanza della rappresentazione iniziale, non una modifica dell'utente o del file
+                // This is an agreement on the initial representation, not a change by the user or the file
                 session = session with { Revision = session.Revision + 1, Content = content, SavedContent = content, ModelEol = eol };
                 this._desktopRuntime.Editor = session;
                 return session;
             }
         }
 
-        /// <summary>Legge il draft soltanto per il lease attivo</summary>
-        /// <param name="token">Lease del lettore</param>
-        /// <returns>Draft immutabile oppure null</returns>
+        /// <summary>Reads the draft only for the active lease</summary>
+        /// <param name="token">Reader lease</param>
+        /// <returns>Immutable draft or null</returns>
         internal RenamerSessionSnapshot GetRenamerSession(WorkspaceClientToken token)
         {
             lock (this._lock)
                 return this.ValidateLeaseLocked(token) ? this._desktopRuntime.Renamer : null;
         }
 
-        /// <summary>Apre un documento senza sostituire una sessione già aperta</summary>
-        /// <param name="token">Lease del chiamante</param>
-        /// <param name="filePath">File già letto dal workflow autorizzato</param>
-        /// <param name="content">Contenuto iniziale</param>
-        /// <returns>Sessione autorevole</returns>
+        /// <summary>Opens a document without replacing an already open session</summary>
+        /// <param name="token">Caller lease</param>
+        /// <param name="filePath">File already read by the authorized workflow</param>
+        /// <param name="content">Initial content</param>
+        /// <returns>Authoritative session</returns>
         internal EditorSessionSnapshot OpenEditorSession(WorkspaceClientToken token, string filePath, string content)
         {
             Action<BiviumWorkspaceSnapshot>[] subscribers;
@@ -333,10 +333,10 @@ namespace Bivium.Services
             return result;
         }
 
-        /// <summary>Apre un draft renamer già materializzato senza rigenerarne la preview</summary>
-        /// <param name="token">Lease del chiamante</param>
-        /// <param name="draft">Payload serializzato della form</param>
-        /// <returns>Sessione autorevole</returns>
+        /// <summary>Opens an already materialized renamer draft without regenerating its preview</summary>
+        /// <param name="token">Caller lease</param>
+        /// <param name="draft">Serialized form payload</param>
+        /// <returns>Authoritative session</returns>
         internal RenamerSessionSnapshot OpenRenamerSession(WorkspaceClientToken token, string draft)
         {
             Action<BiviumWorkspaceSnapshot>[] subscribers;
@@ -358,13 +358,13 @@ namespace Bivium.Services
             return result;
         }
 
-        /// <summary>Accetta un checkpoint ordinato del documento e del viewstate</summary>
-        /// <param name="token">Lease del chiamante</param>
-        /// <param name="id">Identità documento</param>
-        /// <param name="expectedRevision">Revisione del precedente checkpoint confermato</param>
-        /// <param name="checkpoint">Contenuto, delta history, cursor e viewstate atomicamente coerenti</param>
-        /// <param name="session">Sessione dopo il tentativo</param>
-        /// <returns>True se accettato; nessun retry implicito sul draft</returns>
+        /// <summary>Accepts an ordered checkpoint of the document and the viewstate</summary>
+        /// <param name="token">Caller lease</param>
+        /// <param name="id">Document identity</param>
+        /// <param name="expectedRevision">Revision of the previous confirmed checkpoint</param>
+        /// <param name="checkpoint">Content, history delta, cursor and viewstate, atomically consistent</param>
+        /// <param name="session">Session after the attempt</param>
+        /// <returns>True if accepted; no implicit retry on the draft</returns>
         internal bool TryUpdateEditorDraft(WorkspaceClientToken token, Guid id, long expectedRevision, EditorCheckpoint checkpoint, out EditorSessionSnapshot session)
         {
             Action<BiviumWorkspaceSnapshot>[] subscribers = Array.Empty<Action<BiviumWorkspaceSnapshot>>();
@@ -384,7 +384,7 @@ namespace Bivium.Services
                 bool wasDirty = session.IsDirty;
                 session = session with { Revision = session.Revision + 1, Content = checkpoint.Content, ViewState = checkpoint.ViewState };
                 this._desktopRuntime.Editor = session;
-                // Pubblica solo transizioni dirty, mai checkpoint di testo nelle notifiche globali
+                // Publishes only dirty transitions, never text checkpoints in global notifications
                 if (wasDirty != session.IsDirty)
                 {
                     this.CommitDesktopLocked(this._snapshot.FloatingWindows);
@@ -396,13 +396,13 @@ namespace Bivium.Services
             return true;
         }
 
-        /// <summary>Accetta un draft renamer soltanto sulla revisione dalla quale deriva</summary>
-        /// <param name="token">Lease del chiamante</param>
-        /// <param name="id">Identità sessione</param>
-        /// <param name="expectedRevision">Revisione attesa</param>
-        /// <param name="draft">Form e preview materializzata</param>
-        /// <param name="session">Sessione autorevole</param>
-        /// <returns>True se accettato</returns>
+        /// <summary>Accepts a renamer draft only on the revision it derives from</summary>
+        /// <param name="token">Caller lease</param>
+        /// <param name="id">Session identity</param>
+        /// <param name="expectedRevision">Expected revision</param>
+        /// <param name="draft">Form and materialized preview</param>
+        /// <param name="session">Authoritative session</param>
+        /// <returns>True if accepted</returns>
         internal bool TryUpdateRenamerDraft(WorkspaceClientToken token, Guid id, long expectedRevision, string draft, out RenamerSessionSnapshot session)
         {
             lock (this._lock)
@@ -423,13 +423,13 @@ namespace Bivium.Services
             }
         }
 
-        /// <summary>Committa file e baseline nella stessa sezione critica del lease</summary>
-        /// <param name="token">Lease che ha richiesto il save</param>
-        /// <param name="id">Documento da salvare</param>
-        /// <param name="revision">Revisione del testo salvato, per impedire che un save più vecchio superi uno nuovo</param>
-        /// <param name="content">Testo effettivamente scritto nel file temporaneo</param>
-        /// <param name="commit">Commit filesystem breve fornito dal servizio esistente</param>
-        /// <returns>True se il commit è stato autorizzato</returns>
+        /// <summary>Commits file and baseline in the same critical section as the lease</summary>
+        /// <param name="token">Lease that requested the save</param>
+        /// <param name="id">Document to save</param>
+        /// <param name="revision">Revision of the saved text, to prevent an older save from overtaking a newer one</param>
+        /// <param name="content">Text actually written to the temporary file</param>
+        /// <param name="commit">Short filesystem commit provided by the existing service</param>
+        /// <returns>True if the commit was authorized</returns>
         internal bool TryCommitEditorSave(WorkspaceClientToken token, Guid id, long revision, string content, Action commit)
         {
             Action<BiviumWorkspaceSnapshot>[] subscribers;
@@ -448,15 +448,15 @@ namespace Bivium.Services
             return true;
         }
 
-        /// <summary>Aggiorna solo la finestra richiesta, senza sovrascrivere altre superfici</summary>
-        /// <param name="token">Lease corrente</param>
-        /// <param name="expectedRevision">Revisione globale attesa</param>
-        /// <param name="id">Sessione proprietaria</param>
-        /// <param name="editor">True per editor, false per renamer</param>
-        /// <param name="expectedWindow">Finestra da cui deriva la modifica</param>
-        /// <param name="window">Nuovo stato</param>
-        /// <param name="snapshot">Snapshot autorevole</param>
-        /// <returns>True se accettato</returns>
+        /// <summary>Updates only the requested window, without overwriting other surfaces</summary>
+        /// <param name="token">Current lease</param>
+        /// <param name="expectedRevision">Expected global revision</param>
+        /// <param name="id">Owning session</param>
+        /// <param name="editor">True for editor, false for renamer</param>
+        /// <param name="expectedWindow">Window the change derives from</param>
+        /// <param name="window">New state</param>
+        /// <param name="snapshot">Authoritative snapshot</param>
+        /// <returns>True if accepted</returns>
         internal bool TryUpdateDesktopWindow(WorkspaceClientToken token, long expectedRevision, Guid id, bool editor, FloatingWindowSnapshot expectedWindow, FloatingWindowSnapshot window, out BiviumWorkspaceSnapshot snapshot)
         {
             Action<BiviumWorkspaceSnapshot>[] subscribers = Array.Empty<Action<BiviumWorkspaceSnapshot>>();
@@ -478,12 +478,12 @@ namespace Bivium.Services
             return accepted;
         }
 
-        /// <summary>Chiude soltanto la sessione esplicitamente richiesta, non durante dispose</summary>
-        /// <param name="token">Lease corrente</param>
-        /// <param name="id">Sessione da chiudere</param>
-        /// <param name="expectedRevision">Ultima revisione del draft</param>
-        /// <param name="editor">True per editor, false per renamer</param>
-        /// <returns>True se chiusa</returns>
+        /// <summary>Closes only the explicitly requested session, not during dispose</summary>
+        /// <param name="token">Current lease</param>
+        /// <param name="id">Session to close</param>
+        /// <param name="expectedRevision">Last draft revision</param>
+        /// <param name="editor">True for editor, false for renamer</param>
+        /// <returns>True if closed</returns>
         internal bool TryCloseDesktopSession(WorkspaceClientToken token, Guid id, long expectedRevision, bool editor)
         {
             Action<BiviumWorkspaceSnapshot>[] subscribers;
@@ -516,12 +516,12 @@ namespace Bivium.Services
             return true;
         }
 
-        /// <summary>Aggiorna clipboard interna sulla revisione globale attesa</summary>
-        /// <param name="token">Lease corrente</param>
-        /// <param name="expectedRevision">Revisione globale attesa</param>
-        /// <param name="paths">Sorgenti copy/cut</param>
-        /// <param name="isCut">Modalità cut</param>
-        /// <returns>True se accettato</returns>
+        /// <summary>Updates the internal clipboard on the expected global revision</summary>
+        /// <param name="token">Current lease</param>
+        /// <param name="expectedRevision">Expected global revision</param>
+        /// <param name="paths">Copy/cut sources</param>
+        /// <param name="isCut">Cut mode</param>
+        /// <returns>True if accepted</returns>
         internal bool TryUpdateClipboard(WorkspaceClientToken token, long expectedRevision, System.Collections.Generic.IEnumerable<string> paths, bool isCut)
         {
             Action<BiviumWorkspaceSnapshot>[] subscribers;
@@ -544,9 +544,9 @@ namespace Bivium.Services
 
         #region Metodi privati
 
-        /// <summary>Domanda o sessione ancora proprietaria della superficie visuale</summary>
-        /// <param name="draft">Identità catturata al mount</param>
-        /// <returns>True soltanto per una superficie conosciuta e attiva</returns>
+        /// <summary>Question or session that still owns the visual surface</summary>
+        /// <param name="draft">Identity captured at mount</param>
+        /// <returns>True only for a known and active surface</returns>
         private bool IsDialogVisualOwnerLocked(WorkspaceDialogVisualDraft draft)
         {
             if (draft == null || draft.OwnerId == Guid.Empty)
@@ -575,15 +575,15 @@ namespace Bivium.Services
             };
         }
 
-        /// <summary>La stessa rappresentazione uniforme adottata dal modello testo Monaco</summary>
-        /// <param name="content">Testo originale</param>
-        /// <param name="eol">Separatore effettivo del modello</param>
-        /// <returns>Testo con soli separatori EOL concordati</returns>
+        /// <summary>The same uniform representation adopted by the Monaco text model</summary>
+        /// <param name="content">Original text</param>
+        /// <param name="eol">Effective separator of the model</param>
+        /// <returns>Text with only the agreed EOL separators</returns>
         private static string NormalizeEditorEol(string content, string eol) => content.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", eol);
 
-        /// <summary>La directory di base impedisce pubblicazioni tardive dopo una navigazione</summary>
-        /// <param name="panelId">Identità left/right</param>
-        /// <returns>Draft corrente oppure default visuale della nuova directory</returns>
+        /// <summary>The base directory prevents late publications after a navigation</summary>
+        /// <param name="panelId">Left/right identity</param>
+        /// <returns>Current draft or visual default of the new directory</returns>
         private WorkspacePanelPathDraft GetPanelPathDraftLocked(string panelId)
         {
             WorkspacePanelSnapshot panel = panelId == "left" ? this._snapshot.Panels?.LeftPanel : panelId == "right" ? this._snapshot.Panels?.RightPanel : null;
@@ -593,8 +593,8 @@ namespace Bivium.Services
             return draft?.BasePath == panel.CurrentPath ? draft : new WorkspacePanelPathDraft((draft?.Revision ?? -1) + 1, panel.CurrentPath, false, panel.CurrentPath, [], [], 0, "", "");
         }
 
-        /// <summary>Rivalida apertura sotto il lock esistente</summary>
-        /// <param name="token">Lease del chiamante</param>
+        /// <summary>Revalidates the opening under the existing lock</summary>
+        /// <param name="token">Caller lease</param>
         private void RequireDesktopLeaseLocked(WorkspaceClientToken token)
         {
             this.ThrowIfStopped();
@@ -602,9 +602,9 @@ namespace Bivium.Services
                 throw new UnauthorizedAccessException("The browser attachment no longer owns the workspace lease");
         }
 
-        /// <summary>Costruisce metadati leggeri; chiamare solo sotto il lock</summary>
-        /// <param name="windows">Finestre autorevoli</param>
-        /// <returns>Snapshot committato</returns>
+        /// <summary>Builds lightweight metadata; call only under the lock</summary>
+        /// <param name="windows">Authoritative windows</param>
+        /// <returns>Committed snapshot</returns>
         private BiviumWorkspaceSnapshot CommitDesktopLocked(FloatingWindowsSnapshot windows)
         {
             EditorSessionSnapshot editor = this._desktopRuntime.Editor;

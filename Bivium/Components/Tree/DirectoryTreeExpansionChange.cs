@@ -1,17 +1,17 @@
 namespace Bivium.Components.Tree
 {
     /// <summary>
-    /// Descrive una modifica semantica dello stato di espansione dell'albero
+    /// Describes a semantic change of the tree expansion state
     /// </summary>
     public sealed class DirectoryTreeExpansionChange
     {
         /// <summary>
-        /// Percorso completo della directory
+        /// Full path of the directory
         /// </summary>
         public string Path { get; set; } = "";
 
         /// <summary>
-        /// Indica se il nodo è espanso
+        /// Indicates whether the node is expanded
         /// </summary>
         public bool Expanded { get; set; }
     }

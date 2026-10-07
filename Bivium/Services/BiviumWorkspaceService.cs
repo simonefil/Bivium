@@ -61,13 +61,13 @@ namespace Bivium.Services
         /// </summary>
         /// <param name="logger">Application logger</param>
         /// <param name="settings">Application settings</param>
-        /// <param name="workflowFiles">Servizio file singleton già autorizzato</param>
-        /// <param name="workflowSecurity">Validazione path esistente</param>
-        /// <param name="workflowArchives">Servizio archive singleton esistente</param>
-        /// <param name="workflowPermissions">Servizio permission singleton esistente</param>
-        /// <param name="workflowFileSystem">Servizio letture e calcolo singleton esistente</param>
-        /// <param name="workflowEnvironment">Root usata dal commit delle impostazioni</param>
-        /// <param name="services">Risoluzione differita del singleton terminale</param>
+        /// <param name="workflowFiles">Already authorized singleton file service</param>
+        /// <param name="workflowSecurity">Existing path validation</param>
+        /// <param name="workflowArchives">Existing singleton archive service</param>
+        /// <param name="workflowPermissions">Existing singleton permission service</param>
+        /// <param name="workflowFileSystem">Existing singleton read and calculation service</param>
+        /// <param name="workflowEnvironment">Root used by the settings commit</param>
+        /// <param name="services">Deferred resolution of the terminal singleton</param>
         public BiviumWorkspaceService(ILogger<BiviumWorkspaceService> logger, IOptionsMonitor<CommanderSettings> settings, IFileOperationService workflowFiles, SecurityService workflowSecurity, IArchiveService workflowArchives, IPermissionService workflowPermissions, IFileSystemService workflowFileSystem, IWebHostEnvironment workflowEnvironment, IServiceProvider services)
         {
             this._logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -643,9 +643,9 @@ namespace Bivium.Services
 
         #region Private Methods
 
-        /// <summary>Stessa policy di pulizia del reset esplicito, sotto il lock dell'owner già validato</summary>
-        /// <param name="upload">Trasporto da ripulire fuori lock</param>
-        /// <returns>Snapshot reset con lease preservato</returns>
+        /// <summary>Same cleanup policy as the explicit reset, under the lock of the already validated owner</summary>
+        /// <param name="upload">Transport to clean up outside the lock</param>
+        /// <returns>Reset snapshot with the lease preserved</returns>
         private BiviumWorkspaceSnapshot ResetWorkspaceLocked(out WorkspaceUploadRuntime upload)
         {
             this.CancelHandoffLocked("Workspace reset. Retry activation.");
@@ -736,7 +736,7 @@ namespace Bivium.Services
         private CancellationTokenSource AcquireLeaseLocked(ClientAttachment attachment, DateTime now)
         {
             this.CancelHandoffLocked("Workspace ownership changed. Retry activation.");
-            // Sempre, anche quando l'owner precedente è stato rimosso o il setup non è stato acknowledged dalla UI
+            // Always, even when the previous owner was removed or the setup was not acknowledged by the UI
             this._workflowServices.GetRequiredService<AuthenticationService>().CancelPendingTwoFactorSetup();
             if (this._uploadRuntime?.Snapshot.Visible == true && (this._uploadRuntime.Snapshot.Phase == WorkspaceUploadPhase.Uploading || (this._uploadRuntime.Snapshot.Phase == WorkspaceUploadPhase.Selecting && (!this._uploadRuntime.Snapshot.Files.IsEmpty || !this._uploadRuntime.Snapshot.Directories.IsEmpty))))
             {
@@ -781,9 +781,9 @@ namespace Bivium.Services
             return this._snapshot.Handoff?.Frozen != true && !this.IsStopped && this.ValidateLeaseLocked(token);
         }
 
-        /// <summary>Valida il lease anche durante il drain dei publisher dedicati</summary>
-        /// <param name="token">Lease da validare</param>
-        /// <returns>True quando owner e generazione sono ancora autorevoli</returns>
+        /// <summary>Validates the lease also during the drain of the dedicated publishers</summary>
+        /// <param name="token">Lease to validate</param>
+        /// <returns>True when owner and generation are still authoritative</returns>
         private bool ValidateLeaseLocked(WorkspaceClientToken token)
         {
             if (token == null || this._snapshot.ActiveClientLease == null)

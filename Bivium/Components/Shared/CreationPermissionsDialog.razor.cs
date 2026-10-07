@@ -27,7 +27,7 @@ namespace Bivium.Components.Shared
         [Inject] private Bivium.Services.BiviumWorkspaceService WorkspaceService { get; set; }
         private readonly WorkspaceFormBinding _binding = new WorkspaceFormBinding();
 
-        /// <summary>Hydration di owner, group, bit e modalità senza reset dalle options</summary>
+        /// <summary>Hydration of owner, group, bits and mode without reset from the options</summary>
         protected override void OnParametersSet()
         {
             if (this.Workflow == null)
@@ -51,7 +51,7 @@ namespace Bivium.Components.Shared
 
         private void PublishDraft() => this._binding.Publish(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this.GetDraft());
 
-        /// <summary>Barriera del draft, mai della scrittura impostazioni</summary>
+        /// <summary>Draft barrier, never of the settings write</summary>
         internal System.Threading.Tasks.Task<bool> FlushForHandoffAsync(CancellationToken cancellationToken) => this._binding.FlushAsync(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this.GetDraft(), cancellationToken);
 
         #endregion
@@ -95,20 +95,20 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Focuses the dialog after rendering
         /// </summary>
-        /// <param name="firstRender">Primo mount reale del contenuto</param>
+        /// <param name="firstRender">First real mount of the content</param>
         private async System.Threading.Tasks.Task HandleContentRenderedAsync(bool firstRender)
         {
             if (firstRender && this._isVisible)
                 await this._cancelButton.Element.FocusAsync();
         }
 
-        /// <summary>Conferma il draft acknowledged; il salvataggio appartiene al workflow server</summary>
+        /// <summary>Confirms the acknowledged draft; saving belongs to the server workflow</summary>
         private void HandleSave()
         {
             this._binding.Respond(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), false);
         }
 
-        /// <summary>Chiude senza salvare</summary>
+        /// <summary>Closes without saving</summary>
         private void HandleCancel()
         {
             this._binding.Respond(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), true);

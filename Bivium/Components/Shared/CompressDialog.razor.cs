@@ -12,19 +12,19 @@ namespace Bivium.Components.Shared
         #region Parameters
 
         /// <summary>
-        /// Rivalida l'autorità del browser prima di confermare la compressione
+        /// Revalidates the browser authority before confirming the compression
         /// </summary>
         [Parameter]
         public Func<bool> CanInvoke { get; set; }
 
-        /// <summary>Proiezione del workflow, senza reinvocare Show</summary>
+        /// <summary>Workflow projection, without re-invoking Show</summary>
         [Parameter] public WorkspaceWorkflowSnapshot Workflow { get; set; }
         [Parameter] public string AttachmentId { get; set; } = "";
         [Parameter] public long LeaseGeneration { get; set; }
         [Inject] private Bivium.Services.BiviumWorkspaceService WorkspaceService { get; set; }
         private readonly WorkspaceFormBinding _binding = new WorkspaceFormBinding();
 
-        /// <summary>Hydration della sola form catturata</summary>
+        /// <summary>Hydration of the captured form only</summary>
         protected override void OnParametersSet()
         {
             if (this.Workflow == null)
@@ -41,7 +41,7 @@ namespace Bivium.Components.Shared
             this._isVisible = this.Workflow.Phase is WorkspaceWorkflowPhase.AwaitingInput or WorkspaceWorkflowPhase.Failed;
         }
 
-        /// <summary>Checkpoint Immediate di formato e nome</summary>
+        /// <summary>Immediate checkpoint of format and name</summary>
         private void PublishDraft()
         {
             this._binding.Publish(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this.GetDraft());
@@ -49,7 +49,7 @@ namespace Bivium.Components.Shared
 
         private string GetDraft() => System.Text.Json.JsonSerializer.Serialize(new WorkspaceCompressDraft(this._selectedFormat, this._outputName, this._baseName));
 
-        /// <summary>Barriera semantica, senza avviare compressione</summary>
+        /// <summary>Semantic barrier, without starting compression</summary>
         internal System.Threading.Tasks.Task<bool> FlushForHandoffAsync(CancellationToken cancellationToken) => this._binding.FlushAsync(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this.GetDraft(), cancellationToken);
 
         #endregion
@@ -81,7 +81,7 @@ namespace Bivium.Components.Shared
         /// </summary>
         private Radzen.Blazor.RadzenTextBox _outputNameElement;
 
-        /// <summary>Formati esistenti con etichette leggibili per il dropdown</summary>
+        /// <summary>Existing formats with readable labels for the dropdown</summary>
         private readonly Dictionary<ArchiveFormat, string> _formats = new Dictionary<ArchiveFormat, string>
         {
             { ArchiveFormat.Zip, "ZIP (.zip)" },
@@ -92,7 +92,7 @@ namespace Bivium.Components.Shared
             { ArchiveFormat.Tar, "TAR (.tar)" }
         };
 
-        /// <summary>Estensione di ciascun formato; i suffissi composti precedono .tar nel riconoscimento</summary>
+        /// <summary>Extension of each format; compound suffixes precede .tar during recognition</summary>
         private static readonly (ArchiveFormat Format, string Extension)[] _extensions =
         {
             (ArchiveFormat.TarGz, ".tar.gz"),
@@ -110,7 +110,7 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Focuses the output name input after render
         /// </summary>
-        /// <param name="firstRender">Primo mount reale del contenuto</param>
+        /// <param name="firstRender">First real mount of the content</param>
         private async System.Threading.Tasks.Task HandleContentRenderedAsync(bool firstRender)
         {
             if (firstRender && this._isVisible)
@@ -118,9 +118,9 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Sostituisce soltanto l'estensione del nome digitato con quella del formato già aggiornato dal binding
+        /// Replaces only the extension of the typed name with that of the format already updated by the binding
         /// </summary>
-        /// <param name="args">Valore selezionato, già applicato da @bind-Value</param>
+        /// <param name="args">Selected value, already applied by @bind-Value</param>
         private void HandleFormatChange(object args)
         {
             string name = (this._outputName ?? "").Trim();

@@ -146,7 +146,7 @@ async function runUploadSelection(sessionId, attachmentId, leaseGeneration, cont
             const item = files.find(file => file.relativePath === receipt.source.relativePath);
             await uploadOneFile(destinationDir, item, receipt, sessionId, attachmentId, leaseGeneration, uploadController.signal);
         }
-        // Le directory create sono memorizzate sul server, anche quando la risposta HTTP è andata persa
+        // Created directories are stored on the server, even when the HTTP response was lost
         state = await uploadRequest('/api/FileTransfer/upload-state', 'GET', attachmentId, leaseGeneration, uploadController.signal);
         for (const directory of [...state.directories].sort((left, right) => comparePathsChildFirst(left.relativePath, right.relativePath))) {
             if (directory.created && !directory.finalized) await requestUploadDirectory(destinationDir, directory.relativePath, true, sessionId, attachmentId, leaseGeneration, uploadController.signal);
@@ -166,7 +166,7 @@ async function runUploadSelection(sessionId, attachmentId, leaseGeneration, cont
     }
 }
 
-/** Verifica metadati dell'intero manifest e SHA-256 di ogni chunk già acknowledged. */
+/** Verifies metadata of the entire manifest and the SHA-256 of every already acknowledged chunk. */
 async function verifySources(state, files, directories, attachmentId, generation, signal) {
     if (files.length !== state.files.length || directories.length !== state.directories.length || state.directories.some(directory => !directories.includes(directory.relativePath))) {
         throw new Error('Select the same original files and folders. The selection does not match the saved manifest.');
@@ -184,7 +184,7 @@ async function verifySources(state, files, directories, attachmentId, generation
                 const hash = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('');
                 if (hash !== receipt.chunkHashes[index]) throw new Error('Received source chunk does not match: ' + receipt.source.relativePath);
             } else {
-                // Il listener predefinito è HTTP: il server verifica lo stesso chunk senza riscriverlo
+                // The default listener is HTTP: the server verifies the same chunk without rewriting it
                 const headers = buildUploadHeaders(state.destination, receipt.source.name, receipt.source.relativePath, index, Math.max(1, Math.ceil(item.file.size / CHUNK_SIZE)), receipt.id, state.id, attachmentId, generation);
                 headers['X-Verify-Only'] = 'true';
                 const response = await fetch('/api/FileTransfer/upload', { method: 'POST', headers, body: chunk, signal });
@@ -208,7 +208,7 @@ async function uploadRequest(url, method, attachmentId, generation, signal, body
     throw new Error(message || 'HTTP ' + response.status);
 }
 
-/** Pausa esplicita o per handoff: ferma il trasporto e attende il rollback del chunk corrente, conservando la selezione. */
+/** Explicit pause or handoff pause: stops the transport and waits for the current chunk rollback, preserving the selection. */
 export async function pauseUpload(sessionId, generation) {
     if (_context?.sessionId !== sessionId || _context?.generation !== generation) throw new Error('Upload adapter changed');
     _uploadController?.abort(PAUSE_REASON);
@@ -445,14 +445,14 @@ async function notifySelectionChanged(context = _context) {
 async function reportComplete(success, message, context = _context) {
     if (!context || _context !== context) return;
     try { await context.reference.invokeMethodAsync('OnUploadComplete', context.sessionId, context.generation, success, message); }
-    catch { /* Le ricevute server sopravvivono al dispose o alla perdita del circuito. */ }
+    catch { /* Server receipts survive dispose or circuit loss. */ }
 }
 
-/** Un errore preflight non pubblica fase, progresso o checkpoint nel workspace. */
+/** A preflight error does not publish phase, progress or checkpoint in the workspace. */
 async function reportLocalError(message, context = _context) {
     if (!context || _context !== context) return;
     try { await context.reference.invokeMethodAsync('OnUploadVerificationFailed', context.sessionId, context.generation, message); }
-    catch { /* L'errore locale non sopravvive al dispose del chiamante. */ }
+    catch { /* The local error does not survive the caller's dispose. */ }
 }
 
 async function trackSelection(action) {

@@ -22,7 +22,7 @@
 
 .renamer-file-list {
     flex: 6;
-    /* Il DataGrid virtualizzato scorre al proprio interno con altezza fissa */
+    /* The virtualized DataGrid scrolls internally with a fixed height */
     overflow: hidden;
     min-width: 0;
     min-height: 0;
@@ -33,14 +33,14 @@
     cursor: not-allowed;
 }
 
-/* Preview colorata: originale barrato se cambia, nuovo nome evidenziato, conflitto in rosso, errore barrato in grigio */
-/* Il testo vive in .rz-cell-data: la decorazione sul td non si propaga ai blocchi interni della griglia */
+/* Colored preview: original struck through if it changes, new name highlighted, conflict in red, error struck through in gray */
+/* The text lives in .rz-cell-data: decoration on the td does not propagate to the inner blocks of the grid */
 .renamer-cell-original-changed .rz-cell-data {
     text-decoration: line-through;
     color: var(--rz-text-secondary-color);
 }
 
-/* Colore titolo del tema: leggibile su righe alternate e selezionate, chiaro o scuro */
+/* Theme title color: readable on alternating and selected rows, light or dark */
 .renamer-cell-changed .renamer-new-name {
     color: var(--rz-text-title-color);
     font-weight: 600;

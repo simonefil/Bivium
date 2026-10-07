@@ -3,22 +3,22 @@ using Bivium.Models;
 namespace Bivium.Components.Panel
 {
     /// <summary>
-    /// Dati di una richiesta di menu contestuale
+    /// Data of a context menu request
     /// </summary>
     public class ContextMenuEventArgs
     {
         /// <summary>
-        /// Coordinata orizzontale del puntatore
+        /// Horizontal pointer coordinate
         /// </summary>
         public double X { get; set; }
 
         /// <summary>
-        /// Coordinata verticale del puntatore
+        /// Vertical pointer coordinate
         /// </summary>
         public double Y { get; set; }
 
         /// <summary>
-        /// Entry associata alla richiesta, oppure null per lo sfondo
+        /// Entry associated with the request, or null for the background
         /// </summary>
         public FileSystemEntry Entry { get; set; }
     }

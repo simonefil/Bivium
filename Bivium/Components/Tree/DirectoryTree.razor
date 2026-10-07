@@ -17,90 +17,90 @@
 
 @code {
     /// <summary>
-    /// Percorso attualmente aperto nel pannello
+    /// Path currently open in the panel
     /// </summary>
     [Parameter]
     public string CurrentPath { get; set; } = "";
 
     /// <summary>
-    /// Percorsi semantici dei nodi espansi
+    /// Semantic paths of the expanded nodes
     /// </summary>
     [Parameter]
     public HashSet<string> ExpandedDirectoryPaths { get; set; } = new HashSet<string>();
 
     /// <summary>
-    /// Contenuto già caricato della directory corrente: un nuovo elenco segue navigazione, refresh e operazioni
+    /// Already loaded content of the current directory: a new list follows navigation, refresh and operations
     /// </summary>
     [Parameter]
     public List<FileSystemEntry> Entries { get; set; }
 
     /// <summary>
-    /// Notifica una richiesta di navigazione
+    /// Notifies a navigation request
     /// </summary>
     [Parameter]
     public EventCallback<string> OnDirectorySelected { get; set; }
 
     /// <summary>
-    /// Notifica una modifica dello stato di espansione
+    /// Notifies a change of the expansion state
     /// </summary>
     [Parameter]
     public EventCallback<DirectoryTreeExpansionChange> OnExpansionChanged { get; set; }
 
     /// <summary>
-    /// Radici filesystem visualizzate dal tree
+    /// Filesystem roots displayed by the tree
     /// </summary>
     private List<DirectoryTreeItem> _roots = new List<DirectoryTreeItem>();
 
     /// <summary>
-    /// Snapshot di espansione usato esclusivamente dalla proiezione UI
+    /// Expansion snapshot used exclusively by the UI projection
     /// </summary>
     private HashSet<string> _expandedPaths = new HashSet<string>();
 
     /// <summary>
-    /// Espansioni automatiche ancora da inoltrare al proprietario
+    /// Automatic expansions still to be forwarded to the owner
     /// </summary>
     private HashSet<string> _pendingExpansions = new HashSet<string>();
 
     /// <summary>
-    /// Percorso normalizzato osservato nell'ultimo render
+    /// Normalized path observed in the last render
     /// </summary>
     private string _currentPath = "";
 
     /// <summary>
-    /// Nodo selezionato nella gerarchia della radice filesystem
+    /// Node selected in the hierarchy of the filesystem root
     /// </summary>
     private DirectoryTreeItem _selectedNode;
 
     /// <summary>
-    /// Ultimo elenco del pannello proiettato sui figli del nodo corrente
+    /// Last panel list projected onto the children of the current node
     /// </summary>
     private List<FileSystemEntry> _projectedEntries;
 
     /// <summary>
-    /// Stato transitorio del caricamento e dello scroll
+    /// Transient loading and scroll state
     /// </summary>
     private bool _initialized, _scrollPending, _publishingExpansions, _isDisposed;
 
     /// <summary>
-    /// Host DOM e modulo stateless dello scroll locale
+    /// DOM host and stateless module of the local scroll
     /// </summary>
     private ElementReference _host;
     private IJSObjectReference _jsModule;
 
     /// <summary>
-    /// Import condiviso tra render sovrapposti e atteso anche dal cleanup
+    /// Import shared between overlapping renders and awaited also by the cleanup
     /// </summary>
     private Task<IJSObjectReference> _moduleImport;
 
     /// <summary>
-    /// Proietta l'icona directory e il percorso completo lasciando a Radzen gli eventi del nodo
+    /// Projects the directory icon and the full path leaving the node events to Radzen
     /// </summary>
     private RenderFragment<RadzenTreeItem> DirectoryTemplate => item => @<span class="bivium-tree-name" title="@item.Value" data-directory-path="@item.Value">
         <RadzenIcon Icon="folder" aria-hidden="true" /><span>@item.Text</span>
     </span>;
 
     /// <summary>
-    /// Riproietta lo snapshot e rivela gli antenati soltanto al cambio percorso
+    /// Re-projects the snapshot and reveals the ancestors only when the path changes
     /// </summary>
     protected override void OnParametersSet()
     {
@@ -144,9 +144,9 @@
     }
 
     /// <summary>
-    /// Pubblica le richieste automatiche e scorre senza spostare il focus DOM
+    /// Publishes the automatic requests and scrolls without moving the DOM focus
     /// </summary>
-    /// <param name="firstRender">True al primo render interattivo</param>
+    /// <param name="firstRender">True on the first interactive render</param>
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (this._isDisposed)
@@ -193,9 +193,9 @@
     }
 
     /// <summary>
-    /// Materializza il ramo richiesto senza delegare a Radzen identità dei data item
+    /// Materializes the requested branch without delegating the data item identity to Radzen
     /// </summary>
-    /// <param name="args">Nodo richiesto da Radzen</param>
+    /// <param name="args">Node requested by Radzen</param>
     private async Task HandleExpandAsync(TreeExpandEventArgs args)
     {
         string path = args.Value as string ?? "";
@@ -209,9 +209,9 @@
     }
 
     /// <summary>
-    /// Inoltra al proprietario la compressione di un nodo
+    /// Forwards the collapse of a node to the owner
     /// </summary>
-    /// <param name="args">Nodo compresso da Radzen</param>
+    /// <param name="args">Node collapsed by Radzen</param>
     private async Task HandleCollapseAsync(TreeEventArgs args)
     {
         string path = args.Value as string ?? "";
@@ -221,22 +221,22 @@
     }
 
     /// <summary>
-    /// Inoltra la selezione del nodo come navigazione semantica
+    /// Forwards the node selection as semantic navigation
     /// </summary>
-    /// <param name="args">Nodo selezionato</param>
+    /// <param name="args">Selected node</param>
     private async Task HandleChangeAsync(TreeEventArgs args)
     {
         string path = args.Value as string ?? "";
-        // Radzen notifica Change anche quando Selected viene proiettato dai parametri
+        // Radzen notifies Change also when Selected is projected from the parameters
         if (!string.IsNullOrEmpty(path) && !string.Equals(path, this._currentPath, this.GetPathComparison()))
             await this.OnDirectorySelected.InvokeAsync(path);
     }
 
     /// <summary>
-    /// Renderizza soltanto i nodi materializzati con Value stringa e chiave fullpath
+    /// Renders only the materialized nodes with string Value and fullpath key
     /// </summary>
-    /// <param name="nodes">Nodi del livello</param>
-    /// <returns>Componenti ufficiali Radzen del livello</returns>
+    /// <param name="nodes">Nodes of the level</param>
+    /// <returns>Official Radzen components of the level</returns>
     private RenderFragment RenderNodes(List<DirectoryTreeItem> nodes)
     {
         return builder =>
@@ -259,7 +259,7 @@
     }
 
     /// <summary>
-    /// Materializza gli antenati dalla radice filesystem, senza consultare i mount
+    /// Materializes the ancestors from the filesystem root, without consulting the mounts
     /// </summary>
     private void RevealCurrentPath()
     {
@@ -273,7 +273,7 @@
         if (node == null)
             return;
 
-        // La radice Unix mostra le sue cartelle anche quando CurrentPath coincide con /
+        // The Unix root shows its folders also when CurrentPath equals /
         if (!OperatingSystem.IsWindows() && this._expandedPaths.Add(node.FullPath))
             this._pendingExpansions.Add(node.FullPath);
         DirectoryInfo directory = new DirectoryInfo(this._currentPath);
@@ -296,7 +296,7 @@
             DirectoryTreeItem next = node.Children.FirstOrDefault(child => string.Equals(child.FullPath, path, this.GetPathComparison()));
             if (next == null)
             {
-                // Una cartella appena creata può non essere ancora nella cache del padre
+                // A just-created folder may not yet be in the parent's cache
                 this.LoadChildren(node, true);
                 next = node.Children.FirstOrDefault(child => string.Equals(child.FullPath, path, this.GetPathComparison()));
             }
@@ -306,7 +306,7 @@
     }
 
     /// <summary>
-    /// Allinea i figli del nodo corrente all'elenco già caricato dal pannello, senza letture filesystem aggiuntive
+    /// Aligns the children of the current node with the list already loaded by the panel, without additional filesystem reads
     /// </summary>
     private void RefreshCurrentChildren()
     {
@@ -317,24 +317,24 @@
             return;
         if (this.Entries.Count == 0)
         {
-            // Elenco vuoto ambiguo (directory vuota o non ancora caricata): rilegge solo un ramo che mostrava figli
+            // Ambiguous empty list (empty directory or not yet loaded): re-reads only a branch that showed children
             if (node.Children != null && node.Children.Count > 0)
                 this.LoadChildren(node, true);
             return;
         }
-        // L'elenco deve appartenere alla directory corrente, non a quella appena lasciata
+        // The list must belong to the current directory, not to the one just left
         string parent = this.NormalizePath(Path.GetDirectoryName(this.Entries[0].FullPath));
         if (!string.Equals(parent, this._currentPath, this.GetPathComparison()))
             return;
-        // Stesso ordinamento di IFileSystemService.GetSubDirectories, indipendente dal sort del pannello
+        // Same ordering as IFileSystemService.GetSubDirectories, independent of the panel sort
         this.ProjectChildren(node, this.Entries.Where(entry => entry.IsDirectory).OrderBy(entry => entry.Name, StringComparer.OrdinalIgnoreCase));
     }
 
     /// <summary>
-    /// Carica o aggiorna un solo livello, conservando i nodi e i rami ancora presenti
+    /// Loads or refreshes a single level, keeping the nodes and branches still present
     /// </summary>
-    /// <param name="node">Nodo da materializzare</param>
-    /// <param name="reload">True per rileggere anche un livello già materializzato</param>
+    /// <param name="node">Node to materialize</param>
+    /// <param name="reload">True to re-read also an already materialized level</param>
     private void LoadChildren(DirectoryTreeItem node, bool reload = false)
     {
         if (node.Children != null && !reload)
@@ -343,10 +343,10 @@
     }
 
     /// <summary>
-    /// Sostituisce i figli di un nodo conservando le istanze, e quindi i rami, ancora presenti
+    /// Replaces the children of a node keeping the instances, and thus the branches, still present
     /// </summary>
-    /// <param name="node">Nodo da aggiornare</param>
-    /// <param name="directories">Sottodirectory già ordinate</param>
+    /// <param name="node">Node to update</param>
+    /// <param name="directories">Already sorted subdirectories</param>
     private void ProjectChildren(DirectoryTreeItem node, IEnumerable<FileSystemEntry> directories)
     {
         StringComparer comparer = this.GetPathComparison() == StringComparison.Ordinal ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
@@ -364,9 +364,9 @@
     }
 
     /// <summary>
-    /// Ripristina solo i rami richiesti dallo snapshot, senza una scansione del filesystem
+    /// Restores only the branches requested by the snapshot, without a filesystem scan
     /// </summary>
-    /// <param name="nodes">Livello già materializzato</param>
+    /// <param name="nodes">Already materialized level</param>
     private void LoadExpandedBranches(List<DirectoryTreeItem> nodes)
     {
         foreach (DirectoryTreeItem node in nodes)
@@ -380,11 +380,11 @@
     }
 
     /// <summary>
-    /// Cerca soltanto nella cache UI, senza effettuare letture filesystem
+    /// Searches only in the UI cache, without filesystem reads
     /// </summary>
-    /// <param name="nodes">Livello della cache</param>
-    /// <param name="path">Identità richiesta</param>
-    /// <returns>Nodo trovato oppure null</returns>
+    /// <param name="nodes">Cache level</param>
+    /// <param name="path">Requested identity</param>
+    /// <returns>Node found or null</returns>
     private DirectoryTreeItem FindNode(List<DirectoryTreeItem> nodes, string path)
     {
         foreach (DirectoryTreeItem node in nodes)
@@ -399,26 +399,26 @@
     }
 
     /// <summary>
-    /// Restituisce il confronto percorso della piattaforma
+    /// Returns the platform path comparison
     /// </summary>
-    /// <returns>Confronto case-aware del filesystem</returns>
+    /// <returns>Case-aware filesystem comparison</returns>
     private StringComparison GetPathComparison()
     {
         return OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
     }
 
     /// <summary>
-    /// Normalizza separatori finali senza trasformare la radice in un percorso vuoto
+    /// Normalizes trailing separators without turning the root into an empty path
     /// </summary>
-    /// <param name="path">Percorso semantico</param>
-    /// <returns>Percorso completo normalizzato</returns>
+    /// <param name="path">Semantic path</param>
+    /// <returns>Normalized full path</returns>
     private string NormalizePath(string path)
     {
         return string.IsNullOrEmpty(path) ? "" : Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
     }
 
     /// <summary>
-    /// Rilascia il modulo di scroll, che non registra listener o observer
+    /// Releases the scroll module, which registers no listeners or observers
     /// </summary>
     public async ValueTask DisposeAsync()
     {
@@ -439,14 +439,14 @@
     }
 
     /// <summary>
-    /// Adatta un'entry filesystem al valore semantico richiesto dal tree Radzen
+    /// Adapts a filesystem entry to the semantic value required by the Radzen tree
     /// </summary>
     private sealed class DirectoryTreeItem
     {
         /// <summary>
-        /// Crea un nodo lazy dal modello filesystem esistente
+        /// Creates a lazy node from the existing filesystem model
         /// </summary>
-        /// <param name="entry">Directory sorgente</param>
+        /// <param name="entry">Source directory</param>
         public DirectoryTreeItem(FileSystemEntry entry)
         {
             this.Name = entry.Name;
@@ -455,22 +455,22 @@
         }
 
         /// <summary>
-        /// Nome visualizzato
+        /// Displayed name
         /// </summary>
         public string Name { get; }
 
         /// <summary>
-        /// Percorso completo usato come identità semantica
+        /// Full path used as semantic identity
         /// </summary>
         public string FullPath { get; }
 
         /// <summary>
-        /// Indica se il nodo può essere espanso
+        /// Indicates whether the node can be expanded
         /// </summary>
         public bool IsDirectory { get; }
 
         /// <summary>
-        /// Figli materializzati nella cache UI, null fino alla prima espansione
+        /// Materialized children in the UI cache, null until the first expansion
         /// </summary>
         public List<DirectoryTreeItem> Children { get; set; }
     }

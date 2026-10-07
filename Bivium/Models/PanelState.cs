@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 
 namespace Bivium.Models
 {
-    /// <summary>Stato visuale del path editor; nessuna navigazione o callback nel draft</summary>
+    /// <summary>Visual state of the path editor; no navigation or callback in the draft</summary>
     public sealed record WorkspacePanelPathDraft(long Revision, string BasePath, bool Editing, string Text, ImmutableArray<string> Candidates, ImmutableArray<string> Matches, int MatchIndex, string ParentDirectory, string CycleValue, int SelectionStart = 0, int SelectionEnd = 0, bool Focused = true);
 
     /// <summary>
@@ -131,7 +131,7 @@ namespace Bivium.Models
         ActivateFocused,
 
         /// <summary>
-        /// Sposta il focus senza modificare la selezione
+        /// Moves the focus without changing the selection
         /// </summary>
         Focus
     }
@@ -240,12 +240,12 @@ namespace Bivium.Models
         public long PathEditRequestVersion { get; set; }
 
         /// <summary>
-        /// Percentuale verticale occupata dall'albero nella variante Radzen
+        /// Vertical percentage occupied by the tree in the Radzen variant
         /// </summary>
         public double TreeSizePercent { get; set; } = 30;
 
         /// <summary>
-        /// Indica se l'albero della variante Radzen è compresso
+        /// Whether the tree of the Radzen variant is collapsed
         /// </summary>
         public bool TreeCollapsed { get; set; }
 

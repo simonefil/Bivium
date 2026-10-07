@@ -14,34 +14,34 @@ namespace Bivium.Services
     {
         #region Variabili di classe
 
-        /// <summary>Servizio singleton preesistente, senza callback verso il circuito</summary>
+        /// <summary>Existing singleton service, with no callbacks to the circuit</summary>
         private readonly IFileOperationService _workflowFiles;
-        /// <summary>Validazione path preesistente, senza nuova policy</summary>
+        /// <summary>Existing path validation, with no new policy</summary>
         private readonly SecurityService _workflowSecurity;
-        /// <summary>Servizi singleton esistenti, mai adapter circuito</summary>
+        /// <summary>Existing singleton services, never circuit adapters</summary>
         private readonly IArchiveService _workflowArchives;
-        /// <summary>Servizio di permessi e ownership esistente</summary>
+        /// <summary>Existing permissions and ownership service</summary>
         private readonly IPermissionService _workflowPermissions;
-        /// <summary>Calcolo dimensione e letture filesystem preesistenti</summary>
+        /// <summary>Existing size calculation and filesystem reads</summary>
         private readonly IFileSystemService _workflowFileSystem;
-        /// <summary>Ambiente del commit impostazioni condiviso con gli endpoint</summary>
+        /// <summary>Settings commit environment shared with the endpoints</summary>
         private readonly IWebHostEnvironment _workflowEnvironment;
-        /// <summary>Risoluzione differita del singleton terminale per evitare dipendenze circolari DI</summary>
+        /// <summary>Deferred resolution of the terminal singleton to avoid circular DI dependencies</summary>
         private readonly IServiceProvider _workflowServices;
-        /// <summary>Lifetime delle operazioni ammesse, indipendente dalla revoca browser</summary>
+        /// <summary>Lifetime of the admitted operations, independent of browser revocation</summary>
         private readonly CancellationTokenSource _operationLifetimeCancellation = new CancellationTokenSource();
-        /// <summary>Ultimo task ammesso e relativa proiezione</summary>
+        /// <summary>Last admitted task and its projection</summary>
         private WorkspaceOperationRuntime _operationRuntime;
 
         #endregion
 
         #region Metodi pubblici
 
-        /// <summary>Solo la lease corrente può chiedere cancel della stessa operazione e revisione</summary>
-        /// <param name="token">Lease del richiedente</param>
-        /// <param name="id">Operazione osservata</param>
-        /// <param name="expectedRevision">Revisione osservata</param>
-        /// <returns>True se la richiesta è stata ammessa</returns>
+        /// <summary>Only the current lease can request cancel of the same operation and revision</summary>
+        /// <param name="token">Requester lease</param>
+        /// <param name="id">Observed operation</param>
+        /// <param name="expectedRevision">Observed revision</param>
+        /// <returns>True if the request was admitted</returns>
         internal bool TryCancelWorkspaceOperation(WorkspaceClientToken token, Guid id, long expectedRevision)
         {
             CancellationTokenSource cancellation;
@@ -63,7 +63,7 @@ namespace Bivium.Services
             }
             catch (ObjectDisposedException)
             {
-                // Il task ha già completato il suo effetto e rilasciato la risorsa
+                // The task has already completed its effect and released the resource
             }
             this.NotifySubscribers(subscribers, snapshot);
             return true;
@@ -73,10 +73,10 @@ namespace Bivium.Services
 
         #region Metodi privati
 
-        /// <summary>Ammette esclusivamente il piano derivato dalla risposta validata sotto lock</summary>
-        /// <param name="workflowId">Workflow proprietario</param>
-        /// <param name="plan">Piano immutabile</param>
-        /// <returns>Runtime senza riferimenti al browser</returns>
+        /// <summary>Admits exclusively the plan derived from the response validated under lock</summary>
+        /// <param name="workflowId">Owning workflow</param>
+        /// <param name="plan">Immutable plan</param>
+        /// <returns>Runtime with no references to the browser</returns>
         private WorkspaceOperationRuntime AdmitWorkflowOperationLocked(Guid workflowId, WorkspaceOperationPlan plan)
         {
             WorkspaceOperationRuntime operation = new WorkspaceOperationRuntime
@@ -91,8 +91,8 @@ namespace Bivium.Services
             return operation;
         }
 
-        /// <summary>Esegue il solo piano ammesso usando i servizi e i controlli di permesso esistenti</summary>
-        /// <param name="operation">Runtime ammesso una volta sola</param>
+        /// <summary>Executes only the admitted plan using the existing services and permission checks</summary>
+        /// <param name="operation">Runtime admitted exactly once</param>
         private void RunWorkspaceOperation(WorkspaceOperationRuntime operation)
         {
             FileOperationResult result;
@@ -135,7 +135,7 @@ namespace Bivium.Services
                 {
                     if (this.IsStopped || !ReferenceEquals(this._operationRuntime, operation))
                         return;
-                    // Anche un'eccezione o cancel durante una radice conserva i conteggi già registrati
+                    // Even an exception or cancel during a root preserves the counts already recorded
                     result.FilesProcessed = Math.Max(result.FilesProcessed, operation.FilesProcessed);
                     result.FilesFailed = Math.Max(result.FilesFailed, operation.FilesFailed);
                     if (operation.Plan.Kind == WorkspaceWorkflowKind.BatchRename)
@@ -165,10 +165,10 @@ namespace Bivium.Services
             }
         }
 
-        /// <summary>Pubblica progresso del task ammesso senza dipendere dal lease del browser</summary>
-        /// <param name="operation">Runtime proprietario dei conteggi</param>
-        /// <param name="processed">Radici completate</param>
-        /// <param name="failed">Radici fallite</param>
+        /// <summary>Publishes progress of the admitted task without depending on the browser lease</summary>
+        /// <param name="operation">Runtime that owns the counts</param>
+        /// <param name="processed">Completed roots</param>
+        /// <param name="failed">Failed roots</param>
         private void PublishWorkspaceOperationProgress(WorkspaceOperationRuntime operation, int processed, int failed)
         {
             Action<BiviumWorkspaceSnapshot>[] subscribers;
@@ -186,19 +186,19 @@ namespace Bivium.Services
             this.NotifySubscribers(subscribers, snapshot);
         }
 
-        /// <summary>Legge lo stato two-pass solo per il lease corrente e la sessione proprietaria</summary>
-        /// <param name="token">Lease dell'adapter</param>
-        /// <param name="sessionId">Sessione renamer montata</param>
-        /// <returns>Stato immutabile, mai il piano di un altro workflow</returns>
+        /// <summary>Reads the two-pass state only for the current lease and the owning session</summary>
+        /// <param name="token">Adapter lease</param>
+        /// <param name="sessionId">Mounted renamer session</param>
+        /// <returns>Immutable state, never the plan of another workflow</returns>
         internal ImmutableArray<WorkspaceRenameItemState> GetBatchRenameState(WorkspaceClientToken token, Guid sessionId)
         {
             lock (this._lock)
                 return !this.IsStopped && this.ValidateLeaseLocked(token) && this._operationRuntime?.Plan.RenamerSessionId == sessionId ? this._operationRuntime.RenameState.ToImmutableArray() : ImmutableArray<WorkspaceRenameItemState>.Empty;
         }
 
-        /// <summary>Esegue il piano transfer catturato attraverso il servizio esistente, senza thread aggiuntivi</summary>
-        /// <param name="operation">Task già ammesso dal runner workspace</param>
-        /// <returns>Conteggi delle radici, separati dal progresso dei passaggi</returns>
+        /// <summary>Executes the captured transfer plan through the existing service, with no additional threads</summary>
+        /// <param name="operation">Task already admitted by the workspace runner</param>
+        /// <returns>Root counts, separate from step progress</returns>
         private FileOperationResult RunWorkspaceTransfer(WorkspaceOperationRuntime operation)
         {
             WorkspaceOperationPlan plan = operation.Plan;
@@ -227,9 +227,9 @@ namespace Bivium.Services
             return aggregate;
         }
 
-        /// <summary>Conserva i due passaggi e il rollback locali preesistenti, ora nel task server-owned</summary>
-        /// <param name="operation">Runtime con nomi temporanei immutabili</param>
-        /// <returns>Esito dei nomi finalizzati, con rollback falliti espliciti</returns>
+        /// <summary>Preserves the existing local two-step flow and rollback, now in the server-owned task</summary>
+        /// <param name="operation">Runtime with immutable temporary names</param>
+        /// <returns>Outcome of the finalized names, with failed rollbacks made explicit</returns>
         private FileOperationResult RunWorkspaceBatchRename(WorkspaceOperationRuntime operation)
         {
             ImmutableArray<WorkspaceRenameItem> items = operation.Plan.RenameItems;
@@ -278,7 +278,7 @@ namespace Bivium.Services
                     aggregate.Success = false;
                     aggregate.FilesFailed++;
                     aggregate.ErrorMessage = "Failed to finalize '" + item.NewName + "': " + result.ErrorMessage;
-                    // Registra il temporaneo prima del possibile cancel: anche B vede la posizione effettiva
+                    // Records the temporary name before the possible cancel: B also sees the actual location
                     this.SetWorkspaceRenameItemState(operation, i, WorkspaceRenameItemPhase.Temporary, item.TemporaryPath, result.ErrorMessage);
                     operation.Cancellation.Token.ThrowIfCancellationRequested();
                     FileOperationResult rollback = this._workflowFiles.RenameEntry(item.TemporaryPath, item.OriginalName);
@@ -292,10 +292,10 @@ namespace Bivium.Services
             return aggregate;
         }
 
-        /// <summary>Riassume l'esito del batch fallito: rinominati, falliti e riportati al nome originale</summary>
-        /// <param name="operation">Runtime con lo stato effettivo delle righe</param>
-        /// <param name="result">Esito con i conteggi già consolidati</param>
-        /// <returns>Testo mostrato dal dialog e dalla barra di stato</returns>
+        /// <summary>Summarizes the outcome of the failed batch: renamed, failed and restored to the original name</summary>
+        /// <param name="operation">Runtime with the actual state of the rows</param>
+        /// <param name="result">Outcome with the already consolidated counts</param>
+        /// <returns>Text shown by the dialog and the status bar</returns>
         private static string DescribeBatchRenameOutcome(WorkspaceOperationRuntime operation, FileOperationResult result)
         {
             int rolledBack = operation.RenameState.Count(item => item.Phase == WorkspaceRenameItemPhase.RolledBack);
@@ -306,23 +306,23 @@ namespace Bivium.Services
             return string.IsNullOrEmpty(result.ErrorMessage) ? outcome : outcome + ". " + result.ErrorMessage;
         }
 
-        /// <summary>Registra la posizione effettiva dopo ogni effetto filesystem, non dopo un render</summary>
-        /// <param name="operation">Runtime proprietario</param>
-        /// <param name="index">Riga catturata</param>
-        /// <param name="phase">Esito del passo</param>
-        /// <param name="path">Posizione effettiva</param>
-        /// <param name="error">Errore del passo</param>
+        /// <summary>Records the actual location after each filesystem effect, not after a render</summary>
+        /// <param name="operation">Owning runtime</param>
+        /// <param name="index">Captured row</param>
+        /// <param name="phase">Step outcome</param>
+        /// <param name="path">Actual location</param>
+        /// <param name="error">Step error</param>
         private void SetWorkspaceRenameItemState(WorkspaceOperationRuntime operation, int index, WorkspaceRenameItemPhase phase, string path, string error)
         {
             lock (this._lock)
                 operation.RenameState[index] = new WorkspaceRenameItemState(operation.Plan.RenameItems[index], phase, path, error);
         }
 
-        /// <summary>Progresso leggero del passo; non trasmette il piano o i temporanei</summary>
-        /// <param name="operation">Runtime proprietario</param>
-        /// <param name="current">Posizione nel passo</param>
-        /// <param name="total">Totale del passo</param>
-        /// <param name="stage">Passo corrente</param>
+        /// <summary>Lightweight step progress; does not transmit the plan or the temporary names</summary>
+        /// <param name="operation">Owning runtime</param>
+        /// <param name="current">Position within the step</param>
+        /// <param name="total">Step total</param>
+        /// <param name="stage">Current step</param>
         private void PublishWorkspaceExecutionState(WorkspaceOperationRuntime operation, int current, int total, string stage)
         {
             Action<BiviumWorkspaceSnapshot>[] subscribers;
@@ -341,10 +341,10 @@ namespace Bivium.Services
             this.NotifySubscribers(subscribers, snapshot);
         }
 
-        /// <summary>Coalesce pubblicazioni a 100 ms; il risultato finale pubblica sempre tutti i conteggi</summary>
-        /// <param name="operation">Runtime del progresso</param>
-        /// <param name="snapshot">Proiezione pubblicata oppure null</param>
-        /// <returns>True quando è stata avanzata la revisione pubblicata</returns>
+        /// <summary>Coalesces publications to 100 ms; the final result always publishes all counts</summary>
+        /// <param name="operation">Progress runtime</param>
+        /// <param name="snapshot">Published projection or null</param>
+        /// <returns>True when the published revision was advanced</returns>
         private bool TryPublishWorkspaceProgressLocked(WorkspaceOperationRuntime operation, out BiviumWorkspaceSnapshot snapshot)
         {
             DateTime now = DateTime.UtcNow;
@@ -357,9 +357,9 @@ namespace Bivium.Services
             return true;
         }
 
-        /// <summary>Riconcilia risultati nel workspace senza callback trattenuti dal circuito</summary>
-        /// <param name="operation">Operazione conclusa</param>
-        /// <param name="result">Esito effettivo</param>
+        /// <summary>Reconciles results into the workspace without callbacks retained by the circuit</summary>
+        /// <param name="operation">Completed operation</param>
+        /// <param name="result">Actual outcome</param>
         private void ReconcileWorkspaceOperationLocked(WorkspaceOperationRuntime operation, FileOperationResult result)
         {
             WorkspaceOperationPlan plan = operation.Plan;

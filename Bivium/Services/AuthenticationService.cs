@@ -30,7 +30,7 @@ namespace Bivium.Services
 
         #region Class Variables
 
-        /// <summary>Autorità condivisa per tutti i read-modify-write delle impostazioni applicative</summary>
+        /// <summary>Shared authority for all read-modify-write operations on application settings</summary>
         internal static readonly object SettingsWriteLock = new object();
 
         private readonly IOptionsMonitor<CommanderSettings> _settingsMonitor;
@@ -49,10 +49,10 @@ namespace Bivium.Services
 
         private string _pendingTwoFactorSecret = "";
 
-        /// <summary>Lock breve del challenge, senza I/O o callback della configurazione</summary>
+        /// <summary>Short challenge lock, without I/O or configuration callbacks</summary>
         private readonly object _twoFactorSetupLock = new object();
 
-        /// <summary>Una risposta tardiva del vecchio owner non può cancellare il challenge della nuova lease</summary>
+        /// <summary>A late response from the previous owner cannot clear the challenge of the new lease</summary>
         private WorkspaceClientToken _pendingTwoFactorOwner;
 
         #endregion
@@ -405,7 +405,7 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Prepara il payload; soltanto il controller autorizzato dalla lease pubblica il challenge
+        /// Prepares the payload; only the controller authorized by the lease publishes the challenge
         /// </summary>
         /// <returns>Two-factor setup data</returns>
         public async System.Threading.Tasks.Task<TwoFactorSetupResult> CreateTwoFactorSetupAsync(string currentPassword, CancellationToken cancellationToken = default)
@@ -451,9 +451,9 @@ namespace Bivium.Services
             return result;
         }
 
-        /// <summary>Pubblica il challenge dentro il commit della lease, senza trasferirne il segreto</summary>
-        /// <param name="secret">Segreto appena generato</param>
-        /// <param name="owner">Lease autorizzata alla pubblicazione</param>
+        /// <summary>Publishes the challenge inside the lease commit, without transferring its secret</summary>
+        /// <param name="secret">Newly generated secret</param>
+        /// <param name="owner">Lease authorized to publish</param>
         internal void SetPendingTwoFactorSetup(string secret, WorkspaceClientToken owner)
         {
             lock (this._twoFactorSetupLock)
@@ -463,8 +463,8 @@ namespace Bivium.Services
             }
         }
 
-        /// <summary>Invalida anche setup completati sul backend la cui risposta è andata persa</summary>
-        /// <param name="owner">Lease da annullare, oppure null per l'invalidazione globale del takeover</param>
+        /// <summary>Also invalidates setups completed on the backend whose response was lost</summary>
+        /// <param name="owner">Lease to cancel, or null for the global takeover invalidation</param>
         internal void CancelPendingTwoFactorSetup(WorkspaceClientToken owner = null)
         {
             lock (this._twoFactorSetupLock)
@@ -481,9 +481,9 @@ namespace Bivium.Services
         /// </summary>
         /// <param name="code">TOTP code</param>
         /// <param name="currentPassword">Current administrator password</param>
-        /// <param name="workspace">Autorità del commit finale</param>
-        /// <param name="token">Lease che possiede il challenge</param>
-        /// <param name="cancellationToken">Revoca della richiesta</param>
+        /// <param name="workspace">Authority of the final commit</param>
+        /// <param name="token">Lease that owns the challenge</param>
+        /// <param name="cancellationToken">Request revocation</param>
         public async System.Threading.Tasks.Task EnableTwoFactorAsync(string code, string currentPassword, BiviumWorkspaceService workspace, WorkspaceClientToken token, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -895,7 +895,7 @@ namespace Bivium.Services
                 this.ReloadConfiguration();
         }
 
-        /// <summary>Notifica i consumer fuori dai lock del workspace, del challenge e dei writer</summary>
+        /// <summary>Notifies consumers outside the workspace, challenge and writer locks</summary>
         private void ReloadConfiguration()
         {
             IConfigurationRoot configurationRoot = this._configuration as IConfigurationRoot;

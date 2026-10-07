@@ -1,13 +1,13 @@
-// Bivium Advanced Rename - Escape locale della finestra modeless
+// Bivium Advanced Rename - Local Escape handling of the modeless window
 import { isBlockingModalOpen } from './interop.js';
 
 const registrations = new Map();
 
 /**
- * Escape con il focus nella finestra renamer chiude la finestra e non raggiunge la tastiera del Commander.
- * Il listener in capture su window precede quello del Commander registrato su document.
- * @param {string} windowId - Id DOM della finestra renamer.
- * @param {object} dotNetRef - DotNetObjectReference del componente.
+ * Escape with focus inside the renamer window closes the window and does not reach the Commander keyboard.
+ * The capture listener on window runs before the Commander listener registered on document.
+ * @param {string} windowId - DOM id of the renamer window.
+ * @param {object} dotNetRef - DotNetObjectReference of the component.
  */
 export function registerRenamerEscape(windowId, dotNetRef) {
     disposeRenamerEscape(windowId);
@@ -18,7 +18,7 @@ export function registerRenamerEscape(windowId, dotNetRef) {
         const active = document.activeElement;
         if (!win?.classList.contains('visible') || !active || !win.contains(active)) return;
         if (isBlockingModalOpen() || globalThis[Symbol.for('bivium.desktopPublications')]?.freeze) return;
-        // Un dropdown aperto consuma Escape per chiudere il proprio popup
+        // An open dropdown consumes Escape to close its own popup
         if (active.closest('[role="combobox"][aria-expanded="true"]')) return;
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -28,8 +28,8 @@ export function registerRenamerEscape(windowId, dotNetRef) {
 }
 
 /**
- * Rimuove il listener Escape della finestra.
- * @param {string} windowId - Id DOM della finestra renamer.
+ * Removes the Escape listener of the window.
+ * @param {string} windowId - DOM id of the renamer window.
  */
 export function disposeRenamerEscape(windowId) {
     registrations.get(windowId)?.abort();

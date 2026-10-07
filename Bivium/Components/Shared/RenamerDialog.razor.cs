@@ -29,11 +29,11 @@ namespace Bivium.Components.Shared
         [Parameter]
         public EventCallback<bool> OnClose { get; set; }
 
-        /// <summary>Stato visuale ricevuto dallo stacking JS</summary>
+        /// <summary>Visual state received from the JS stacking</summary>
         [Parameter]
         public bool IsActive { get; set; }
 
-        /// <summary>Notifica il lifecycle della finestra</summary>
+        /// <summary>Notifies the window lifecycle</summary>
         [Parameter]
         public EventCallback OnStateChanged { get; set; }
 
@@ -43,11 +43,11 @@ namespace Bivium.Components.Shared
         [Parameter]
         public long LeaseGeneration { get; set; }
 
-        /// <summary>Workflow corrente: ogni nuova revisione rende la finestra, lo stato autorevole si rilegge dal workspace</summary>
+        /// <summary>Current workflow: each new revision renders the window, the authoritative state is re-read from the workspace</summary>
         [Parameter]
         public WorkspaceWorkflowSnapshot Workflow { get; set; }
 
-        /// <summary>Operazione corrente: progresso ed esito del batch arrivano con il render</summary>
+        /// <summary>Current operation: batch progress and outcome arrive with the render</summary>
         [Parameter]
         public WorkspaceOperationSnapshot Operation { get; set; }
 
@@ -60,22 +60,22 @@ namespace Bivium.Components.Shared
         /// </summary>
         private bool _isVisible = false;
 
-        /// <summary>Finestra aperta ma temporaneamente nascosta</summary>
+        /// <summary>Window open but temporarily hidden</summary>
         private bool _isMinimized;
 
-        /// <summary>Richiesta di attivazione invalidabile dal manager JS</summary>
+        /// <summary>Activation request that the JS manager can invalidate</summary>
         private long _pendingActivation;
 
-        /// <summary>Revisione proprietaria del ticket post-render</summary>
+        /// <summary>Revision owning the post-render ticket</summary>
         private long _pendingActivationRevision;
 
-        /// <summary>Ripristino provvisorio in attesa dell'esito JS</summary>
+        /// <summary>Provisional restore awaiting the JS outcome</summary>
         private bool _restorePending;
 
-        /// <summary>Origine conservata fra restore ripetuti</summary>
+        /// <summary>Origin preserved across repeated restores</summary>
         private bool _restoreWasMinimized;
 
-        /// <summary>Ordine locale lifecycle per scartare continuazioni obsolete</summary>
+        /// <summary>Local lifecycle order used to discard stale continuations</summary>
         private long _lifecycleRevision;
 
         /// <summary>
@@ -128,51 +128,51 @@ namespace Bivium.Components.Shared
         /// </summary>
         private bool _isDisposed;
 
-        /// <summary>Workflow e risposta del solo adapter, mai esecuzione dei due passaggi</summary>
+        /// <summary>Workflow and response of the adapter only, never execution of the two passes</summary>
         private WorkspaceWorkflowSnapshot _batchWorkflow;
-        /// <summary>Identità stabile della risposta alla domanda corrente</summary>
+        /// <summary>Stable identity of the answer to the current question</summary>
         private WorkspaceWorkflowResponse _batchResponse;
-        /// <summary>Posizioni effettive lette dal runtime autorizzato, senza rigenerare preview</summary>
+        /// <summary>Actual positions read from the authorized runtime, without regenerating the preview</summary>
         private readonly Dictionary<string, WorkspaceRenameItemState> _renameState = new Dictionary<string, WorkspaceRenameItemState>(StringComparer.Ordinal);
-        /// <summary>Il piano ammesso non può essere sostituito da modifiche della form</summary>
+        /// <summary>The accepted plan cannot be replaced by form changes</summary>
         private bool IsBatchFormLocked => this._batchWorkflow != null;
-        /// <summary>Close non equivale a cancellare un task ammesso</summary>
+        /// <summary>Close does not equal cancelling an accepted task</summary>
         private bool IsBatchRunning => this._batchWorkflow?.Phase == WorkspaceWorkflowPhase.Running;
-        /// <summary>Operazione batch del workflow corrente, per progresso e richiesta di stop</summary>
+        /// <summary>Batch operation of the current workflow, for progress and stop requests</summary>
         private WorkspaceOperationSnapshot _batchOperation;
-        /// <summary>Modulo dell'Escape locale della finestra</summary>
+        /// <summary>Window-local Escape module</summary>
         private IJSObjectReference _renamerModule;
-        /// <summary>Draft modificato e non ancora pubblicato dal debounce</summary>
+        /// <summary>Draft modified and not yet published by the debounce</summary>
         private bool _draftPending;
-        /// <summary>Ritardo del debounce: la digitazione continua non serializza form e preview ad ogni tasto</summary>
+        /// <summary>Debounce delay: continuous typing does not serialize the form and preview on every keystroke</summary>
         private const int DRAFT_PERSIST_DELAY_MS = 300;
-        /// <summary>Generazione del debounce: un timer superato da una pubblicazione successiva non pubblica</summary>
+        /// <summary>Debounce generation: a timer superseded by a later publication does not publish</summary>
         private long _draftPersistGeneration;
 
-        /// <summary>Sessione posseduta dal workspace, non dal circuito</summary>
+        /// <summary>Session owned by the workspace, not by the circuit</summary>
         private RenamerSessionSnapshot _session;
 
-        /// <summary>Finestra autorevole, distinta dal draft corposo</summary>
+        /// <summary>Authoritative window, distinct from the bulky draft</summary>
         private FloatingWindowSnapshot _window = new FloatingWindowsSnapshot().Renamer;
 
-        /// <summary>Callback JS appartenente esclusivamente all'adapter</summary>
+        /// <summary>JS callback belonging exclusively to the adapter</summary>
         private DotNetObjectReference<RenamerDialog> _dotNetRef;
 
-        /// <summary>Ultima notifica geometrica accettata per questa sessione</summary>
+        /// <summary>Last geometry notification accepted for this session</summary>
         private long _geometrySequence;
 
-        /// <summary>Generazione del lease per la quale è stato ricostruito l'adapter</summary>
+        /// <summary>Lease generation for which the adapter was rebuilt</summary>
         private long _adapterLeaseGeneration;
-        /// <summary>Root ufficiale della finestra, senza ricreare markup o skin</summary>
+        /// <summary>Official window root, without recreating markup or skin</summary>
         private Radzen.Blazor.RadzenCard _surfaceRoot;
-        /// <summary>Publisher visuale separato dal draft della preview</summary>
+        /// <summary>Visual publisher separate from the preview draft</summary>
         private IJSObjectReference _surfaceModule;
-        /// <summary>Owner visuale montato</summary>
+        /// <summary>Mounted visual owner</summary>
         private Guid _surfaceSessionId;
-        /// <summary>Lease del publisher visuale montato</summary>
+        /// <summary>Lease of the mounted visual publisher</summary>
         private long _surfaceGeneration;
 
-        /// <summary>Geometria serializzata con cultura invariante</summary>
+        /// <summary>Geometry serialized with invariant culture</summary>
         private string WindowStyle => this._window.Width > 0 ? FormattableString.Invariant($"left:{this._window.Left}px;top:{this._window.Top}px;width:{this._window.Width}px;height:{this._window.Height}px") : "";
 
         #endregion
@@ -217,13 +217,13 @@ namespace Bivium.Components.Shared
             _ = this.RestoreAsync();
         }
 
-        /// <summary>Indica se la sessione renamer è ancora aperta</summary>
+        /// <summary>Indicates whether the renamer session is still open</summary>
         public bool IsOpen() => this._isVisible || this._isMinimized;
 
-        /// <summary>Titolo della finestra</summary>
+        /// <summary>Window title</summary>
         public string GetTitle() => "Advanced Rename";
 
-        /// <summary>Conserva stack, configurazione, preview e geometria</summary>
+        /// <summary>Preserves stack, configuration, preview and geometry</summary>
         public async Task MinimizeAsync()
         {
             if (this._isDisposed || !this._isVisible)
@@ -240,7 +240,7 @@ namespace Bivium.Components.Shared
             await this.OnStateChanged.InvokeAsync();
         }
 
-        /// <summary>Ripristina e attiva la stessa finestra dopo il render</summary>
+        /// <summary>Restores and activates the same window after the render</summary>
         public async Task RestoreAsync()
         {
             if (this._isDisposed || !this.IsOpen())
@@ -277,7 +277,7 @@ namespace Bivium.Components.Shared
 
         #region Private Methods
 
-        /// <summary>Ricostruisce il draft soltanto al nuovo mount, senza chiamare Show</summary>
+        /// <summary>Rebuilds the draft only on the new mount, without calling Show</summary>
         protected override void OnParametersSet()
         {
             if (this._isDisposed)
@@ -323,15 +323,15 @@ namespace Bivium.Components.Shared
             this.ApplyWindow(this._workspaceService.GetSnapshot().FloatingWindows.Renamer);
         }
 
-        /// <summary>Serializza una copia della form e della preview, senza conservare riferimenti mutabili</summary>
-        /// <returns>Draft materializzato</returns>
+        /// <summary>Serializes a copy of the form and preview, without keeping mutable references</summary>
+        /// <returns>Materialized draft</returns>
         private string SerializeDraft()
         {
             return JsonSerializer.Serialize(new RenamerDraft { Entries = this._entries, Methods = this._methodStack, Preview = this._previewItems, EditingMethod = this._editingMethod, SelectedMethodType = this._selectedMethodType, ParamsError = this._paramsError, StatusText = this._statusText, DidRename = this._didRename });
         }
 
-        /// <summary>Hydrate senza invocare RenameEngine o i callback di input</summary>
-        /// <param name="session">Draft autorevole</param>
+        /// <summary>Hydrates without invoking RenameEngine or the input callbacks</summary>
+        /// <param name="session">Authoritative draft</param>
         private void ApplyDraft(RenamerSessionSnapshot session)
         {
             if (this._session?.Id != session.Id || this._adapterLeaseGeneration != this.LeaseGeneration)
@@ -349,7 +349,7 @@ namespace Bivium.Components.Shared
             this._session = session;
         }
 
-        /// <summary>Conserva anche gli input non ancora aggiunti allo stack</summary>
+        /// <summary>Also preserves the inputs not yet added to the stack</summary>
         private void PersistDraft()
         {
             this._draftPending = false;
@@ -362,7 +362,7 @@ namespace Bivium.Components.Shared
                 this.ApplyDraft(session);
         }
 
-        /// <summary>Coalesce le pubblicazioni del draft durante la digitazione; handoff e azioni esplicite pubblicano subito</summary>
+        /// <summary>Coalesces draft publications during typing; handoff and explicit actions publish immediately</summary>
         private void SchedulePersistDraft()
         {
             if (this._session == null || this._isDisposed)
@@ -372,8 +372,8 @@ namespace Bivium.Components.Shared
             _ = this.PersistDraftAfterDelayAsync(generation);
         }
 
-        /// <summary>Pubblica il draft dopo il ritardo, se nessuna pubblicazione successiva lo ha già superato</summary>
-        /// <param name="generation">Generazione del debounce catturata</param>
+        /// <summary>Publishes the draft after the delay, unless a later publication has already superseded it</summary>
+        /// <param name="generation">Captured debounce generation</param>
         private async Task PersistDraftAfterDelayAsync(long generation)
         {
             await Task.Delay(DRAFT_PERSIST_DELAY_MS);
@@ -384,12 +384,12 @@ namespace Bivium.Components.Shared
             });
         }
 
-        /// <summary>Token del mount corrente</summary>
-        /// <returns>Lease da rivalidare nel workspace</returns>
+        /// <summary>Token of the current mount</summary>
+        /// <returns>Lease to revalidate in the workspace</returns>
         private WorkspaceClientToken GetClientToken() => new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration);
 
-        /// <summary>Proietta lo stato della finestra server</summary>
-        /// <param name="window">Finestra autorevole</param>
+        /// <summary>Projects the server window state</summary>
+        /// <param name="window">Authoritative window</param>
         private void ApplyWindow(FloatingWindowSnapshot window)
         {
             this._window = window;
@@ -397,14 +397,14 @@ namespace Bivium.Components.Shared
             this._isMinimized = window.Minimized;
         }
 
-        /// <summary>Pubblica apertura e minimizzazione prima dell'interop</summary>
+        /// <summary>Publishes open and minimized state before interop</summary>
         private void PersistVisibility()
         {
             this.PersistWindow(this._window with { Visible = this._isVisible, Minimized = this._isMinimized });
         }
 
-        /// <summary>Commit finestra con CAS globale e confronto dello stato sorgente</summary>
-        /// <param name="window">Nuovo stato della sola finestra renamer</param>
+        /// <summary>Window commit with global CAS and source state comparison</summary>
+        /// <param name="window">New state of the renamer window only</param>
         private void PersistWindow(FloatingWindowSnapshot window)
         {
             if (this._session == null || this._isDisposed)
@@ -418,9 +418,9 @@ namespace Bivium.Components.Shared
             this.ApplyWindow(snapshot.FloatingWindows.Renamer);
         }
 
-        /// <summary>Conserva geometria, stacking e controllo focalizzato</summary>
-        /// <param name="update">Misure correnti del DOM</param>
-        /// <returns>Finestra autorevole per riconciliare anche un CAS rifiutato</returns>
+        /// <summary>Preserves geometry, stacking and focused control</summary>
+        /// <param name="update">Current DOM measurements</param>
+        /// <returns>Authoritative window, also used to reconcile a rejected CAS</returns>
         [JSInvokable]
         public FloatingWindowSnapshot OnWindowGeometryChanged(FloatingWindowGeometryUpdate update)
         {
@@ -431,10 +431,10 @@ namespace Bivium.Components.Shared
             return this._window;
         }
 
-        /// <summary>Annulla soltanto il restore rifiutato dal modal e ancora corrente</summary>
-        /// <param name="revision">Revisione proprietaria della richiesta</param>
-        /// <param name="result">Esito JS distinto da un ticket obsoleto</param>
-        /// <returns>Notifica asincrona dell'eventuale rollback</returns>
+        /// <summary>Cancels only the restore rejected by the modal that is still current</summary>
+        /// <param name="revision">Revision owning the request</param>
+        /// <param name="result">JS outcome, distinct from a stale ticket</param>
+        /// <returns>Asynchronous notification of any rollback</returns>
         private async Task CompleteRestoreAsync(long revision, string result)
         {
             if (this._isDisposed || revision != this._lifecycleRevision || !this._restorePending)
@@ -453,9 +453,9 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Registra drag e resize dopo il render reale, senza una finestra temporale non agganciata
+        /// Registers drag and resize after the actual render, without an unanchored time window
         /// </summary>
-        /// <param name="firstRender">Indica il primo render del componente</param>
+        /// <param name="firstRender">Indicates the first render of the component</param>
         protected override async System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender)
         {
             if (this._isDisposed)
@@ -564,36 +564,36 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Restituisce le modalità di rimozione per il controllo Radzen
+        /// Returns the removal modes for the Radzen control
         /// </summary>
-        /// <returns>Etichette indicizzate per valore booleano</returns>
+        /// <returns>Labels indexed by boolean value</returns>
         private Dictionary<bool, string> GetRemoveModes()
         {
             return new Dictionary<bool, string> { { false, "By position" }, { true, "By pattern" } };
         }
 
         /// <summary>
-        /// Restituisce le modalità di conversione maiuscole e minuscole
+        /// Returns the uppercase and lowercase conversion modes
         /// </summary>
-        /// <returns>Etichette indicizzate per modalità</returns>
+        /// <returns>Labels indexed by mode</returns>
         private Dictionary<int, string> GetCaseModes()
         {
             return new Dictionary<int, string> { { 0, "lowercase" }, { 1, "UPPERCASE" }, { 2, "Title Case" } };
         }
 
         /// <summary>
-        /// Restituisce gli ambiti nome ed estensione
+        /// Returns the name and extension scopes
         /// </summary>
-        /// <returns>Etichette indicizzate per ambito</returns>
+        /// <returns>Labels indexed by scope</returns>
         private Dictionary<int, string> GetNameScopes()
         {
             return new Dictionary<int, string> { { 0, "Name only" }, { 1, "Extension only" }, { 2, "Full name" } };
         }
 
         /// <summary>
-        /// Restituisce le posizioni disponibili per il trim
+        /// Returns the positions available for trim
         /// </summary>
-        /// <returns>Etichette indicizzate per posizione</returns>
+        /// <returns>Labels indexed by position</returns>
         private Dictionary<int, string> GetTrimLocations()
         {
             return new Dictionary<int, string> { { 0, "Start" }, { 1, "End" }, { 2, "Both" } };
@@ -905,8 +905,8 @@ namespace Bivium.Components.Shared
             await this.OnClose.InvokeAsync(this._didRename);
         }
 
-        /// <summary>Escape con il focus nella finestra: chiude come Cancel, senza raggiungere i pannelli</summary>
-        /// <returns>Completamento della chiusura</returns>
+        /// <summary>Escape with focus in the window: closes like Cancel, without reaching the panels</summary>
+        /// <returns>Completion of the close</returns>
         [JSInvokable]
         public Task OnRenamerEscape()
         {
@@ -918,7 +918,7 @@ namespace Bivium.Components.Shared
             });
         }
 
-        /// <summary>Richiede la cancellazione del batch in corso; i rename completati restano come documentato dal servizio</summary>
+        /// <summary>Requests cancellation of the running batch; completed renames remain as documented by the service</summary>
         private void HandleStopRename()
         {
             WorkspaceOperationSnapshot operation = this._batchOperation;
@@ -928,8 +928,8 @@ namespace Bivium.Components.Shared
                 this._statusText = "Stop was not accepted. The rename operation is unchanged.";
         }
 
-        /// <summary>Colora le celle della preview: originale barrato se cambia, conflitto in rosso, errore barrato in grigio</summary>
-        /// <param name="args">Cella della preview</param>
+        /// <summary>Colors the preview cells: original struck through if it changes, conflict in red, error struck through in gray</summary>
+        /// <param name="args">Preview cell</param>
         private void HandlePreviewCellRender(Radzen.DataGridCellRenderEventArgs<RenamePreviewItem> args)
         {
             RenamePreviewItem item = args.Data;
@@ -947,19 +947,19 @@ namespace Bivium.Components.Shared
 
         #endregion
 
-        /// <summary>CAS della sessione visuale, senza ricalcolare preview o confermare input</summary>
-        /// <param name="generation">Lease catturata</param>
-        /// <param name="view">Popup della sessione catturata</param>
-        /// <returns>Revisione acknowledged oppure -1</returns>
+        /// <summary>CAS of the visual session, without recalculating the preview or confirming input</summary>
+        /// <param name="generation">Captured lease</param>
+        /// <param name="view">Popup of the captured session</param>
+        /// <returns>Acknowledged revision, or -1</returns>
         [JSInvokable]
         public long OnRenamerViewChanged(long generation, WorkspaceRenamerViewState view)
         {
             return !this._isDisposed && generation == this.LeaseGeneration && view?.SessionId == this._session?.Id ? this._workspaceService.PublishRenamerViewState(this.GetClientToken(), view) : -1;
         }
 
-        /// <summary>Conferma form e preview già materializzata, senza rigenerare token casuali</summary>
-        /// <param name="cancellationToken">Limite del tentativo</param>
-        /// <returns>True solo per il draft e la geometria confermati</returns>
+        /// <summary>Confirms the form and the already materialized preview, without regenerating random tokens</summary>
+        /// <param name="cancellationToken">Attempt limit</param>
+        /// <returns>True only for the confirmed draft and geometry</returns>
         internal async Task<bool> FlushForHandoffAsync(CancellationToken cancellationToken)
         {
             if (this._isDisposed || this._restorePending)
@@ -987,9 +987,9 @@ namespace Bivium.Components.Shared
             return true;
         }
 
-        /// <summary>Stato della riga catturata, letto dal server e non dedotto dai nomi UI</summary>
-        /// <param name="item">Riga della preview materializzata</param>
-        /// <returns>Esito e posizione effettiva del passo, oppure vuoto</returns>
+        /// <summary>State of the captured row, read from the server and not inferred from UI names</summary>
+        /// <param name="item">Materialized preview row</param>
+        /// <returns>Outcome and actual position of the step, or empty</returns>
         private string GetRenameItemStatus(RenamePreviewItem item)
         {
             return !this._renameState.TryGetValue(item.OriginalFullPath, out WorkspaceRenameItemState state) ? "" : state.Phase + ": " + state.CurrentPath + (string.IsNullOrEmpty(state.ErrorMessage) ? "" : " — " + state.ErrorMessage);
@@ -998,9 +998,9 @@ namespace Bivium.Components.Shared
         #region IAsyncDisposable
 
         /// <summary>
-        /// Rimuove listener globali e callback del trascinamento
+        /// Removes global listeners and drag callbacks
         /// </summary>
-        /// <returns>Operazione asincrona di rilascio</returns>
+        /// <returns>Asynchronous release operation</returns>
         public async ValueTask DisposeAsync()
         {
             if (this._isDisposed)

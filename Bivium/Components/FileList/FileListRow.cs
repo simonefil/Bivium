@@ -3,32 +3,32 @@ using Bivium.Models;
 namespace Bivium.Components.FileList
 {
     /// <summary>
-    /// Tipo di riga esclusivamente visuale della griglia file
+    /// Visual-only row type of the file grid
     /// </summary>
     internal enum FileListRowKind
     {
         /// <summary>
-        /// Navigazione al padre, esclusa dalle interazioni di dominio
+        /// Navigation to the parent, excluded from domain interactions
         /// </summary>
         Parent,
 
         /// <summary>
-        /// Entry reale nello stato autoritativo
+        /// Real entry in the authoritative state
         /// </summary>
         Entry
     }
 
     /// <summary>
-    /// Adapter UI immutabile, non serializzato né inserito in PanelState.Entries
+    /// Immutable UI adapter, not serialized nor inserted into PanelState.Entries
     /// </summary>
     internal sealed class FileListRow
     {
         /// <summary>
-        /// Crea la proiezione visuale di una entry o della navigazione al padre
+        /// Creates the visual projection of an entry or of the navigation to the parent
         /// </summary>
-        /// <param name="kind">Tipo della riga</param>
-        /// <param name="entry">Entry reale, null per il padre</param>
-        /// <param name="parentPath">Destinazione soltanto per la riga padre</param>
+        /// <param name="kind">Row type</param>
+        /// <param name="entry">Real entry, null for the parent</param>
+        /// <param name="parentPath">Destination for the parent row only</param>
         public FileListRow(FileListRowKind kind, FileSystemEntry entry, string parentPath)
         {
             this.Kind = kind;
@@ -37,17 +37,17 @@ namespace Bivium.Components.FileList
         }
 
         /// <summary>
-        /// Tipo della riga visuale
+        /// Visual row type
         /// </summary>
         public FileListRowKind Kind { get; }
 
         /// <summary>
-        /// Riferimento all'entry reale senza copia del dominio
+        /// Reference to the real entry without copying the domain
         /// </summary>
         public FileSystemEntry Entry { get; }
 
         /// <summary>
-        /// Destinazione della navigazione al padre
+        /// Parent navigation destination
         /// </summary>
         public string ParentPath { get; }
     }

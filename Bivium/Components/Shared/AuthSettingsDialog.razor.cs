@@ -26,7 +26,7 @@ namespace Bivium.Components.Shared
         public long LeaseGeneration { get; set; }
 
         /// <summary>
-        /// Rivalida l'autorità del browser prima e dopo le modifiche autenticazione
+        /// Revalidates the browser authority before and after authentication changes
         /// </summary>
         [Parameter]
         public Func<bool> CanInvoke { get; set; }
@@ -34,18 +34,18 @@ namespace Bivium.Components.Shared
         [Parameter] public WorkspaceWorkflowSnapshot Workflow { get; set; }
         [Inject] private Bivium.Services.BiviumWorkspaceService WorkspaceService { get; set; }
         private readonly WorkspaceFormBinding _binding = new WorkspaceFormBinding();
-        /// <summary>Indicatore allowlist del challenge; al takeover il server lo annulla</summary>
+        /// <summary>Challenge allowlist indicator; on takeover the server cancels it</summary>
         private bool _pendingMfaSetup;
 
-        /// <summary>Le richieste auth realmente in corso restano protette fino all'esito</summary>
+        /// <summary>Authentication requests actually in progress remain protected until the outcome</summary>
         internal bool HasNonTransferableWork => this._isSaving || this._isOpening;
 
-        /// <summary>Allowlist; i campi sensibili restano esclusivamente in questo adapter</summary>
+        /// <summary>Allowlist; sensitive fields remain exclusively in this adapter</summary>
         private string GetDraft() => JsonSerializer.Serialize(new WorkspaceAuthenticationDraft(this._enabled, this._disabled, this._twoFactorEnabled, this._hasUser, this._mfaPanelVisible, this._passwordPanelVisible, this._username, this._configuredUsername, this._pendingMfaSetup));
 
         private void PublishDraft() => this._binding.Publish(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this.GetDraft());
 
-        /// <summary>Ripristina dialog e sezione senza richiamare endpoint o trasferire segreti</summary>
+        /// <summary>Restores the dialog and section without calling endpoints or transferring secrets</summary>
         protected override void OnParametersSet()
         {
             if (this.Workflow == null)
@@ -77,7 +77,7 @@ namespace Bivium.Components.Shared
             this._isVisible = this.Workflow.Phase == WorkspaceWorkflowPhase.AwaitingInput;
         }
 
-        /// <summary>La guardia MFA pendente non impedisce il checkpoint delle altre sezioni</summary>
+        /// <summary>The pending MFA guard does not prevent the checkpoint of the other sections</summary>
         internal System.Threading.Tasks.Task<bool> FlushForHandoffAsync(CancellationToken cancellationToken) => this._binding.FlushAsync(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this.GetDraft(), cancellationToken);
 
         #endregion
@@ -126,18 +126,18 @@ namespace Bivium.Components.Shared
 
         private string _statusText = "";
 
-        /// <summary>Stile dell'esito mostrato: errore, avviso o conferma</summary>
+        /// <summary>Style of the displayed outcome: error, warning or confirmation</summary>
         private Radzen.AlertStyle _statusStyle = Radzen.AlertStyle.Danger;
 
         private IJSObjectReference _jsModule;
 
-        /// <summary>Impedisce chiusura e doppi commit durante le richieste non cancellabili</summary>
+        /// <summary>Prevents closing and double commits during non-cancellable requests</summary>
         private bool _isSaving;
 
-        /// <summary>Le richieste in corso non possono usare una generazione nuova dopo un await</summary>
+        /// <summary>Requests in progress cannot use a new generation after an await</summary>
         private WorkspaceClientToken _mutationToken;
 
-        /// <summary>Riserva l'apertura mentre viene caricato lo stato iniziale</summary>
+        /// <summary>Reserves the open while the initial state is being loaded</summary>
         private bool _isOpening;
 
         #endregion
@@ -168,8 +168,8 @@ namespace Bivium.Components.Shared
 
         #region Private Methods
 
-        /// <summary>Carica lo stato e ammette soltanto l'apertura ancora appartenente alla lease catturata</summary>
-        /// <param name="token">Lease all'inizio dell'apertura</param>
+        /// <summary>Loads the state and admits only the open that still belongs to the captured lease</summary>
+        /// <param name="token">Lease at the start of the open</param>
         private async System.Threading.Tasks.Task LoadAndOpenAsync(WorkspaceClientToken token)
         {
             this._statusText = "";
@@ -211,12 +211,12 @@ namespace Bivium.Components.Shared
             }
             catch (InvalidOperationException)
             {
-                // Un'altra form può essere stata ammessa durante il caricamento; non la sostituisce
+                // Another form may have been admitted during loading; it does not replace it
                 return;
             }
             catch (UnauthorizedAccessException)
             {
-                // Il cambio lease fra la verifica e l'admission è un rifiuto, non un fault del circuito
+                // A lease change between the check and the admission is a rejection, not a circuit fault
                 return;
             }
             this._binding.Adopt(opened, this.LeaseGeneration);
@@ -224,8 +224,8 @@ namespace Bivium.Components.Shared
             this.StateHasChanged();
         }
 
-        /// <summary>Protegge le azioni di modifica senza alterarne payload e autorità</summary>
-        /// <param name="mutation">Azione esistente da eseguire</param>
+        /// <summary>Protects the modification actions without altering their payload and authority</summary>
+        /// <param name="mutation">Existing action to execute</param>
         private async System.Threading.Tasks.Task ExecuteMutationAsync(Func<System.Threading.Tasks.Task> mutation)
         {
             if (this._isSaving)
@@ -247,7 +247,7 @@ namespace Bivium.Components.Shared
             }
         }
 
-        /// <summary>Non conserva password, token o challenge quando l'adapter perde la lease</summary>
+        /// <summary>Does not retain passwords, tokens or challenges when the adapter loses the lease</summary>
         private void ClearSensitiveFields()
         {
             this._newPassword = this._confirmPassword = this._mfaPassword = this._twoFactorCode = this._twoFactorSecret = this._qrCodeDataUrl = "";
@@ -576,9 +576,9 @@ namespace Bivium.Components.Shared
             await this.OnClose.InvokeAsync();
         }
 
-        /// <summary>Mostra un esito nel dialog con lo stile corrispondente</summary>
-        /// <param name="text">Messaggio</param>
-        /// <param name="style">Errore, avviso o conferma</param>
+        /// <summary>Shows an outcome in the dialog with the corresponding style</summary>
+        /// <param name="text">Message</param>
+        /// <param name="style">Error, warning or confirmation</param>
         private void SetStatus(string text, Radzen.AlertStyle style)
         {
             this._statusText = text;
@@ -586,9 +586,9 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Verifica che il browser conservi l'autorità per una modifica autenticazione
+        /// Verifies that the browser retains authority for an authentication change
         /// </summary>
-        /// <returns><see langword="true"/> quando il comando può proseguire</returns>
+        /// <returns><see langword="true"/> when the command can proceed</returns>
         private bool CanInvokeMutation()
         {
             return (!this._isSaving || (this._mutationToken?.AttachmentId == this.AttachmentId && this._mutationToken.Generation == this.LeaseGeneration)) && !this._binding.Rejected && (this.CanInvoke == null || this.CanInvoke()) && this.WorkspaceService.ValidateMutation(new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration));
@@ -598,7 +598,7 @@ namespace Bivium.Components.Shared
 
         #region Dispose
 
-        /// <summary>Rilascia il modulo JS importato, tollerando il circuito già chiuso</summary>
+        /// <summary>Releases the imported JS module, tolerating an already closed circuit</summary>
         public async System.Threading.Tasks.ValueTask DisposeAsync()
         {
             if (this._jsModule == null)
@@ -609,7 +609,7 @@ namespace Bivium.Components.Shared
             }
             catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException)
             {
-                // Circuito già rilasciato
+                // Circuit already released
             }
             this._jsModule = null;
         }

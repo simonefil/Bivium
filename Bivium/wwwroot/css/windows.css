@@ -1,4 +1,4 @@
-/* Titlebar condivisa delle finestre modeless (editor, renamer, terminale). */
+/* Shared titlebar of the modeless windows (editor, renamer, terminal). */
 .bivium-native-window-titlebar {
     display: flex;
     min-width: 0;

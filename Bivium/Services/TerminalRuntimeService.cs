@@ -29,7 +29,7 @@ namespace Bivium.Services
         private const int NOTIFICATION_DELAY_MS = 16;
 
         /// <summary>
-        /// Attesa massima di un aggiornamento atomico prima di riprendere la pubblicazione
+        /// Maximum wait for an atomic update before publishing resumes
         /// </summary>
         private const int SYNCHRONIZED_OUTPUT_TIMEOUT_MS = 1000;
 
@@ -311,7 +311,7 @@ namespace Bivium.Services
                 this.ScheduleNotification(session, false);
         }
 
-        /// <summary>Mutazione condivisa fra API con lease e piano workspace già ammesso</summary>
+        /// <summary>Mutation shared between lease-based APIs and an already admitted workspace plan</summary>
         private TerminalSessionRuntime RenameSessionState(int sessionId, string label)
         {
             TerminalSessionRuntime session = this.GetSession(sessionId);
@@ -326,7 +326,7 @@ namespace Bivium.Services
             return session;
         }
 
-        /// <summary>Ingresso interno del runner: non riceve token browser revocabili o callback circuito</summary>
+        /// <summary>Internal runner entry point: receives no revocable browser tokens or circuit callbacks</summary>
         internal FileOperationResult ExecuteAdmittedWorkspaceAction(WorkspaceWorkflowKind kind, System.Collections.Immutable.ImmutableArray<int> sessionIds, string draft)
         {
             if (kind == WorkspaceWorkflowKind.TerminalRename && sessionIds.Length == 1)
@@ -396,10 +396,10 @@ namespace Bivium.Services
         /// <param name="shift">Shift modifier</param>
         /// <param name="control">Control modifier</param>
         /// <param name="alt">Alt modifier</param>
-        /// <param name="meta">Modificatore Meta/Super</param>
-        /// <param name="code">Identità fisica DOM del tasto</param>
-        /// <param name="repeat">Ripetizione di una pressione mantenuta</param>
-        /// <param name="release">Rilascio del tasto</param>
+        /// <param name="meta">Meta/Super modifier</param>
+        /// <param name="code">Physical DOM identity of the key</param>
+        /// <param name="repeat">Repeat of a held key press</param>
+        /// <param name="release">Key release</param>
         public void SendKey(WorkspaceClientToken token, int sessionId, string keyName, string character, bool shift, bool control, bool alt, bool meta = false, string code = "", bool repeat = false, bool release = false)
         {
             KeyModifiers modifiers = this.CreateKeyModifiers(shift, control, alt);
@@ -429,7 +429,7 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Invia il paste tramite la sanitizzazione e i protocolli negoziati di XTerm.NET
+        /// Sends the paste through the sanitization and negotiated protocols of XTerm.NET
         /// </summary>
         /// <param name="token">Client lease</param>
         /// <param name="sessionId">Session identifier</param>
@@ -670,8 +670,8 @@ namespace Bivium.Services
             }
         }
 
-        /// <summary>Rimuove i PTY sotto il lock workspace del chiamante; restituisce solo il cleanup fuori lock</summary>
-        /// <returns>Disposal e notifica delle sessioni esattamente rimosse, mai di nuovi PTY</returns>
+        /// <summary>Removes the PTYs under the caller's workspace lock; returns only the cleanup to run outside the lock</summary>
+        /// <returns>Disposal and notification of exactly the removed sessions, never of new PTYs</returns>
         internal Action DetachAllSessionsForWorkspaceReset()
         {
             List<TerminalSessionRuntime> sessions;
@@ -729,7 +729,7 @@ namespace Bivium.Services
                 cancellationToken.ThrowIfCancellationRequested();
                 if (session.Disposed)
                     return null;
-                // Un handoff deve recuperare subito la geometria e lo storico correnti
+                // A handoff must immediately recover the current geometry and history
                 if (session.SynchronizedSnapshot != null)
                 {
                     session.SynchronizedSnapshot = null;
@@ -1152,7 +1152,7 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Esporta soltanto i frammenti non ancora presenti nello storico
+        /// Exports only the fragments not yet present in the history
         /// </summary>
         /// <param name="session">Source session</param>
         /// <returns>Compact current rows not already present in the archive</returns>
@@ -1306,7 +1306,7 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Conserva i riferimenti pubblici di entrambi i buffer, ridimensionati insieme da XTerm
+        /// Preserves the public references of both buffers, resized together by XTerm
         /// </summary>
         private void HandleBufferChanged(TerminalSessionRuntime session, TerminalEvents.BufferChangedEventArgs args)
         {
@@ -1316,7 +1316,7 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Congela il frame alternate a un potenziale boundary di redraw
+        /// Freezes the alternate frame at a potential redraw boundary
         /// </summary>
         private void HandleViewportRedrawStarting(TerminalSessionRuntime session)
         {
@@ -1325,7 +1325,7 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Congela un boundary del buffer alternate prima delle modifiche
+        /// Freezes an alternate buffer boundary before the changes
         /// </summary>
         private void BeginAlternateRedraw(TerminalSessionRuntime session)
         {
@@ -1336,10 +1336,10 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Riconcilia il redraw solo quando il boundary precedente lo richiede
+        /// Reconciles the redraw only when the previous boundary requires it
         /// </summary>
-        /// <param name="session">Sessione sotto il proprio lock</param>
-        /// <param name="complete">True alla fine di un aggiornamento atomico</param>
+        /// <param name="session">Session under its own lock</param>
+        /// <param name="complete">True at the end of an atomic update</param>
         private void ReconcileAlternateAfterWrite(TerminalSessionRuntime session, bool complete = false)
         {
             if (!session.Terminal.IsAlternateBufferActive || session.Terminal.SynchronizedOutput || !session.AlternateFrameReconciler.Pending)
@@ -1528,10 +1528,10 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Congela uno stato coerente prima delle scritture del blocco senza fermare l'emulatore
+        /// Freezes a consistent state before the block writes without stopping the emulator
         /// </summary>
-        /// <param name="session">Sessione sotto il proprio lock</param>
-        /// <param name="active">Stato negoziato del blocco</param>
+        /// <param name="session">Session under its own lock</param>
+        /// <param name="active">Negotiated block state</param>
         private void HandleSynchronizedOutputChanged(TerminalSessionRuntime session, bool active)
         {
             session.SynchronizedSnapshot = null;
@@ -1548,10 +1548,10 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Limita l'attesa usando un orologio monotono, anche quando non arriva altro output
+        /// Bounds the wait using a monotonic clock, even when no more output arrives
         /// </summary>
-        /// <param name="session">Sessione sotto il proprio lock</param>
-        /// <returns>True mentre la pubblicazione è sospesa</returns>
+        /// <param name="session">Session under its own lock</param>
+        /// <returns>True while publishing is suspended</returns>
         private bool IsSynchronizedOutputHeld(TerminalSessionRuntime session)
         {
             if (session.SynchronizedSnapshot == null)
@@ -1559,8 +1559,8 @@ namespace Bivium.Services
             if (session.History.StartIndex == session.SynchronizedSnapshot.HistoryStart && Environment.TickCount64 - session.SynchronizedStartedAt < SYNCHRONIZED_OUTPUT_TIMEOUT_MS)
                 return true;
 
-            // Timeout e trimming non devono mantenere un frame con storico non più disponibile
-            // Il blocco interrotto resta ignorato fino alla successiva negoziazione off/on
+            // Timeout and trimming must not keep a frame whose history is no longer available
+            // The interrupted block stays ignored until the next off/on negotiation
             session.SynchronizedSnapshot = null;
             return false;
         }
@@ -1642,15 +1642,15 @@ namespace Bivium.Services
         /// <summary>
         /// Generates a sequence from DOM input using authoritative XTerm.NET state
         /// </summary>
-        /// <param name="terminal">Emulatore con lo stato negoziato autorevole</param>
+        /// <param name="terminal">Emulator with the authoritative negotiated state</param>
         /// <param name="keyName">DOM key name</param>
         /// <param name="character">Printable character</param>
         /// <param name="modifiers">XTerm.NET modifiers</param>
         /// <returns>Sequence to send to the PTY</returns>
-        /// <param name="meta">Modificatore Meta/Super</param>
-        /// <param name="code">Identità fisica DOM</param>
-        /// <param name="repeat">Ripetizione del tasto</param>
-        /// <param name="release">Rilascio del tasto</param>
+        /// <param name="meta">Meta/Super modifier</param>
+        /// <param name="code">Physical DOM identity</param>
+        /// <param name="repeat">Key repeat</param>
+        /// <param name="release">Key release</param>
         internal static string GenerateKeySequence(Terminal terminal, string keyName, string character, KeyModifiers modifiers, bool meta = false, string code = "", bool repeat = false, bool release = false)
         {
             if (terminal.KittyKeyboardActive)
@@ -2001,7 +2001,7 @@ namespace Bivium.Services
             /// Whether a restart was requested
             /// </summary>
             public bool RestartPending { get; set; }
-            /// <summary>Pubblicazioni catturate dopo Terminal.Write, prima della notifica browser</summary>
+            /// <summary>Publications captured after Terminal.Write, before the browser notification</summary>
             public List<TerminalClientEvent> WorkspaceClipboardRequests { get; } = new List<TerminalClientEvent>();
 
             /// <summary>
@@ -2030,12 +2030,12 @@ namespace Bivium.Services
             public bool NotificationPending { get; set; }
 
             /// <summary>
-            /// Ultimo stato completo, con revisione e confine storico coerenti, durante DEC 2026
+            /// Last complete state, with consistent revision and history boundary, during DEC 2026
             /// </summary>
             public TerminalSessionSnapshot SynchronizedSnapshot { get; set; }
 
             /// <summary>
-            /// Inizio monotono dell'attesa del blocco corrente
+            /// Monotonic start of the wait for the current block
             /// </summary>
             public long SynchronizedStartedAt { get; set; }
 
@@ -2105,22 +2105,22 @@ namespace Bivium.Services
             public TerminalHistoryArchive History { get; }
 
             /// <summary>
-            /// Candidato bounded usato soltanto per i frame del buffer alternate
+            /// Bounded candidate used only for alternate buffer frames
             /// </summary>
             public TerminalAlternateFrameReconciler AlternateFrameReconciler { get; } = new TerminalAlternateFrameReconciler();
 
             /// <summary>
-            /// Checkpoint delle righe normali interamente archiviate, inclusi i rientri dopo resize
+            /// Checkpoint of the fully archived normal rows, including re-entries after resize
             /// </summary>
             public Dictionary<BufferLine, TerminalLineSnapshot> DeactivatedNormalLines { get; set; } = new Dictionary<BufferLine, TerminalLineSnapshot>();
 
             /// <summary>
-            /// Buffer normale conservato anche mentre è attivo quello alternate
+            /// Normal buffer preserved even while the alternate one is active
             /// </summary>
             public TerminalBuffer NormalBuffer { get; }
 
             /// <summary>
-            /// Buffer alternate acquisito alla prima attivazione
+            /// Alternate buffer acquired at first activation
             /// </summary>
             public TerminalBuffer AlternateBuffer { get; set; }
 

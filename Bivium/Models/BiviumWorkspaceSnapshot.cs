@@ -18,11 +18,11 @@ namespace Bivium.Models
         /// <param name="panels">Persistent panel state or null when not initialized yet</param>
         /// <param name="floatingWindows">Persistent floating-window state</param>
         /// <param name="activeClientLease">Active client lease or null</param>
-        /// <param name="desktop">Metadati desktop senza contenuti dei draft</param>
-        /// <param name="handoff">Tentativo live oppure null quando non pendente</param>
-        /// <param name="workflow">Riferimento leggero al workflow</param>
-        /// <param name="operation">Progresso del task ammesso, senza piano o percorsi</param>
-        /// <param name="upload">Riferimento leggero al trasferimento, senza manifest o percorsi</param>
+        /// <param name="desktop">Desktop metadata without draft contents</param>
+        /// <param name="handoff">Live attempt or null when not pending</param>
+        /// <param name="workflow">Lightweight workflow reference</param>
+        /// <param name="operation">Progress of the admitted task, without plan or paths</param>
+        /// <param name="upload">Lightweight transfer reference, without manifest or paths</param>
         public BiviumWorkspaceSnapshot(long revision, WorkspacePanelsSnapshot panels, FloatingWindowsSnapshot floatingWindows, ActiveClientLeaseSnapshot activeClientLease, DesktopSessionsSnapshot desktop = null, WorkspaceHandoffSnapshot handoff = null, WorkspaceWorkflowReference workflow = null, WorkspaceOperationSnapshot operation = null, WorkspaceUploadReference upload = null)
         {
             this.Revision = revision;
@@ -60,18 +60,18 @@ namespace Bivium.Models
         /// </summary>
         public ActiveClientLeaseSnapshot ActiveClientLease { get; }
 
-        /// <summary>Metadati desktop, senza contenuti dei documenti e delle preview</summary>
+        /// <summary>Desktop metadata, without document and preview contents</summary>
         public DesktopSessionsSnapshot Desktop { get; }
 
-        /// <summary>Tentativo live pendente; congela i nuovi comandi, non i publisher dedicati</summary>
+        /// <summary>Pending live attempt; freezes new commands, not the dedicated publishers</summary>
         public WorkspaceHandoffSnapshot Handoff { get; }
 
-        /// <summary>Riferimento runtime senza draft o parametri</summary>
+        /// <summary>Runtime reference without drafts or parameters</summary>
         public WorkspaceWorkflowReference Workflow { get; }
-        /// <summary>Task corrente; nessun callback del circuito o piano nel payload globale</summary>
+        /// <summary>Current task; no circuit callback or plan in the global payload</summary>
         public WorkspaceOperationSnapshot Operation { get; }
 
-        /// <summary>Riferimento Upload; manifest e ricevute richiedono la lease autorizzata</summary>
+        /// <summary>Upload reference; manifest and receipts require the authorized lease</summary>
         public WorkspaceUploadReference Upload { get; }
 
         #endregion
@@ -202,7 +202,7 @@ namespace Bivium.Models
         /// </summary>
         public long WorkspaceRevision { get; set; }
 
-        /// <summary>Errore riprovabile del takeover, senza revoca implicita</summary>
+        /// <summary>Retryable takeover error, without implicit revocation</summary>
         public string ErrorMessage { get; set; } = "";
     }
 
@@ -235,10 +235,10 @@ namespace Bivium.Models
         /// </summary>
         public FloatingWindowSnapshot Terminal { get; }
 
-        /// <summary>Finestra editor; geometria zero lascia applicare il layout CSS iniziale</summary>
+        /// <summary>Editor window; zero geometry lets the initial CSS layout apply</summary>
         public FloatingWindowSnapshot Editor { get; }
 
-        /// <summary>Finestra renamer; geometria zero lascia applicare il layout CSS iniziale</summary>
+        /// <summary>Renamer window; zero geometry lets the initial CSS layout apply</summary>
         public FloatingWindowSnapshot Renamer { get; }
     }
 
@@ -339,8 +339,8 @@ namespace Bivium.Models
         /// <param name="rightPanel">Right panel state</param>
         /// <param name="activePanel">Active panel index</param>
         /// <param name="singlePanelMode">Whether single-panel mode is active</param>
-        /// <param name="outerSizePercent">Percentuale occupata dal pannello sinistro</param>
-        /// <param name="collapsedPanelIndex">Indice del pannello compresso, oppure -1</param>
+        /// <param name="outerSizePercent">Percentage occupied by the left panel</param>
+        /// <param name="collapsedPanelIndex">Index of the collapsed panel, or -1</param>
         public WorkspacePanelsSnapshot(WorkspacePanelSnapshot leftPanel, WorkspacePanelSnapshot rightPanel, int activePanel, bool singlePanelMode, double outerSizePercent = 50, int collapsedPanelIndex = -1)
         {
             this.LeftPanel = leftPanel ?? throw new System.ArgumentNullException(nameof(leftPanel));
@@ -399,12 +399,12 @@ namespace Bivium.Models
         public bool SinglePanelMode { get; }
 
         /// <summary>
-        /// Percentuale occupata dal pannello sinistro nel layout Radzen
+        /// Percentage occupied by the left panel in the Radzen layout
         /// </summary>
         public double OuterSizePercent { get; }
 
         /// <summary>
-        /// Indice del pannello compresso nel layout Radzen, oppure -1
+        /// Index of the collapsed panel in the Radzen layout, or -1
         /// </summary>
         public int CollapsedPanelIndex { get; }
 
@@ -472,8 +472,8 @@ namespace Bivium.Models
         /// <param name="backHistory">Previous directory paths, nearest last</param>
         /// <param name="forwardHistory">Forward directory paths, nearest last</param>
         /// <param name="columns">Complete ordered measured column layout</param>
-        /// <param name="treeSizePercent">Percentuale verticale occupata dall'albero</param>
-        /// <param name="treeCollapsed">Indica se l'albero è compresso</param>
+        /// <param name="treeSizePercent">Vertical percentage occupied by the tree</param>
+        /// <param name="treeCollapsed">Whether the tree is collapsed</param>
         public WorkspacePanelSnapshot(string currentPath, string cursorPath, int cursorIndex, IEnumerable<string> selectedPaths, SortField sortField, SortDirection sortDirection, string scrollAnchorPath = "", IEnumerable<string> expandedDirectoryPaths = null, double? nameColumnRatio = null, double? sizeColumnRatio = null, double? dateColumnRatio = null, double? attributesColumnRatio = null, double? ownerColumnRatio = null, string selectionAnchorPath = "", IEnumerable<string> backHistory = null, IEnumerable<string> forwardHistory = null, IEnumerable<FileListColumnState> columns = null, double treeSizePercent = 30, bool treeCollapsed = false)
         {
             this.CurrentPath = currentPath ?? "";
@@ -739,12 +739,12 @@ namespace Bivium.Models
         public IReadOnlyList<FileListColumnSnapshot> Columns { get; }
 
         /// <summary>
-        /// Percentuale verticale occupata dall'albero
+        /// Vertical percentage occupied by the tree
         /// </summary>
         public double TreeSizePercent { get; }
 
         /// <summary>
-        /// Indica se l'albero è compresso
+        /// Whether the tree is collapsed
         /// </summary>
         public bool TreeCollapsed { get; }
 

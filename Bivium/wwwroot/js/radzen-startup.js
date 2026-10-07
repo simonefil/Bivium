@@ -2,7 +2,7 @@ const RADZEN_MENU_HOVER_KEY = Symbol.for('bivium.radzenMenuHover');
 const RADZEN_SELECTION_KEY = Symbol.for('bivium.radzenSelection');
 
 if (!globalThis[RADZEN_SELECTION_KEY]) {
-    // Solo la prima focalizzazione di ogni input applica la selezione iniziale: i ritorni di focus conservano quella dell'utente
+    // Only the first focus of each input applies the initial selection: later focus returns keep the user's selection
     const selectedInputs = new WeakSet();
     globalThis[RADZEN_SELECTION_KEY] = true;
     document.addEventListener('focusin', function (event) {
@@ -16,7 +16,7 @@ if (!globalThis[RADZEN_SELECTION_KEY]) {
     });
 }
 
-/** Passa da un menu top-level aperto al successivo con l'hover, come nelle menu bar desktop. */
+/** Moves from an open top-level menu to the next one on hover, as in desktop menu bars. */
 export function initializeRadzenMenuHover(host) {
     if (!host || host[RADZEN_MENU_HOVER_KEY]) return;
 
@@ -28,14 +28,14 @@ export function initializeRadzenMenuHover(host) {
         if (!targetItem || !host.contains(targetItem)) return;
 
         const menuRoot = host.querySelector('.rz-menu');
-        // Nel layout responsive le voci sono impilate: l'hover non deve aprire sottomenu
+        // In the responsive layout the items are stacked: hover must not open submenus
         if (!menuRoot || targetItem.parentElement !== menuRoot || menuRoot.classList.contains('rz-menu-open')) return;
 
         const activeItem = Array.from(menuRoot.children).find(function (item) {
             return item.classList.contains('rz-navigation-item-active');
         });
         if (!activeItem || activeItem === targetItem) return;
-        // Solo un sottomenu realmente aperto autorizza il passaggio
+        // Only a submenu that is actually open allows the switch
         const openMenu = activeItem.querySelector(':scope > .rz-navigation-menu');
         if (!openMenu || openMenu.getClientRects().length === 0) return;
 
@@ -44,7 +44,7 @@ export function initializeRadzenMenuHover(host) {
         try {
             globalThis.Radzen.toggleMenuItem(wrapper, event, true, true);
         } catch {
-            // API Radzen interna non disponibile: resta il comportamento click-to-open nativo
+            // Internal Radzen API unavailable: the native click-to-open behavior remains
         }
     }, { signal: controller.signal });
 }

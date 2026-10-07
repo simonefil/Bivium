@@ -29,11 +29,11 @@ namespace Bivium.Components.Shared
         [Inject]
         private BiviumWorkspaceService _workspaceService { get; set; }
 
-        /// <summary>Tema Radzen corrente dal quale deriva il tema Monaco</summary>
+        /// <summary>Current Radzen theme from which the Monaco theme derives</summary>
         [Inject]
         private Radzen.ThemeService _themeService { get; set; }
 
-        /// <summary>Notifiche per errori di salvataggio</summary>
+        /// <summary>Notifications for save errors</summary>
         [Inject]
         private Radzen.NotificationService _notificationService { get; set; }
 
@@ -47,11 +47,11 @@ namespace Bivium.Components.Shared
         [Parameter]
         public EventCallback<bool> OnClose { get; set; }
 
-        /// <summary>Stato visuale ricevuto dallo stacking JS</summary>
+        /// <summary>Visual state received from the JS stacking</summary>
         [Parameter]
         public bool IsActive { get; set; }
 
-        /// <summary>Notifica lifecycle e titolo della finestra</summary>
+        /// <summary>Notifies window lifecycle and title</summary>
         [Parameter]
         public EventCallback OnStateChanged { get; set; }
 
@@ -70,31 +70,31 @@ namespace Bivium.Components.Shared
         /// </summary>
         private bool _isVisible = false;
 
-        /// <summary>Finestra aperta ma temporaneamente nascosta</summary>
+        /// <summary>Window open but temporarily hidden</summary>
         private bool _isMinimized;
 
-        /// <summary>Contenuto iniziale consumato una sola volta dopo il render</summary>
+        /// <summary>Initial content consumed once after the render</summary>
         private string _pendingContent;
 
-        /// <summary>Richiesta di attivazione invalidabile dal manager JS</summary>
+        /// <summary>Activation request that the JS manager can invalidate</summary>
         private long _pendingActivation;
 
-        /// <summary>Revisione proprietaria del ticket post-render</summary>
+        /// <summary>Revision owning the post-render ticket</summary>
         private long _pendingActivationRevision;
 
-        /// <summary>Ripristino visibile provvisorio ancora in attesa dell'esito JS</summary>
+        /// <summary>Provisional visible restore still awaiting the JS outcome</summary>
         private bool _restorePending;
 
-        /// <summary>Origine conservata anche fra restore ripetuti prima dell'esito</summary>
+        /// <summary>Origin preserved across repeated restores before the outcome</summary>
         private bool _restoreWasMinimized;
 
-        /// <summary>Generazione dell'apertura per scartare inizializzazioni obsolete</summary>
+        /// <summary>Open generation used to discard stale initializations</summary>
         private long _openGeneration;
 
-        /// <summary>Ordine locale delle richieste lifecycle, distinto dallo stacking</summary>
+        /// <summary>Local order of lifecycle requests, distinct from stacking</summary>
         private long _lifecycleRevision;
 
-        /// <summary>Evita inizializzazioni concorrenti durante il caricamento AMD</summary>
+        /// <summary>Prevents concurrent initializations during AMD loading</summary>
         private bool _renderInteropPending;
 
         /// <summary>
@@ -137,10 +137,10 @@ namespace Bivium.Components.Shared
         /// </summary>
         private bool _isDisposed;
 
-        /// <summary>Save in corso: impedisce scritture concorrenti e blocca il drain dell'handoff</summary>
+        /// <summary>Save in progress: prevents concurrent writes and blocks the handoff drain</summary>
         private bool _isSaving;
 
-        /// <summary>Guardia transitoria: un save in corso non viene cancellato dal tentativo</summary>
+        /// <summary>Transient guard: a save in progress is not cleared by the attempt</summary>
         internal bool HasNonTransferableWork => this._isSaving;
 
         /// <summary>
@@ -148,27 +148,27 @@ namespace Bivium.Components.Shared
         /// </summary>
         private string _statusText = "";
 
-        /// <summary>Sessione server, separata dagli oggetti Monaco posseduti dall'adapter</summary>
+        /// <summary>Server session, separate from the Monaco objects owned by the adapter</summary>
         private EditorSessionSnapshot _session;
 
-        /// <summary>Ultima finestra autorevole dalla quale derivano gli aggiornamenti</summary>
+        /// <summary>Last authoritative window from which updates derive</summary>
         private FloatingWindowSnapshot _window = new FloatingWindowsSnapshot().Editor;
 
-        /// <summary>Viewstate da applicare una sola volta al nuovo modello Monaco</summary>
+        /// <summary>View state to apply once to the new Monaco model</summary>
         private string _pendingViewState;
-        /// <summary>History della revisione hydrated, consumata soltanto al mount Monaco</summary>
+        /// <summary>History of the hydrated revision, consumed only at the Monaco mount</summary>
         private EditorHistorySnapshot _pendingHistory;
 
-        /// <summary>Ultima notifica geometrica accettata per questa sessione</summary>
+        /// <summary>Last geometry notification accepted for this session</summary>
         private long _geometrySequence;
 
-        /// <summary>Lease che possiede il publisher Monaco di questo mount</summary>
+        /// <summary>Lease owning the Monaco publisher of this mount</summary>
         private long _adapterLeaseGeneration;
 
-        /// <summary>Rilascio del modello locale quando il server chiude o resetta la sessione</summary>
+        /// <summary>Release of the local model when the server closes or resets the session</summary>
         private bool _releaseEditorPending;
 
-        /// <summary>Stile della geometria; vuoto conserva il layout CSS iniziale</summary>
+        /// <summary>Geometry style; empty preserves the initial CSS layout</summary>
         private string WindowStyle => this._window.Width > 0 ? FormattableString.Invariant($"left:{this._window.Left}px;top:{this._window.Top}px;width:{this._window.Width}px;height:{this._window.Height}px") : "";
 
         #endregion
@@ -228,13 +228,13 @@ namespace Bivium.Components.Shared
             _ = this.OnStateChanged.InvokeAsync();
         }
 
-        /// <summary>Indica se la stessa sessione editor è ancora aperta</summary>
+        /// <summary>Indicates whether the same editor session is still open</summary>
         public bool IsOpen() => this._isVisible || this._isMinimized;
 
-        /// <summary>Titolo corrente con indicatore di modifiche non salvate</summary>
+        /// <summary>Current title with unsaved changes indicator</summary>
         public string GetTitle() => "Edit: " + this._fileName + (this._isDirty ? " *" : "");
 
-        /// <summary>Nasconde la finestra conservando DOM, modello Monaco e geometria</summary>
+        /// <summary>Hides the window preserving DOM, Monaco model and geometry</summary>
         public async Task MinimizeAsync()
         {
             if (this._isDisposed || !this._isVisible)
@@ -251,7 +251,7 @@ namespace Bivium.Components.Shared
             await this.OnStateChanged.InvokeAsync();
         }
 
-        /// <summary>Ripristina e attiva la stessa istanza dopo il render visibile</summary>
+        /// <summary>Restores and activates the same instance after the visible render</summary>
         public async Task RestoreAsync()
         {
             if (this._isDisposed || !this.IsOpen())
@@ -288,13 +288,13 @@ namespace Bivium.Components.Shared
 
         #region Private Methods
 
-        /// <summary>Segue i cambi di tema Radzen per aggiornare Monaco</summary>
+        /// <summary>Follows Radzen theme changes to update Monaco</summary>
         protected override void OnInitialized()
         {
             this._themeService.ThemeChanged += this.HandleThemeChanged;
         }
 
-        /// <summary>Hydrate dal runtime senza rileggere il file o azzerare dirty</summary>
+        /// <summary>Hydrates from the runtime without re-reading the file or clearing dirty</summary>
         protected override void OnParametersSet()
         {
             if (this._isDisposed)
@@ -316,8 +316,8 @@ namespace Bivium.Components.Shared
             this.ApplyWindow(this._workspaceService.GetSnapshot().FloatingWindows.Editor);
         }
 
-        /// <summary>Ricostruisce l'adapter soltanto quando cambia identità documento</summary>
-        /// <param name="session">Documento autorevole</param>
+        /// <summary>Rebuilds the adapter only when the document identity changes</summary>
+        /// <param name="session">Authoritative document</param>
         private void ApplySession(EditorSessionSnapshot session)
         {
             if (this._session?.Id != session.Id || this._adapterLeaseGeneration != this.LeaseGeneration)
@@ -339,8 +339,8 @@ namespace Bivium.Components.Shared
             this._statusText = ByteSizeFormatter.Format(session.Content.Length) + (session.IsDirty ? " - Modified" : " - Saved");
         }
 
-        /// <summary>Proietta la finestra del workspace senza attivarla come nuova apertura</summary>
-        /// <param name="window">Stato autorevole</param>
+        /// <summary>Projects the workspace window without activating it as a new open</summary>
+        /// <param name="window">Authoritative state</param>
         private void ApplyWindow(FloatingWindowSnapshot window)
         {
             this._window = window;
@@ -348,18 +348,18 @@ namespace Bivium.Components.Shared
             this._isMinimized = window.Minimized;
         }
 
-        /// <summary>Token del mount corrente</summary>
-        /// <returns>Lease da rivalidare sotto il lock workspace</returns>
+        /// <summary>Token of the current mount</summary>
+        /// <returns>Lease to revalidate under the workspace lock</returns>
         private WorkspaceClientToken GetClientToken() => new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration);
 
-        /// <summary>Pubblica il lifecycle prima degli await degli adapter JS</summary>
+        /// <summary>Publishes the lifecycle before the JS adapter awaits</summary>
         private void PersistVisibility()
         {
             this.PersistWindow(this._window with { Visible = this._isVisible, Minimized = this._isMinimized });
         }
 
-        /// <summary>Confronta finestra e revisione; un retry richiede prova che la stessa finestra sia invariata</summary>
-        /// <param name="window">Modifica derivata dalla finestra locale</param>
+        /// <summary>Compares window and revision; a retry requires proof that the same window is unchanged</summary>
+        /// <param name="window">Change derived from the local window</param>
         private void PersistWindow(FloatingWindowSnapshot window)
         {
             if (this._session == null || this._isDisposed)
@@ -373,9 +373,9 @@ namespace Bivium.Components.Shared
             this.ApplyWindow(snapshot.FloatingWindows.Editor);
         }
 
-        /// <summary>Riceve geometria, focus semantico e ordine MRU dal manager locale</summary>
-        /// <param name="update">Misure della finestra montata</param>
-        /// <returns>Finestra autorevole per riconciliare anche un CAS rifiutato</returns>
+        /// <summary>Receives geometry, semantic focus and MRU order from the local manager</summary>
+        /// <param name="update">Measurements of the mounted window</param>
+        /// <returns>Authoritative window, also used to reconcile a rejected CAS</returns>
         [JSInvokable]
         public FloatingWindowSnapshot OnWindowGeometryChanged(FloatingWindowGeometryUpdate update)
         {
@@ -386,12 +386,12 @@ namespace Bivium.Components.Shared
             return this._window;
         }
 
-        /// <summary>Accetta il checkpoint JS solo sulla precedente revisione confermata</summary>
-        /// <param name="sessionId">Identità catturata dall'istanza Monaco</param>
-        /// <param name="revision">Revisione del checkpoint precedente</param>
-        /// <param name="leaseGeneration">Generazione catturata dal publisher JS</param>
-        /// <param name="checkpointStream">Checkpoint trasferito fuori dal messaggio SignalR ordinario</param>
-        /// <returns>Nuova revisione oppure -1 per fermare il publisher revocato o obsoleto</returns>
+        /// <summary>Accepts the JS checkpoint only on the previous confirmed revision</summary>
+        /// <param name="sessionId">Identity captured from the Monaco instance</param>
+        /// <param name="revision">Revision of the previous checkpoint</param>
+        /// <param name="leaseGeneration">Generation captured by the JS publisher</param>
+        /// <param name="checkpointStream">Checkpoint transferred outside the ordinary SignalR message</param>
+        /// <returns>New revision, or -1 to stop the revoked or stale publisher</returns>
         [JSInvokable("OnEditorCheckpoint")]
         public async Task<long> OnEditorCheckpointAsync(string sessionId, long revision, long leaseGeneration, IJSStreamReference checkpointStream)
         {
@@ -411,13 +411,13 @@ namespace Bivium.Components.Shared
             }
         }
 
-        /// <summary>Handshake streaming della base, prima di abilitare input e publisher del journal</summary>
-        /// <param name="sessionId">Documento catturato</param>
-        /// <param name="revision">Revisione hydrated</param>
-        /// <param name="generation">Lease catturata</param>
-        /// <param name="eol">EOL pubblico del modello</param>
-        /// <param name="contentStream">getValue senza limiti del messaggio SignalR ordinario</param>
-        /// <returns>Revisione concordata oppure -1</returns>
+        /// <summary>Streaming handshake of the base, before enabling input and the journal publisher</summary>
+        /// <param name="sessionId">Captured document</param>
+        /// <param name="revision">Hydrated revision</param>
+        /// <param name="generation">Captured lease</param>
+        /// <param name="eol">Public EOL of the model</param>
+        /// <param name="contentStream">getValue without the limits of the ordinary SignalR message</param>
+        /// <returns>Agreed revision, or -1</returns>
         [JSInvokable("OnEditorModelInitialized")]
         public async Task<long> OnEditorModelInitializedAsync(string sessionId, long revision, long generation, string eol, IJSStreamReference contentStream)
         {
@@ -439,10 +439,10 @@ namespace Bivium.Components.Shared
             }
         }
 
-        /// <summary>Conferma il restore o annulla soltanto quello rifiutato dal modal</summary>
-        /// <param name="revision">Revisione proprietaria della richiesta</param>
-        /// <param name="result">Esito JS distinto da un ticket obsoleto</param>
-        /// <returns>Notifica asincrona dell'eventuale rollback</returns>
+        /// <summary>Confirms the restore or cancels only the one rejected by the modal</summary>
+        /// <param name="revision">Revision owning the request</param>
+        /// <param name="result">JS outcome, distinct from a stale ticket</param>
+        /// <returns>Asynchronous notification of any rollback</returns>
         private async Task CompleteRestoreAsync(long revision, string result)
         {
             if (this._isDisposed || revision != this._lifecycleRevision || !this._restorePending)
@@ -461,9 +461,9 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Inizializza Monaco una volta e applica l'attivazione dopo il render
+        /// Initializes Monaco once and applies the activation after the render
         /// </summary>
-        /// <param name="firstRender">Indica il primo render del componente</param>
+        /// <param name="firstRender">Indicates the first render of the component</param>
         protected override async Task OnAfterRenderAsync(bool firstRender)
         {
             if (this._isDisposed || this._renderInteropPending)
@@ -555,8 +555,8 @@ namespace Bivium.Components.Shared
             await this.SaveAsync();
         }
 
-        /// <summary>Salva una sola volta alla volta e riporta l'esito</summary>
-        /// <returns>True solo quando il file è stato scritto e committato</returns>
+        /// <summary>Saves one at a time and reports the outcome</summary>
+        /// <returns>True only when the file was written and committed</returns>
         private async Task<bool> SaveAsync()
         {
             if (this._isSaving)
@@ -575,8 +575,8 @@ namespace Bivium.Components.Shared
             }
         }
 
-        /// <summary>Salva solo il documento catturato prima del flush, preservando le guardie di generazione</summary>
-        /// <returns>True solo per il save committato</returns>
+        /// <summary>Saves only the document captured before the flush, preserving the generation guards</summary>
+        /// <returns>True only for the committed save</returns>
         private async Task<bool> HandleSaveCoreAsync()
         {
             if (this._isDisposed || this._session == null || this._jsModule == null || !this._jsInitialized)
@@ -592,7 +592,7 @@ namespace Bivium.Components.Shared
                 return false;
             }
 
-            // Il flush può sospendere l'adapter mentre il documento viene chiuso e riaperto
+            // The flush may suspend the adapter while the document is closed and reopened
             if (!await this._jsModule.InvokeAsync<bool>("flushEditorCheckpoint"))
                 return false;
             if (this._isDisposed || generation != this._openGeneration || this._session?.Id != sessionId)
@@ -654,9 +654,9 @@ namespace Bivium.Components.Shared
             }
         }
 
-        /// <summary>Esegue la scelta consumata dalla domanda di chiusura: salva e chiude oppure scarta e chiude</summary>
-        /// <param name="save">True per salvare prima di chiudere</param>
-        /// <returns>Completamento della chiusura; un save fallito lascia l'editor aperto</returns>
+        /// <summary>Executes the choice consumed by the close question: save and close, or discard and close</summary>
+        /// <param name="save">True to save before closing</param>
+        /// <returns>Completion of the close; a failed save leaves the editor open</returns>
         internal async Task CompleteCloseAsync(bool save)
         {
             if (this._isDisposed || this._session == null)
@@ -666,7 +666,7 @@ namespace Bivium.Components.Shared
             await this.CloseSessionAsync();
         }
 
-        /// <summary>Chiude la sessione e notifica se nella sessione è stato eseguito almeno un save</summary>
+        /// <summary>Closes the session and notifies whether at least one save was performed in the session</summary>
         private async Task CloseSessionAsync()
         {
             bool saved = this._session?.SavedRevision > 0;
@@ -676,7 +676,7 @@ namespace Bivium.Components.Shared
             await this.OnClose.InvokeAsync(saved);
         }
 
-        /// <summary>Applica a Monaco il tema derivato dal tema Radzen corrente</summary>
+        /// <summary>Applies to Monaco the theme derived from the current Radzen theme</summary>
         private void HandleThemeChanged()
         {
             _ = this.InvokeAsync(async () =>
@@ -693,8 +693,8 @@ namespace Bivium.Components.Shared
             });
         }
 
-        /// <summary>Tema Monaco coerente con il tema Radzen: chiaro, scuro o ad alto contrasto con WCAG</summary>
-        /// <returns>Identificatore del tema Monaco</returns>
+        /// <summary>Monaco theme consistent with the Radzen theme: light, dark or WCAG high contrast</summary>
+        /// <returns>Monaco theme identifier</returns>
         private string GetMonacoTheme()
         {
             string theme = this._themeService.Theme ?? RadzenThemeCatalog.DEFAULT_THEME;
@@ -706,9 +706,9 @@ namespace Bivium.Components.Shared
 
         #endregion
 
-        /// <summary>Drena checkpoint e geometria senza salvare il file né ricostruire Monaco</summary>
-        /// <param name="cancellationToken">Limite e lifecycle del tentativo</param>
-        /// <returns>True solo per publisher confermati e sessione invariata</returns>
+        /// <summary>Drains checkpoint and geometry without saving the file or rebuilding Monaco</summary>
+        /// <param name="cancellationToken">Attempt limit and lifecycle</param>
+        /// <returns>True only for confirmed publishers and an unchanged session</returns>
         internal async Task<bool> FlushForHandoffAsync(CancellationToken cancellationToken)
         {
             if (this._isDisposed || this._isSaving || this._restorePending || this._renderInteropPending)

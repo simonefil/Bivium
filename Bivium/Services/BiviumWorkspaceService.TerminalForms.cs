@@ -11,23 +11,23 @@ namespace Bivium.Services
     {
         #region Variabili di classe
 
-        /// <summary>Coda bounded server-owned di richieste OSC, indipendente dal circuito</summary>
+        /// <summary>Bounded server-owned queue of OSC requests, independent of the circuit</summary>
         private readonly Queue<WorkspaceWorkflowSnapshot> _terminalClipboardRequests = new Queue<WorkspaceWorkflowSnapshot>();
 
         #endregion
 
         #region Metodi pubblici
 
-        /// <summary>Pubblicazione dopo il rilascio del lock terminale; non accede alla clipboard OS</summary>
-        /// <param name="request">Richiesta OSC già catturata dalla sessione</param>
-        /// <param name="isSourceCurrent">Controllo breve dell'identità nel registro terminale, senza I/O, notifiche o lock di sessione</param>
+        /// <summary>Publication after the terminal lock is released; does not access the OS clipboard</summary>
+        /// <param name="request">OSC request already captured by the session</param>
+        /// <param name="isSourceCurrent">Short identity check in the terminal registry, with no I/O, notifications or session lock</param>
         internal void EnqueueTerminalClipboard(TerminalClientEvent request, Func<bool> isSourceCurrent)
         {
             Action<BiviumWorkspaceSnapshot>[] subscribers;
             BiviumWorkspaceSnapshot snapshot;
             lock (this._lock)
             {
-                // Reset rimuove la sorgente e svuota la coda sotto questo stesso lock workspace
+                // Reset removes the source and empties the queue under this same workspace lock
                 if (this.IsStopped || this._terminalClipboardRequests.Count >= 8 || isSourceCurrent == null || !isSourceCurrent())
                     return;
                 WorkspaceTerminalContext context = new WorkspaceTerminalContext(ImmutableArray.Create(request.SessionId), ClipboardRequestId: request.Id);
@@ -44,7 +44,7 @@ namespace Bivium.Services
 
         #region Metodi privati
 
-        /// <summary>Le domande queued hanno già identità; non vengono ricreate alla hydration</summary>
+        /// <summary>Queued questions already have an identity; they are not recreated on hydration</summary>
         private void ActivateNextTerminalClipboardLocked()
         {
             if (this._terminalClipboardRequests.Count == 0 || this._uploadRuntime?.Snapshot.Visible == true || this._workflowRuntime.Current?.IsActive == true || this._operationRuntime?.Snapshot.IsRunning == true)
@@ -53,7 +53,7 @@ namespace Bivium.Services
             this._workflowRuntime.Responses.Clear();
         }
 
-        /// <summary>Lo stesso runner esegue solo il piano terminale già ammesso</summary>
+        /// <summary>The same runner executes only the already admitted terminal plan</summary>
         private FileOperationResult RunWorkspaceTerminal(WorkspaceOperationRuntime operation)
         {
             WorkspaceOperationPlan plan = operation.Plan;

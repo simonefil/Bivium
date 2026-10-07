@@ -22,7 +22,7 @@
                                        HeaderCssClass="@("bivium-column-" + column.Id.ToString().ToLowerInvariant())"
                                        CssClass="@("bivium-column-" + column.Id.ToString().ToLowerInvariant())"
                                        Visible="@column.Visible" Pickable="@(column.Id != FileListColumnId.Name)" Reorderable="true" Resizable="true">
-                    @* Sort Radzen nativo non usato: riordinerebbe Data ignorando "directory prima"; il bottone delega a Commander *@
+                    @* Native Radzen sort not used: it would reorder Data ignoring "directories first"; the button delegates to Commander *@
                     <HeaderTemplate>
                         <RadzenButton ButtonStyle="ButtonStyle.Base" Variant="Variant.Text" Size="ButtonSize.Small" class="radzen-file-sort" Click="() => this.ToggleSortAsync(column.Id)" @onclick:stopPropagation="true">
                             @this.GetTitle(column.Id)
@@ -63,190 +63,190 @@
 
 @code {
     /// <summary>
-    /// Stato autoritativo del pannello
+    /// Authoritative panel state
     /// </summary>
     [Parameter]
     public PanelState State { get; set; }
 
     /// <summary>
-    /// Percorso padre risolto dal pannello senza aggiungere entry di dominio
+    /// Parent path resolved by the panel without adding domain entries
     /// </summary>
     [Parameter]
     public string ParentPath { get; set; } = "";
 
     /// <summary>
-    /// Identificatore stabile del wrapper applicativo
+    /// Stable identifier of the application wrapper
     /// </summary>
     [Parameter]
     public string HostId { get; set; } = "";
 
     /// <summary>
-    /// Identificatore del pannello proprietario del tracker di scroll
+    /// Identifier of the panel owning the scroll tracker
     /// </summary>
     [Parameter]
     public string PanelId { get; set; } = "";
 
     /// <summary>
-    /// Notifica una richiesta di navigazione
+    /// Notifies a navigation request
     /// </summary>
     [Parameter]
     public EventCallback<string> OnNavigate { get; set; }
 
     /// <summary>
-    /// Notifica una richiesta di menu contestuale
+    /// Notifies a context menu request
     /// </summary>
     [Parameter]
     public EventCallback<ContextMenuEventArgs> OnContextMenu { get; set; }
 
     /// <summary>
-    /// Richiede il render del proprietario dopo un reducer UI
+    /// Requests the owner to render after a UI reducer
     /// </summary>
     [Parameter]
     public EventCallback OnStateChanged { get; set; }
 
     /// <summary>
-    /// Notifica una richiesta di ordinamento
+    /// Notifies a sort request
     /// </summary>
     [Parameter]
     public EventCallback<SortColumn> OnSortChanged { get; set; }
 
     /// <summary>
-    /// Griglia Radzen usata per aggiornare la virtualizzazione in-place
+    /// Radzen grid used to refresh the in-place virtualization
     /// </summary>
     private RadzenDataGrid<FileListRow> _grid;
 
     /// <summary>
-    /// Proiezione UI con padre opzionale e sole entry reali nello snapshot semantico
+    /// UI projection with optional parent and only real entries in the semantic snapshot
     /// </summary>
     private FileListRow[] _rowsRenderSnapshot = Array.Empty<FileListRow>();
 
     /// <summary>
-    /// Percorso padre osservato nell'ultima proiezione UI
+    /// Parent path observed in the last UI projection
     /// </summary>
     private string _renderedParentPath = "";
 
     /// <summary>
-    /// Layout locale proiettato dallo stato Commander
+    /// Local layout projected from the Commander state
     /// </summary>
     private List<FileListColumnState> _columns = new List<FileListColumnState>();
 
     /// <summary>
-    /// Snapshot non autoritativa che cambia identità quando cambia la sequenza Commander
+    /// Non-authoritative snapshot that changes identity when the Commander sequence changes
     /// </summary>
     private FileSystemEntry[] _entriesRenderSnapshot = Array.Empty<FileSystemEntry>();
 
     /// <summary>
-    /// Percorsi dell'ultimo ordine semantico osservato
+    /// Paths of the last observed semantic order
     /// </summary>
     private string[] _entryOrder = Array.Empty<string>();
 
     /// <summary>
-    /// Risolve in O(1) l'indice semantico delle righe virtualizzate
+    /// Resolves the semantic index of virtualized rows in O(1)
     /// </summary>
     private Dictionary<string, int> _entryIndexes = new Dictionary<string, int>();
 
     /// <summary>
-    /// Snapshot non autoritativo usato soltanto per invalidare le righe renderizzate
+    /// Non-authoritative snapshot used only to invalidate rendered rows
     /// </summary>
     private List<string> _renderedSelectionPaths = new List<string>();
 
     /// <summary>
-    /// Selezione Commander indicizzata per il RowRender, ricalcolata solo al cambio selezione
+    /// Commander selection indexed for RowRender, recomputed only when the selection changes
     /// </summary>
     private HashSet<string> _selectedPathSet = new HashSet<string>();
 
     /// <summary>
-    /// Presenza della riga padre, calcolata una volta per render
+    /// Presence of the parent row, computed once per render
     /// </summary>
     private bool _hasParentDirectory;
 
     /// <summary>
-    /// Il context menu di una cella è già stato inoltrato: lo sfondo ignora la stessa gesture
+    /// The context menu of a cell has already been forwarded: the background ignores the same gesture
     /// </summary>
     private bool _cellContextMenuHandled;
 
     /// <summary>
-    /// Proiezione one-way della selezione Commander per la skin nativa Radzen
+    /// One-way projection of the Commander selection for the native Radzen skin
     /// </summary>
     private IList<FileListRow> _selectedRows = new List<FileListRow>();
 
     /// <summary>
-    /// Focus semantico osservato nell'ultimo render
+    /// Semantic focus observed in the last render
     /// </summary>
     private string _focusedPath = "";
 
     /// <summary>
-    /// Indica che l'invalidazione semantica è stata inizializzata
+    /// Indicates that the semantic invalidation has been initialized
     /// </summary>
     private bool _semanticStateObserved;
 
     /// <summary>
-    /// Indica che la prima sequenza autoritativa è stata acquisita
+    /// Indicates that the first authoritative sequence has been acquired
     /// </summary>
     private bool _entriesObserved;
 
     /// <summary>
-    /// Indica che la sorgente in-place deve essere riletta da Radzen
+    /// Indicates that the in-place source must be re-read by Radzen
     /// </summary>
     private bool _refreshPending;
 
     /// <summary>
-    /// Indica che il layout legacy deve essere misurato una sola volta
+    /// Indicates that the legacy layout must be measured only once
     /// </summary>
     private bool _measurePending;
 
     /// <summary>
-    /// Indica che l'adapter colonne deve verificare il DOM corrente
+    /// Indicates that the column adapter must verify the current DOM
     /// </summary>
     private bool _columnAdapterPending = true;
 
     /// <summary>
-    /// Indica che il sort proiettato è stato osservato almeno una volta
+    /// Indicates that the projected sort has been observed at least once
     /// </summary>
     private bool _sortProjectionObserved;
 
     /// <summary>
-    /// Campo dell'ultima proiezione sort richiesta
+    /// Field of the last requested sort projection
     /// </summary>
     private SortField _sortProjectionField;
 
     /// <summary>
-    /// Direzione dell'ultima proiezione sort richiesta
+    /// Direction of the last requested sort projection
     /// </summary>
     private SortDirection _sortProjectionDirection;
 
     /// <summary>
-    /// Richiesta one-shot di visibilità del focus dopo un cambio ordinamento
+    /// One-shot focus visibility request after a sort change
     /// </summary>
     private bool _sortFocusScrollPending;
 
     /// <summary>
-    /// Directory della richiesta sort, usata per scartarla dopo una navigazione
+    /// Directory of the sort request, used to discard it after a navigation
     /// </summary>
     private string _sortFocusDirectoryPath = "";
 
     /// <summary>
-    /// Cancella l'invocazione interop del focus quando la griglia viene rilasciata
+    /// Cancels the focus interop invocation when the grid is released
     /// </summary>
     private readonly CancellationTokenSource _sortFocusCancellation = new CancellationTokenSource();
 
     /// <summary>
-    /// Modulo JavaScript per la misura iniziale delle colonne
+    /// JavaScript module for the initial column measurement
     /// </summary>
     private IJSObjectReference _jsModule;
 
     /// <summary>
-    /// Riferimento .NET posseduto dall'adapter di resize colonne
+    /// .NET reference owned by the column resize adapter
     /// </summary>
     private DotNetObjectReference<FileListTable> _dotNetReference;
 
     /// <summary>
-    /// Indica che le risorse della griglia sono già state rilasciate
+    /// Indicates that the grid resources have already been released
     /// </summary>
     private bool _isDisposed;
 
     /// <summary>
-    /// Sincronizza lookup, ordine dati e layout senza introdurre stato di selezione locale
+    /// Synchronizes lookup, data order and layout without introducing local selection state
     /// </summary>
     protected override void OnParametersSet()
     {
@@ -294,7 +294,7 @@
             }
             this._selectedRows = selectedRows;
         }
-        // Un solo spostamento del cursore aggiorna le righe con il render ordinario della griglia, senza rileggere i dati
+        // A single cursor move updates the rows with the ordinary grid render, without re-reading the data
         if (this._semanticStateObserved && selectionChanged)
             this._refreshPending = true;
         if (!this._semanticStateObserved || semanticStateChanged)
@@ -326,9 +326,9 @@
     }
 
     /// <summary>
-    /// Aggiorna Radzen dopo mutazioni in-place e migra il layout legacy dalla geometria reale
+    /// Refreshes Radzen after in-place mutations and migrates the legacy layout from the actual geometry
     /// </summary>
-    /// <param name="firstRender">True al primo render</param>
+    /// <param name="firstRender">True on the first render</param>
     protected override async System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender)
     {
         if (this._isDisposed)
@@ -404,9 +404,9 @@
     }
 
     /// <summary>
-    /// Proietta selezione e focus semantici negli attributi accessibili della riga
+    /// Projects semantic selection and focus into the accessible attributes of the row
     /// </summary>
-    /// <param name="args">Riga renderizzata da Radzen</param>
+    /// <param name="args">Row rendered by Radzen</param>
     private void HandleRowRender(RowRenderEventArgs<FileListRow> args)
     {
         if (args.Data.Kind == FileListRowKind.Parent)
@@ -429,24 +429,24 @@
         args.Attributes["data-entry-render-index"] = (semanticIndex + (this._hasParentDirectory ? 1 : 0)).ToString(CultureInfo.InvariantCulture);
         args.Attributes["aria-selected"] = selected ? "true" : "false";
         args.Attributes["tabindex"] = focused ? "0" : "-1";
-        // Lo splat RowRender sostituisce la classe Radzen: conserva la base e lo stato nativo
+        // The RowRender splat replaces the Radzen class: keeps the base and the native state
         args.Attributes["class"] = "rz-data-row " + (selected ? "rz-state-highlight bivium-selected " : "") + (focused ? "bivium-focused " : "") + (entry.IsDirectory ? "entry-dir" : "entry-file");
     }
 
     /// <summary>
-    /// Scarta l'eventuale selezione da tastiera interna e riproietta soltanto Commander
+    /// Discards any internal keyboard selection and re-projects only Commander
     /// </summary>
-    /// <param name="value">Proposta nativa non autoritativa, mai applicata al dominio</param>
+    /// <param name="value">Non-authoritative native proposal, never applied to the domain</param>
     private void DiscardNativeSelection(IList<FileListRow> value)
     {
-        // Radzen modifica il proprio Value con Enter/Space anche con row click disabilitato
+        // Radzen changes its own Value with Enter/Space even with row click disabled
         this.StateHasChanged();
     }
 
     /// <summary>
-    /// Inoltra il click al reducer Commander con i modificatori nativi
+    /// Forwards the click to the Commander reducer with the native modifiers
     /// </summary>
-    /// <param name="args">Dati del click Radzen</param>
+    /// <param name="args">Radzen click data</param>
     private async System.Threading.Tasks.Task HandleRowClick(DataGridRowMouseEventArgs<FileListRow> args)
     {
         if (args.Data.Kind == FileListRowKind.Parent)
@@ -456,9 +456,9 @@
     }
 
     /// <summary>
-    /// Attiva l'entry focalizzata senza usare la selezione nativa della griglia
+    /// Activates the focused entry without using the native grid selection
     /// </summary>
-    /// <param name="args">Dati del doppio click Radzen</param>
+    /// <param name="args">Radzen double-click data</param>
     private async System.Threading.Tasks.Task HandleRowDoubleClick(DataGridRowMouseEventArgs<FileListRow> args)
     {
         if (args.Data.Kind == FileListRowKind.Parent)
@@ -475,12 +475,12 @@
     }
 
     /// <summary>
-    /// Mantiene la selezione multipla e sposta soltanto il focus prima del menu contestuale
+    /// Keeps the multiple selection and moves only the focus before the context menu
     /// </summary>
-    /// <param name="args">Cella cliccata con il tasto secondario</param>
+    /// <param name="args">Cell clicked with the secondary button</param>
     private async System.Threading.Tasks.Task HandleCellContextMenu(DataGridCellMouseEventArgs<FileListRow> args)
     {
-        // Impostato in modo sincrono: il callback dello sfondo, nella stessa gesture, arriva dopo
+        // Set synchronously: the background callback, in the same gesture, arrives later
         this._cellContextMenuHandled = true;
         if (args.Data.Kind == FileListRowKind.Parent)
             return;
@@ -491,9 +491,9 @@
     }
 
     /// <summary>
-    /// Proietta l'ordinamento Commander nell'attributo accessibile dell'header
+    /// Projects the Commander sort into the accessible attribute of the header
     /// </summary>
-    /// <param name="args">Header nativo Radzen</param>
+    /// <param name="args">Native Radzen header</param>
     private void HandleHeaderCellRender(DataGridCellRenderEventArgs<FileListRow> args)
     {
         FileListColumnId id;
@@ -502,12 +502,12 @@
     }
 
     /// <summary>
-    /// Inoltra una sola richiesta sullo sfondo senza modificarne selezione o focus
+    /// Forwards a single request on the background without changing its selection or focus
     /// </summary>
-    /// <param name="args">Coordinate originali del context menu</param>
+    /// <param name="args">Original context menu coordinates</param>
     private async System.Threading.Tasks.Task HandleBackgroundContextMenuAsync(MouseEventArgs args)
     {
-        // La stessa gesture su una cella risale fino al wrapper: è già stata inoltrata con la sua entry
+        // The same gesture on a cell bubbles up to the wrapper: it has already been forwarded with its entry
         if (this._cellContextMenuHandled)
         {
             this._cellContextMenuHandled = false;
@@ -517,9 +517,9 @@
     }
 
     /// <summary>
-    /// Esclude percorsi padre vuoti o equivalenti alla directory corrente normalizzata
+    /// Excludes empty parent paths or paths equivalent to the normalized current directory
     /// </summary>
-    /// <returns>True quando esiste una destinazione padre distinta</returns>
+    /// <returns>True when a distinct parent destination exists</returns>
     private bool HasParentDirectory()
     {
         if (string.IsNullOrEmpty(this.ParentPath))
@@ -530,10 +530,10 @@
     }
 
     /// <summary>
-    /// Attiva il padre da tastiera mantenendo il doppio click mouse della baseline; il click singolo attiva solo il pannello
+    /// Activates the parent from the keyboard keeping the baseline's mouse double click; a single click activates only the panel
     /// </summary>
-    /// <param name="row">Riga padre UI</param>
-    /// <param name="args">Click nativo, con Detail zero per l'attivazione da tastiera</param>
+    /// <param name="row">UI parent row</param>
+    /// <param name="args">Native click, with Detail zero for keyboard activation</param>
     private async System.Threading.Tasks.Task HandleParentButtonClickAsync(FileListRow row, MouseEventArgs args)
     {
         if (args.Detail == 0)
@@ -541,9 +541,9 @@
     }
 
     /// <summary>
-    /// Mostra lo stato vuoto anche quando il padre impedisce l'EmptyTemplate nativo
+    /// Shows the empty state even when the parent prevents the native EmptyTemplate
     /// </summary>
-    /// <returns>Messaggio solo per una directory non root senza entry reali</returns>
+    /// <returns>Message only for a non-root directory without real entries</returns>
     private RenderFragment GetEmptyDirectoryFooter()
     {
         if (this.State.Entries.Count == 0 && this._hasParentDirectory)
@@ -552,9 +552,9 @@
     }
 
     /// <summary>
-    /// Richiede a Commander il nuovo ordinamento mantenendo le directory per prime
+    /// Asks Commander for the new sort keeping directories first
     /// </summary>
-    /// <param name="columnId">Identità stabile della colonna</param>
+    /// <param name="columnId">Stable column identity</param>
     private async System.Threading.Tasks.Task ToggleSortAsync(FileListColumnId columnId)
     {
         SortField field = this.GetSortField(columnId);
@@ -563,9 +563,9 @@
     }
 
     /// <summary>
-    /// Acquisisce tutte le larghezze fissate dalla gesture Radzen
+    /// Captures all the widths fixed by the Radzen gesture
     /// </summary>
-    /// <param name="args">Larghezze indicizzate per colonna</param>
+    /// <param name="args">Widths indexed by column</param>
     private async System.Threading.Tasks.Task HandleColumnResized(DataGridColumnResizedEventArgs<FileListRow> args)
     {
         Dictionary<FileListColumnId, double> widths = this._columns.ToDictionary(column => column.Id, column => column.Width);
@@ -584,9 +584,9 @@
     }
 
     /// <summary>
-    /// Riceve le larghezze prodotte dalla gesture client-side sul wrapper Radzen stabile
+    /// Receives the widths produced by the client-side gesture on the stable Radzen wrapper
     /// </summary>
-    /// <param name="ids">Identità semantiche delle colonne visibili</param>
+    /// <param name="ids">Semantic identities of the visible columns</param>
     /// <param name="widths">Larghezze finali in pixel</param>
     [JSInvokable]
     public async System.Threading.Tasks.Task OnRadzenColumnWidthsChanged(string[] ids, double[] widths)
@@ -607,9 +607,9 @@
     }
 
     /// <summary>
-    /// Traduce il riordino Radzen nell'ordine stabile del modello UI
+    /// Translates the Radzen reorder into the stable order of the UI model
     /// </summary>
-    /// <param name="args">Indici precedente e nuovo</param>
+    /// <param name="args">Previous and new indexes</param>
     private async System.Threading.Tasks.Task HandleColumnReordered(DataGridColumnReorderedEventArgs<FileListRow> args)
     {
         FileListColumnId reorderedId;
@@ -628,9 +628,9 @@
     }
 
     /// <summary>
-    /// Traduce il picker Radzen in visibilità semantica mantenendo Name visibile
+    /// Translates the Radzen picker into semantic visibility keeping Name visible
     /// </summary>
-    /// <param name="args">Colonne attualmente scelte</param>
+    /// <param name="args">Currently chosen columns</param>
     private async System.Threading.Tasks.Task HandlePickedColumnsChanged(DataGridPickedColumnsChangedEventArgs<FileListRow> args)
     {
         HashSet<FileListColumnId> visible = new HashSet<FileListColumnId> { FileListColumnId.Name };
@@ -646,9 +646,9 @@
     }
 
     /// <summary>
-    /// Invia sempre un layout completo al callback autoritativo
+    /// Always sends a complete layout to the authoritative callback
     /// </summary>
-    /// <param name="layout">Cinque colonne ordinate</param>
+    /// <param name="layout">Five ordered columns</param>
     private void RequestColumnLayout(List<FileListColumnState> layout)
     {
         this._columns = this.CloneColumns(layout);
@@ -657,9 +657,9 @@
     }
 
     /// <summary>
-    /// Crea il layout da snapshot semantico, rapporti legacy o default geometrici
+    /// Creates the layout from the semantic snapshot, legacy ratios or geometric defaults
     /// </summary>
-    /// <returns>Cinque colonne ordinate</returns>
+    /// <returns>Five ordered columns</returns>
     private List<FileListColumnState> CreateInitialColumns()
     {
         if (this.State.Columns.Count == 5)
@@ -676,10 +676,10 @@
     }
 
     /// <summary>
-    /// Riserva ai metadata default compatti e lascia a Name lo spazio residuo iniziale
+    /// Reserves compact default widths for the metadata and leaves to Name the initial residual space
     /// </summary>
-    /// <param name="column">Colonna da proiettare</param>
-    /// <returns>Larghezza fissata oppure null per il fit iniziale di Name, senza alterare layout salvati</returns>
+    /// <param name="column">Column to project</param>
+    /// <returns>Fixed width or null for the initial fit of Name, without altering saved layouts</returns>
     private string GetColumnWidth(FileListColumnState column)
     {
         if (column.Id == FileListColumnId.Name && this.State.Columns.Count == 0 && !this.HasLegacyRatios())
@@ -688,9 +688,9 @@
     }
 
     /// <summary>
-    /// Verifica se il layout locale coincide con quello persistito
+    /// Checks whether the local layout matches the persisted one
     /// </summary>
-    /// <returns>True quando ordine, larghezze e visibilità coincidono</returns>
+    /// <returns>True when order, widths and visibility match</returns>
     private bool LayoutMatchesState()
     {
         if (this.State.Columns.Count == 0)
@@ -708,9 +708,9 @@
     }
 
     /// <summary>
-    /// Verifica la disponibilità dei cinque rapporti legacy
+    /// Checks the availability of the five legacy ratios
     /// </summary>
-    /// <returns>True quando tutti i rapporti sono positivi e finiti</returns>
+    /// <returns>True when all ratios are positive and finite</returns>
     private bool HasLegacyRatios()
     {
         return this.State.NameColumnRatio.HasValue && this.State.SizeColumnRatio.HasValue && this.State.DateColumnRatio.HasValue && this.State.AttributesColumnRatio.HasValue && this.State.OwnerColumnRatio.HasValue
@@ -719,9 +719,9 @@
     }
 
     /// <summary>
-    /// Confronta in O(n) riferimenti e percorsi con l'ultima proiezione Radzen
+    /// Compares references and paths with the last Radzen projection in O(n)
     /// </summary>
-    /// <returns>True quando ogni entry conserva identità e posizione</returns>
+    /// <returns>True when every entry keeps identity and position</returns>
     private bool EntriesMatchRenderSnapshot()
     {
         if (this._entriesRenderSnapshot.Length != this.State.Entries.Count || this._entryOrder.Length != this.State.Entries.Count)
@@ -736,66 +736,66 @@
     }
 
     /// <summary>
-    /// Copia un layout per separare la proiezione dagli oggetti autoritativi
+    /// Copies a layout to separate the projection from the authoritative objects
     /// </summary>
-    /// <param name="source">Layout sorgente</param>
-    /// <returns>Copia completa</returns>
+    /// <param name="source">Source layout</param>
+    /// <returns>Full copy</returns>
     private List<FileListColumnState> CloneColumns(IEnumerable<FileListColumnState> source)
     {
         return source.Select(column => new FileListColumnState(column.Id, column.Width, column.Visible)).ToList();
     }
 
     /// <summary>
-    /// Restituisce il comparatore filesystem della piattaforma
+    /// Returns the platform filesystem comparer
     /// </summary>
-    /// <returns>Comparatore dei percorsi</returns>
+    /// <returns>Path comparer</returns>
     private StringComparer GetPathComparer()
     {
         return OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
     }
 
     /// <summary>
-    /// Converte l'identità UI nella proprietà stabile Radzen
+    /// Converts the UI identity into the stable Radzen property
     /// </summary>
-    /// <param name="id">Identità della colonna</param>
-    /// <returns>Nome della proprietà del modello</returns>
+    /// <param name="id">Column identity</param>
+    /// <returns>Model property name</returns>
     private string GetProperty(FileListColumnId id) => "Entry." + (id switch { FileListColumnId.Name => nameof(FileSystemEntry.Name), FileListColumnId.Size => nameof(FileSystemEntry.SizeBytes), FileListColumnId.Date => nameof(FileSystemEntry.LastModified), FileListColumnId.Attributes => nameof(FileSystemEntry.Attributes), _ => nameof(FileSystemEntry.Owner) });
 
     /// <summary>
-    /// Converte l'identità UI nel titolo visibile
+    /// Converts the UI identity into the visible title
     /// </summary>
-    /// <param name="id">Identità della colonna</param>
-    /// <returns>Titolo breve</returns>
+    /// <param name="id">Column identity</param>
+    /// <returns>Short title</returns>
     private string GetTitle(FileListColumnId id) => id switch { FileListColumnId.Name => "Name", FileListColumnId.Size => "Size", FileListColumnId.Date => "Date", FileListColumnId.Attributes => "Attr", _ => "Owner" };
 
     /// <summary>
-    /// Converte l'identità UI nel campo di ordinamento Commander
+    /// Converts the UI identity into the Commander sort field
     /// </summary>
-    /// <param name="id">Identità della colonna</param>
-    /// <returns>Campo di ordinamento equivalente</returns>
+    /// <param name="id">Column identity</param>
+    /// <returns>Equivalent sort field</returns>
     private SortField GetSortField(FileListColumnId id) => id switch { FileListColumnId.Name => SortField.Name, FileListColumnId.Size => SortField.Size, FileListColumnId.Date => SortField.Date, FileListColumnId.Attributes => SortField.Attributes, _ => SortField.Owner };
 
     /// <summary>
-    /// Proietta l'ordinamento Commander nell'attributo accessibile dell'header
+    /// Projects the Commander sort into the accessible attribute of the header
     /// </summary>
-    /// <param name="id">Identità della colonna</param>
-    /// <returns>Direzione ARIA oppure none</returns>
+    /// <param name="id">Column identity</param>
+    /// <returns>ARIA direction or none</returns>
     private string GetAriaSort(FileListColumnId id) => this.State.CurrentSort.Field == this.GetSortField(id) ? (this.State.CurrentSort.Direction == SortDirection.Ascending ? "ascending" : "descending") : "none";
 
     /// <summary>
-    /// Formatta una cella senza delegare calcoli di dominio al browser
+    /// Formats a cell without delegating domain calculations to the browser
     /// </summary>
-    /// <param name="entry">Entry della riga</param>
-    /// <param name="id">Identità della colonna</param>
-    /// <returns>Testo già prodotto dal modello applicativo</returns>
+    /// <param name="entry">Row entry</param>
+    /// <param name="id">Column identity</param>
+    /// <returns>Text already produced by the application model</returns>
     private string GetCellText(FileSystemEntry entry, FileListColumnId id) => id switch { FileListColumnId.Name => entry.Name + (entry.IsSymLink ? " @" : ""), FileListColumnId.Size => entry.FormatSize(), FileListColumnId.Date => entry.FormatDate(), FileListColumnId.Attributes => entry.Attributes, _ => entry.Owner };
 
     /// <summary>
-    /// Risolve una proprietà Radzen nell'identità stabile corrispondente
+    /// Resolves a Radzen property into the matching stable identity
     /// </summary>
-    /// <param name="property">Nome della proprietà Radzen</param>
-    /// <param name="id">Identità risolta</param>
-    /// <returns>True quando la proprietà è nota</returns>
+    /// <param name="property">Radzen property name</param>
+    /// <param name="id">Resolved identity</param>
+    /// <returns>True when the property is known</returns>
     private bool TryGetColumnId(string property, out FileListColumnId id)
     {
         for (int i = 0; i < Enum.GetValues<FileListColumnId>().Length; i++)
@@ -812,9 +812,9 @@
     }
 
     /// <summary>
-    /// Rilascia il modulo JavaScript del componente
+    /// Releases the JavaScript module of the component
     /// </summary>
-    /// <returns>Operazione asincrona di rilascio</returns>
+    /// <returns>Asynchronous release operation</returns>
     public async ValueTask DisposeAsync()
     {
         if (this._isDisposed)

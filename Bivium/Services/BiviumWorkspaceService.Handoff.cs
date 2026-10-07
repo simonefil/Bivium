@@ -9,21 +9,21 @@ namespace Bivium.Services
     {
         #region Variabili di classe
 
-        /// <summary>Un solo tentativo per generazione; le continuazioni non eseguono sotto lock</summary>
+        /// <summary>A single attempt per generation; continuations do not run under lock</summary>
         private TaskCompletionSource<WorkspaceAttachResult> _handoffCompletion;
 
-        /// <summary>Cancellazione del richiedente verificata anche nel commit Ready</summary>
+        /// <summary>Requester cancellation also verified in the Ready commit</summary>
         private CancellationToken _handoffRequesterCancellation;
 
         #endregion
 
         #region Metodi pubblici
 
-        /// <summary>Richiede il drain live o acquisisce lo snapshot acknowledged di un owner disconnesso</summary>
-        /// <param name="attachmentId">Attachment del richiedente</param>
-        /// <param name="expectedGeneration">Generazione osservata nella conferma</param>
-        /// <param name="cancellationToken">Lifecycle del richiedente</param>
-        /// <returns>Esito senza revoca in caso di timeout o drain non confermato</returns>
+        /// <summary>Requests the live drain or acquires the acknowledged snapshot of a disconnected owner</summary>
+        /// <param name="attachmentId">Requester attachment</param>
+        /// <param name="expectedGeneration">Generation observed in the confirmation</param>
+        /// <param name="cancellationToken">Requester lifecycle</param>
+        /// <returns>Outcome with no revocation on timeout or unconfirmed drain</returns>
         internal async Task<WorkspaceAttachResult> TryTakeoverAsync(string attachmentId, long expectedGeneration, CancellationToken cancellationToken)
         {
             BiviumWorkspaceSnapshot snapshot;
@@ -74,7 +74,7 @@ namespace Bivium.Services
             {
                 lock (this._lock)
                 {
-                    // Un Ready già committato vince sulla scadenza dell'attesa locale
+                    // An already committed Ready wins over the expiry of the local wait
                     if (ReferenceEquals(this._handoffCompletion, completion))
                         this.CancelHandoffLocked(ex is TimeoutException ? "The active browser did not confirm the desktop handoff. Retry activation." : "Activation cancelled. Retry when connected.");
                     snapshot = this._snapshot;
@@ -85,10 +85,10 @@ namespace Bivium.Services
             }
         }
 
-        /// <summary>Legge il watermark solo per l'owner del tentativo ancora valido</summary>
-        /// <param name="token">Lease dell'owner, catturato dal componente server</param>
-        /// <param name="id">Tentativo da drenare</param>
-        /// <returns>Stamp oppure null per richieste obsolete</returns>
+        /// <summary>Reads the watermark only for the owner of the still valid attempt</summary>
+        /// <param name="token">Owner lease, captured by the server component</param>
+        /// <param name="id">Attempt to drain</param>
+        /// <returns>Stamp or null for stale requests</returns>
         internal WorkspaceHandoffStamp GetHandoffStamp(WorkspaceClientToken token, Guid id)
         {
             lock (this._lock)
@@ -99,10 +99,10 @@ namespace Bivium.Services
             }
         }
 
-        /// <summary>Registra l'ack del freeze soltanto per owner e generazione del tentativo</summary>
-        /// <param name="token">Lease catturato dall'owner</param>
-        /// <param name="id">Tentativo congelato nel browser</param>
-        /// <returns>True se il freeze è ancora pertinente</returns>
+        /// <summary>Records the freeze ack only for the owner and generation of the attempt</summary>
+        /// <param name="token">Lease captured by the owner</param>
+        /// <param name="id">Attempt frozen in the browser</param>
+        /// <returns>True if the freeze is still relevant</returns>
         internal bool TryConfirmHandoffFreeze(WorkspaceClientToken token, Guid id)
         {
             Action<BiviumWorkspaceSnapshot>[] subscribers;
@@ -119,11 +119,11 @@ namespace Bivium.Services
             return true;
         }
 
-        /// <summary>Conferma Ready e trasferisce lease e snapshot nella stessa sezione critica</summary>
-        /// <param name="token">Owner del drain</param>
-        /// <param name="id">Tentativo confermato</param>
-        /// <param name="stamp">Revisioni acknowledged, senza ricostruirle dal richiedente</param>
-        /// <returns>True soltanto per il commit di questa richiesta</returns>
+        /// <summary>Confirms Ready and transfers lease and snapshot in the same critical section</summary>
+        /// <param name="token">Drain owner</param>
+        /// <param name="id">Confirmed attempt</param>
+        /// <param name="stamp">Acknowledged revisions, without rebuilding them from the requester</param>
+        /// <returns>True only for the commit of this request</returns>
         internal bool TryCompleteHandoff(WorkspaceClientToken token, Guid id, WorkspaceHandoffStamp stamp)
         {
             CancellationTokenSource revocation;
@@ -154,10 +154,10 @@ namespace Bivium.Services
             return true;
         }
 
-        /// <summary>Rifiuta il tentativo soltanto dall'owner autorizzato, conservando il suo lease</summary>
-        /// <param name="token">Owner del tentativo</param>
-        /// <param name="id">Richiesta rifiutata</param>
-        /// <param name="message">Motivo riprovabile privo di dati del documento</param>
+        /// <summary>Rejects the attempt only from the authorized owner, preserving its lease</summary>
+        /// <param name="token">Owner of the attempt</param>
+        /// <param name="id">Rejected request</param>
+        /// <param name="message">Retryable reason with no document data</param>
         internal void RejectHandoff(WorkspaceClientToken token, Guid id, string message)
         {
             Action<BiviumWorkspaceSnapshot>[] subscribers;
@@ -173,9 +173,9 @@ namespace Bivium.Services
             this.NotifySubscribers(subscribers, snapshot);
         }
 
-        /// <summary>Autorità del publisher dedicato, distinta dal permesso di avviare nuovi comandi</summary>
-        /// <param name="token">Lease del publisher</param>
-        /// <returns>True se l'owner è ancora autorevole durante il drain</returns>
+        /// <summary>Authority of the dedicated publisher, distinct from the permission to start new commands</summary>
+        /// <param name="token">Publisher lease</param>
+        /// <returns>True if the owner is still authoritative during the drain</returns>
         internal bool ValidatePublication(WorkspaceClientToken token)
         {
             lock (this._lock)
@@ -186,25 +186,25 @@ namespace Bivium.Services
 
         #region Metodi privati
 
-        /// <summary>Valida identità, owner, generazione e scadenza prima di ogni Ready</summary>
-        /// <param name="token">Lease dell'owner</param>
-        /// <param name="id">Tentativo atteso</param>
-        /// <returns>True solo per il tentativo attivo</returns>
+        /// <summary>Validates identity, owner, generation and expiry before every Ready</summary>
+        /// <param name="token">Owner lease</param>
+        /// <param name="id">Expected attempt</param>
+        /// <returns>True only for the active attempt</returns>
         private bool ValidateHandoffOwnerLocked(WorkspaceClientToken token, Guid id)
         {
             WorkspaceHandoffSnapshot handoff = this._snapshot.Handoff;
             return !this.IsStopped && handoff != null && handoff.Id == id && handoff.OwnerAttachmentId == token?.AttachmentId && handoff.Generation == token.Generation && DateTime.UtcNow < handoff.DeadlineUtc && this.ValidateLeaseLocked(token);
         }
 
-        /// <summary>Aggiorna il protocollo senza perdere lo stato delle altre superfici</summary>
-        /// <param name="handoff">Richiesta oppure null per sbloccare l'owner</param>
+        /// <summary>Updates the protocol without losing the state of the other surfaces</summary>
+        /// <param name="handoff">Request or null to unblock the owner</param>
         private void SetHandoffLocked(WorkspaceHandoffSnapshot handoff)
         {
             this._snapshot = new BiviumWorkspaceSnapshot(this._snapshot.Revision + 1, this._snapshot.Panels, this._snapshot.FloatingWindows, this._snapshot.ActiveClientLease, this._snapshot.Desktop, handoff, this._snapshot.Workflow, this._snapshot.Operation, this._snapshot.Upload);
         }
 
-        /// <summary>Invalida il tentativo e completa l'attesa senza eseguire continuazioni sotto lock</summary>
-        /// <param name="message">Motivo riprovabile</param>
+        /// <summary>Invalidates the attempt and completes the wait without running continuations under lock</summary>
+        /// <param name="message">Retryable reason</param>
         private void CancelHandoffLocked(string message)
         {
             if (this._snapshot.Handoff == null)
@@ -217,10 +217,10 @@ namespace Bivium.Services
             completion?.TrySetResult(this.CreateHandoffResultLocked(requester, message));
         }
 
-        /// <summary>Costruisce l'esito usando solo lo stato autorevole sotto lock</summary>
-        /// <param name="attachmentId">Richiedente</param>
-        /// <param name="message">Errore riprovabile oppure vuoto</param>
-        /// <returns>Esito corrente</returns>
+        /// <summary>Builds the outcome using only the authoritative state under lock</summary>
+        /// <param name="attachmentId">Requester</param>
+        /// <param name="message">Retryable error or empty</param>
+        /// <returns>Current outcome</returns>
         private WorkspaceAttachResult CreateHandoffResultLocked(string attachmentId, string message)
         {
             ActiveClientLeaseSnapshot lease = this._snapshot.ActiveClientLease;

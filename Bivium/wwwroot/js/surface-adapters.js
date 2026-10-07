@@ -1,4 +1,4 @@
-// Superfici app-owned: soltanto identità semantiche e stato visuale, mai valori o HTML.
+// App-owned surfaces: only semantic identities and visual state, never values or HTML.
 import { createDesktopPublicationReference, requestVisualFrame } from './interop.js';
 const key = Symbol.for('bivium.desktopPublications');
 const registrationKey = Symbol.for('bivium.surfaceAdapter');
@@ -68,7 +68,7 @@ function publisher(host, reference, method, generation, initial, read) {
 
 export { publisher as createSurfacePublisher };
 
-/** Menu ufficiale Radzen: tastiera e toggle responsive nativi, l'adapter cattura e ripristina soltanto lo stato visuale. */
+/** Official Radzen menu: native keyboard and responsive toggle, the adapter captures and restores only the visual state. */
 export function installMenuSurface(host, reference, generation, initial) {
     const root = host?.querySelector('.rz-menu');
     if (!root || typeof globalThis.Radzen?.toggleMenuItem !== 'function') return false;
@@ -82,7 +82,7 @@ export function installMenuSurface(host, reference, generation, initial) {
         const ancestor = element.parentElement.closest('.rz-navigation-item');
         return !ancestor || ancestor.classList.contains('rz-navigation-item-active');
     });
-    // Elemento evidenziato dalla tastiera nativa RadzenMenu, se presente
+    // Element highlighted by the native RadzenMenu keyboard, if any
     const nativeActive = () => root.querySelector('.rz-navigation-item.rz-state-focused[id]:not([data-bivium-restored-focus])')?.id || '';
     function expand(element, open) {
         const wrapper = element?.querySelector(':scope > .rz-navigation-item-wrapper');
@@ -92,7 +92,7 @@ export function installMenuSurface(host, reference, generation, initial) {
         active = nativeActive() || active;
         return { openIds: opened(), responsiveOpen: root.classList.contains('rz-menu-open'), navigationParent: opened().at(-1) || '', activeItem: active, focused };
     });
-    // L'evidenziazione ripristinata è soltanto visuale e cede alla prima interazione nativa
+    // The restored highlight is visual only and yields to the first native interaction
     function clearRestoredFocus() {
         for (const element of root.querySelectorAll('[data-bivium-restored-focus]')) {
             element.classList.remove('rz-state-focused');
@@ -113,7 +113,7 @@ export function installMenuSurface(host, reference, generation, initial) {
     adapter.registration.observer.observe(root, { attributes: true, subtree: true, attributeFilter: ['class', 'aria-expanded'] });
     requestVisualFrame(() => {
         if (host[registrationKey] !== adapter.registration) return;
-        // Il toggle responsive nativo possiede lo stato aperto: si ripristina con il suo stesso evento
+        // The native responsive toggle owns the open state: it is restored with its own event
         if (root.classList.contains('rz-menu-open') !== Boolean(initial.responsiveOpen)) root.querySelector('.rz-menu-toggle')?.click();
         for (const id of openIds) expand(item(id), initial.openIds.includes(id));
         const restored = item(active);
@@ -128,7 +128,7 @@ export function installMenuSurface(host, reference, generation, initial) {
     return true;
 }
 
-/** Chiavi app: id/name espliciti o label accessibili dichiarate dal markup, mai indici DOM. */
+/** App keys: explicit id/name or accessible labels declared by the markup, never DOM indices. */
 function focusKey(element, root) {
     const keyed = element?.closest('[data-ui-key]');
     if (keyed && root.contains(keyed)) return 'app:' + keyed.dataset.uiKey;
@@ -136,7 +136,7 @@ function focusKey(element, root) {
     if (named && root.contains(named)) return 'name:' + named.getAttribute('name');
     const labelled = element?.closest('[aria-label]');
     if (labelled && root.contains(labelled)) return 'label:' + labelled.getAttribute('aria-label');
-    // Etichette chiuse dichiarate dalle form app; non serializza testo arbitrario o valori DOM
+    // Closed labels declared by the app forms; does not serialize arbitrary text or DOM values
     const button = element?.closest('button');
     const text = button?.querySelector('.rz-button-text')?.textContent.trim();
     if (button && root.contains(button) && ['Cancel', 'OK', 'Save', 'Close', 'Delete', 'No', 'Yes', 'Yes to all', 'Calculate size', 'Cancel calculation', 'Add Files...', 'Add Folders...', 'Clear', 'Generate QR', 'Disable 2FA', 'Copy secret', 'Enable 2FA', 'Change password'].includes(text)) return 'button:' + text;
@@ -151,7 +151,7 @@ function focusTarget(root, key) {
     return element?.matches('input, textarea, button, a, [tabindex]') ? element : element?.querySelector('input, textarea, button, a, [tabindex]');
 }
 
-// API standard anche per readonly; nessuna lettura o scrittura del valore del campo.
+// Standard API also for readonly; no reading or writing of the field value.
 function fieldSelection(element, key) {
     if (!element?.matches('input:not([type=password]):not([type=file]), textarea') || typeof element.selectionStart !== 'number') return null;
     return { key, start: element.selectionStart, end: element.selectionEnd, direction: element.selectionDirection || 'none' };
@@ -159,7 +159,7 @@ function fieldSelection(element, key) {
 
 function restoreFieldSelection(element, selection) {
     if (!selection || !fieldSelection(element, selection.key) || typeof element.setSelectionRange !== 'function') return;
-    try { element.setSelectionRange(selection.start, selection.end, selection.direction); } catch { /* API non supportata dal tipo del controllo */ }
+    try { element.setSelectionRange(selection.start, selection.end, selection.direction); } catch { /* API not supported by the control type */ }
 }
 
 function restoreSurfaceScrolls(scrollers, positions) {
@@ -177,12 +177,12 @@ function listenSurfaceFields(host, adapter, accepts = () => true) {
     }
 }
 
-/** Restore dopo autofocus dell'owner; nessun valore, password o token viene letto dal tracker. */
+/** Restore after the owner's autofocus; the tracker reads no value, password or token. */
 export function installDialogSurface(root, reference, generation, initial) {
     const wrapper = root?.closest('.rz-dialog-wrapper');
     if (!wrapper) return false;
     const body = root.closest('.rz-dialog-content') || root;
-    // app.css:47 e :172 assegnano overflow ai due stack, oltre al body nativo
+    // app.css:47 and :172 assign overflow to the two stacks, in addition to the native body
     const scrollers = () => [['dialog-body', body], ...Array.from(root.querySelectorAll('.bivium-radzen-modal, .bivium-radzen-upload-dialog')).map(element => ['app-body', element]), ...Array.from(root.querySelectorAll('[data-ui-scroll-key]')).map(element => [element.dataset.uiScrollKey, element]), ...Array.from(root.querySelectorAll('textarea[name]')).map(element => ['field:' + element.name, element])];
     const identity = { ownerId: initial.ownerId, questionId: initial.questionId, phase: initial.phase, surface: initial.surface };
     let lastFocus = initial.focusKey || '';
@@ -223,7 +223,7 @@ export function installDialogSurface(root, reference, generation, initial) {
           }
           if (root[registrationKey] !== adapter.registration) return;
           if (modal() === wrapper && !registry().freeze) {
-            // Misure tipizzate, non style-copy; conserva il layout responsive sull'asse non ridimensionabile
+            // Typed measurements, not a style copy; preserves the responsive layout on the non-resizable axis
             for (const geometry of initial.textareaGeometries || []) {
                 const element = focusTarget(root, geometry.key);
                 if (!element?.matches('textarea')) continue;
@@ -240,26 +240,26 @@ export function installDialogSurface(root, reference, generation, initial) {
             }
             if (formatControl && initial.formatPopup && !await formatControl[formatKey].restore(initial.formatPopup)) throw new Error('Format popup restore was not authorized');
             if (root[registrationKey] !== adapter.registration) return;
-            // L'highlight ufficiale usa scrollIntoView: ripristina gli stack del dialog dopo il popup
+            // The official highlight uses scrollIntoView: restores the dialog stacks after the popup
             restoreSurfaceScrolls(scrollers, initial.scrolls);
           }
           adapter.registration.restoring = false;
           adapter.registration.capture();
         } catch {
             if (adapter.signal.aborted) return;
-            // Fail-closed: il mount resta non ready e il drain non promette una hydration riuscita
+            // Fail-closed: the mount stays not ready and the drain does not promise a successful hydration
             registry().failures++;
         }
     }));
     return true;
 }
 
-/** Descriptor del popup ufficiale; tutti i checkpoint confluiscono nel publisher unico del dialog. */
+/** Descriptor of the official popup; all checkpoints converge on the dialog's single publisher. */
 export function installDropDownControl(control, popupId, listId, reference, generation, ownerId, questionId, phase, controlId) {
     disposeDropDownControl(control);
     const popup = document.getElementById(popupId);
     const list = document.getElementById(listId);
-    const scroller = list?.parentElement; // RadzenDropDown.razor: wrapper ufficiale del listbox
+    const scroller = list?.parentElement; // RadzenDropDown.razor: official wrapper of the listbox
     if (!control || !popup || !list || !scroller) return false;
     const controller = new AbortController();
     const notify = () => control.dispatchEvent(new CustomEvent('bivium:surface-change', { bubbles: true }));
@@ -300,7 +300,7 @@ export function disposeDropDownControl(control) {
     if (control) { delete control[formatKey]; delete control[registrationKey]; }
 }
 
-/** Publisher della sessione Renamer; i controlli condizionali devono completare il proprio mount. */
+/** Renamer session publisher; conditional controls must complete their own mount. */
 export function installRenamerSurface(root, reference, generation, initial) {
     const controls = () => Array.from(root.querySelectorAll('[data-workspace-dropdown-surface]'));
     const popupOwns = element => controls().some(control => control[formatKey]?.owns(element));
@@ -345,7 +345,7 @@ export function installRenamerSurface(root, reference, generation, initial) {
     let restoring = false;
     const restore = async () => {
         if (initialized || restoring || !mounted() || registry().freeze) return;
-        // Minimized: conserva il draft senza clamping a zero su un viewport ancora nascosto.
+        // Minimized: keeps the draft without clamping to zero on a still hidden viewport.
         if (!visible(root)) { adapter.registration.restoring = false; adapter.registration.capture(); return; }
         restoring = true;
         adapter.registration.restoring = true;
@@ -396,9 +396,9 @@ export function disposeSurface(host) {
     if (host) delete host[registrationKey];
 }
 
-/** Portal context menu: tastiera nativa Radzen; l'adapter cattura posizione, voce attiva e focus. */
+/** Portal context menu: native Radzen keyboard; the adapter captures position, active item and focus. */
 export function installContextSurface(root, reference, generation, initial) {
-    const portal = root?.closest('.rz-tooltip'); // Markup ufficiale RadzenContextMenu 11.4.2
+    const portal = root?.closest('.rz-tooltip'); // Official RadzenContextMenu 11.4.2 markup
     if (!portal) return false;
     const menu = root.querySelector('.rz-menu');
     let active = initial.activeItem || '';
@@ -423,7 +423,7 @@ export function installContextSurface(root, reference, generation, initial) {
     adapter.registration.observer = new MutationObserver(capture);
     if (menu) adapter.registration.observer.observe(menu, { subtree: true, attributes: true, attributeFilter: ['class'] });
     window.addEventListener('resize', () => adapter.registration.capture(), { signal: adapter.signal });
-    // openPopup ha già posizionato e limitato il portal al viewport
+    // openPopup has already positioned the portal and limited it to the viewport
     requestVisualFrame(() => {
         if (root[registrationKey] !== adapter.registration) return;
         const restored = item(active);

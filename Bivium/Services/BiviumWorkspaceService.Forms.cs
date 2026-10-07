@@ -12,12 +12,12 @@ namespace Bivium.Services
     {
         #region Metodi pubblici
 
-        /// <summary>Cattura entry e permessi una volta, mantenendo gli errori di lettura preesistenti</summary>
-        /// <param name="token">Lease dell'invocazione</param>
-        /// <param name="kind">Form entry richiesta</param>
-        /// <param name="entry">Entry catturata dal comando</param>
-        /// <param name="panelIndex">Pannello di origine</param>
-        /// <returns>Workflow con proprietà e permessi materializzati</returns>
+        /// <summary>Captures entry and permissions once, preserving the existing read errors</summary>
+        /// <param name="token">Invocation lease</param>
+        /// <param name="kind">Requested entry form</param>
+        /// <param name="entry">Entry captured by the command</param>
+        /// <param name="panelIndex">Source panel</param>
+        /// <returns>Workflow with materialized properties and permissions</returns>
         internal WorkspaceWorkflowSnapshot BeginEntryFormWorkflow(WorkspaceClientToken token, WorkspaceWorkflowKind kind, FileSystemEntry entry, int panelIndex)
         {
             if (!this.ValidateMutation(token) || entry == null || !this._workflowSecurity.IsPathSafe(entry.FullPath))
@@ -50,12 +50,12 @@ namespace Bivium.Services
             return this.BeginFormWorkflow(token, kind, new WorkspaceWorkflowInvocation(entry.FullPath, Path.GetDirectoryName(entry.FullPath), panelIndex, kind.ToString(), error, -1, FormContext: context), draft);
         }
 
-        /// <summary>Apre una form tipizzata sullo stesso runtime, senza nuove letture durante hydration</summary>
-        /// <param name="token">Lease del comando</param>
-        /// <param name="kind">Tipo chiuso della form</param>
-        /// <param name="invocation">Contesto catturato</param>
-        /// <param name="draft">Valori iniziali non sensibili</param>
-        /// <returns>Workflow oppure estrazione già ammessa atomicamente</returns>
+        /// <summary>Opens a typed form on the same runtime, with no new reads during hydration</summary>
+        /// <param name="token">Command lease</param>
+        /// <param name="kind">Closed form type</param>
+        /// <param name="invocation">Captured context</param>
+        /// <param name="draft">Non-sensitive initial values</param>
+        /// <returns>Workflow or extraction already admitted atomically</returns>
         internal WorkspaceWorkflowSnapshot BeginFormWorkflow(WorkspaceClientToken token, WorkspaceWorkflowKind kind, WorkspaceWorkflowInvocation invocation, string draft)
         {
             BiviumWorkspaceSnapshot snapshot;
@@ -98,17 +98,17 @@ namespace Bivium.Services
             return workflow;
         }
 
-        /// <summary>Riconosce soltanto le form effettivamente migrate</summary>
+        /// <summary>Recognizes only the forms actually migrated</summary>
         internal static bool IsFormKind(WorkspaceWorkflowKind kind) => kind is WorkspaceWorkflowKind.EditorExtensions or WorkspaceWorkflowKind.CreationPermissions or WorkspaceWorkflowKind.Permissions or WorkspaceWorkflowKind.Compress or WorkspaceWorkflowKind.Extract or WorkspaceWorkflowKind.Properties or WorkspaceWorkflowKind.About or WorkspaceWorkflowKind.Authentication or WorkspaceWorkflowKind.TerminalRename or WorkspaceWorkflowKind.TerminalClose or WorkspaceWorkflowKind.TerminalClipboard;
 
-        /// <summary>Form con draft modificabile e salvataggio esplicito anche dopo un errore, come nella UX preesistente</summary>
+        /// <summary>Forms with an editable draft and explicit save, even after an error, as in the existing UX</summary>
         internal static bool IsEditableFormKind(WorkspaceWorkflowKind kind) => kind is WorkspaceWorkflowKind.EditorExtensions or WorkspaceWorkflowKind.CreationPermissions or WorkspaceWorkflowKind.Permissions or WorkspaceWorkflowKind.Compress;
 
         #endregion
 
         #region Metodi privati
 
-        /// <summary>Deserializza e riserializza i payload chiusi; auth scarta ogni campo fuori allowlist</summary>
+        /// <summary>Deserializes and reserializes the closed payloads; auth discards every field outside the allowlist</summary>
         private static string NormalizeFormDraft(WorkspaceWorkflowKind kind, string draft)
         {
             return kind switch
@@ -127,7 +127,7 @@ namespace Bivium.Services
             };
         }
 
-        /// <summary>Deriva il piano dal draft acknowledged e dal contesto originale catturato</summary>
+        /// <summary>Derives the plan from the acknowledged draft and the captured original context</summary>
         private WorkspaceOperationPlan CreateFormPlan(WorkspaceWorkflowSnapshot workflow)
         {
             WorkspaceWorkflowInvocation invocation = workflow.InvocationParameters;

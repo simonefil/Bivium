@@ -12,7 +12,7 @@ namespace Bivium.Services
     {
         #region Metodi privati
 
-        /// <summary>Usa il commit delle impostazioni condiviso con gli endpoint esistenti</summary>
+        /// <summary>Uses the settings commit shared with the existing endpoints</summary>
         private FileOperationResult RunWorkspaceSettings(WorkspaceOperationRuntime operation)
         {
             WorkspaceOperationPlan plan = operation.Plan;
@@ -29,7 +29,7 @@ namespace Bivium.Services
             return FileOperationResult.Ok(1);
         }
 
-        /// <summary>Preserva ordine permission poi ownership e condizione recursive preesistenti</summary>
+        /// <summary>Preserves the existing order of permission then ownership and the existing recursive condition</summary>
         private FileOperationResult RunWorkspacePermissions(WorkspaceOperationRuntime operation)
         {
             WorkspaceOperationPlan plan = operation.Plan;
@@ -48,7 +48,7 @@ namespace Bivium.Services
             return result;
         }
 
-        /// <summary>Esegue le stesse API archive con destinazioni catturate e lifetime workspace</summary>
+        /// <summary>Runs the same archive APIs with captured destinations and workspace lifetime</summary>
         private FileOperationResult RunWorkspaceArchive(WorkspaceOperationRuntime operation)
         {
             WorkspaceOperationPlan plan = operation.Plan;
@@ -92,7 +92,7 @@ namespace Bivium.Services
             return FileOperationResult.Ok(processed);
         }
 
-        /// <summary>Il risultato del calcolo appartiene alla form, non al browser che lo avvia</summary>
+        /// <summary>The calculation result belongs to the form, not to the browser that starts it</summary>
         private FileOperationResult RunWorkspaceProperties(WorkspaceOperationRuntime operation)
         {
             WorkspacePropertiesDraft draft = JsonSerializer.Deserialize<WorkspacePropertiesDraft>(operation.Plan.FormDraft);

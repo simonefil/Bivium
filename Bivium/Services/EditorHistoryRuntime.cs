@@ -7,24 +7,24 @@ using System.Text;
 
 namespace Bivium.Services
 {
-    /// <summary>Journal del documento; tutte le letture e i commit avvengono sotto il lock workspace</summary>
+    /// <summary>Document journal; all reads and commits happen under the workspace lock</summary>
     internal sealed class EditorHistoryRuntime
     {
-        /// <summary>Unità autorevoli; il prefisso non viene copiato a ogni checkpoint</summary>
+        /// <summary>Authoritative units; the prefix is not copied at every checkpoint</summary>
         private readonly List<EditorHistoryUnit> _units = new List<EditorHistoryUnit>();
-        /// <summary>Numero di unità applicate</summary>
+        /// <summary>Number of applied units</summary>
         private int _cursor;
 
-        /// <summary>Materializza la history soltanto per hydration autorizzata</summary>
-        /// <returns>Snapshot immutabile separato dal documento</returns>
+        /// <summary>Materializes the history only for authorized hydration</summary>
+        /// <returns>Immutable snapshot separate from the document</returns>
         internal EditorHistorySnapshot Capture() => new EditorHistorySnapshot(this._units.ToImmutableArray(), this._cursor);
 
-        /// <summary>Valida il delta su una coda provvisoria e committa soltanto se il contenuto finale coincide</summary>
-        /// <param name="before">Contenuto acknowledged</param>
-        /// <param name="after">Contenuto dichiarato dal checkpoint</param>
-        /// <param name="mutations">Delta ordinati, senza history completa per keypress</param>
-        /// <param name="expectedCursor">Cursore dichiarato dopo i delta</param>
-        /// <returns>True soltanto per contenuto e history coerenti</returns>
+        /// <summary>Validates the delta on a provisional tail and commits only if the final content matches</summary>
+        /// <param name="before">Acknowledged content</param>
+        /// <param name="after">Content declared by the checkpoint</param>
+        /// <param name="mutations">Ordered deltas, without full history per keypress</param>
+        /// <param name="expectedCursor">Cursor declared after the deltas</param>
+        /// <returns>True only for consistent content and history</returns>
         internal bool TryApply(string before, string after, EditorHistoryMutation[] mutations, int expectedCursor)
         {
             if (mutations == null)
@@ -48,7 +48,7 @@ namespace Bivium.Services
                         foreach (EditorHistoryBatch batch in unit.Batches)
                             content = ApplyBatch(content, batch, false);
                         bool merge = cursor == count && cursor > 0 && Read(cursor - 1).GroupId == unit.GroupId;
-                        // Un edit dopo undo tronca soltanto la coda redo
+                        // An edit after undo truncates only the redo tail
                         count = cursor;
                         foreach (int index in tail.Keys.Where(index => index >= count).ToArray())
                             tail.Remove(index);
@@ -94,11 +94,11 @@ namespace Bivium.Services
             return true;
         }
 
-        /// <summary>Applica un batch simultaneo, verificando anche il testo rimosso; inversione senza history nativa</summary>
-        /// <param name="content">Testo sul quale verificare gli offset</param>
-        /// <param name="batch">Sostituzioni della stessa versione documento</param>
-        /// <param name="inverse">True per applicare l'inverso durante undo</param>
-        /// <returns>Testo risultante</returns>
+        /// <summary>Applies a simultaneous batch, also verifying the removed text; inversion without native history</summary>
+        /// <param name="content">Text on which to verify the offsets</param>
+        /// <param name="batch">Replacements of the same document version</param>
+        /// <param name="inverse">True to apply the inverse during undo</param>
+        /// <returns>Resulting text</returns>
         private static string ApplyBatch(string content, EditorHistoryBatch batch, bool inverse)
         {
             if (batch == null || batch.Changes.IsDefaultOrEmpty || batch.Changes.Any(change => change == null || change.Removed == null || change.Inserted == null))

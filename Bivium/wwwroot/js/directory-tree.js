@@ -1,4 +1,4 @@
-// Adapter stateless: modifica solo lo scroll del tree, mai il focus o la pagina
+// Stateless adapter: changes only the tree scroll, never the focus or the page
 export function revealDirectory(host, path) {
     const container = host?.closest(".radzen-panel-tree");
     if (!container || container.clientHeight === 0 || container.clientWidth === 0) return false;

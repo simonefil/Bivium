@@ -54,7 +54,7 @@
     private readonly WorkspaceFormBinding _binding = new WorkspaceFormBinding();
     private WorkspacePropertiesDraft _draft;
 
-    /// <summary>Il mount legge il risultato, non riavvia il calcolo</summary>
+    /// <summary>The mount reads the result, it does not restart the calculation</summary>
     protected override void OnParametersSet()
     {
         if (this._binding.Adopt(this.Workflow, this.LeaseGeneration))
@@ -81,7 +81,7 @@
 
     internal System.Threading.Tasks.Task<bool> FlushForHandoffAsync(CancellationToken cancellationToken) => this._binding.FlushAsync(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this._binding.Current.Draft, cancellationToken);
 
-    /// <summary>Formattazione UI dei dati già calcolati dal servizio</summary>
+    /// <summary>UI formatting of the data already computed by the service</summary>
     private string RenderSize()
     {
         FileSystemEntry entry = this._draft.Entry;

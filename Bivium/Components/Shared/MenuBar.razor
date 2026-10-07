@@ -52,9 +52,9 @@
 </div>
 
 @code {
-    /// <summary>Template nativo: icona gestita da Radzen, etichetta seguita dal badge</summary>
-    /// <param name="id">Identificatore nella proiezione ricevuta</param>
-    /// <param name="label">Etichetta dinamica opzionale</param>
-    /// <returns>Etichetta semantica senza controlli annidati</returns>
+    /// <summary>Native template: icon managed by Radzen, label followed by the badge</summary>
+    /// <param name="id">Identifier in the received projection</param>
+    /// <param name="label">Optional dynamic label</param>
+    /// <returns>Semantic label without nested controls</returns>
     private RenderFragment CommandTemplate(string id, string label = null) => @<CommandMenuLabel Label="@(label ?? this.GetCommand(id)?.Label)" Shortcut="@this.GetCommand(id)?.Shortcut" />;
 }

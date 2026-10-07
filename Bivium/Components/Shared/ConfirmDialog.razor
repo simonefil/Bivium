@@ -43,24 +43,24 @@
 }
 
 @code {
-    /// <summary>Domanda server-owned da proiettare senza reinvocare alert, delete o reset</summary>
+    /// <summary>Server-owned question to project without re-invoking alert, delete or reset</summary>
     [Parameter] public Bivium.Models.WorkspaceWorkflowSnapshot Workflow { get; set; }
-    /// <summary>Attachment dell'adapter corrente</summary>
+    /// <summary>Attachment of the current adapter</summary>
     [Parameter] public string AttachmentId { get; set; } = "";
-    /// <summary>Generazione autorevole osservata</summary>
+    /// <summary>Observed authoritative generation</summary>
     [Parameter] public long LeaseGeneration { get; set; }
-    /// <summary>Solo feedback UI dopo reset esplicitamente consumato, mai esecuzione</summary>
+    /// <summary>UI feedback only after an explicitly consumed reset, never execution</summary>
     [Parameter] public EventCallback OnResetConfirmed { get; set; }
-    /// <summary>Risposta catturata per una sola domanda, non un delegate di comando</summary>
+    /// <summary>Response captured for a single question, not a command delegate</summary>
     private Bivium.Models.WorkspaceWorkflowResponse _workspaceResponse;
-    /// <summary>Identità della domanda montata</summary>
+    /// <summary>Identity of the mounted question</summary>
     private Guid _workspaceQuestionId;
-    /// <summary>Errore di risposta, senza retry automatico</summary>
+    /// <summary>Response error, without automatic retry</summary>
     private string _workspaceError = "";
-    /// <summary>Dispose rilascia soltanto l'adapter</summary>
+    /// <summary>Dispose releases only the adapter</summary>
     private bool _workspaceDisposed;
 
-    /// <summary>Hydration della domanda; nessuna risposta o mutazione filesystem</summary>
+    /// <summary>Question hydration; no response or filesystem mutation</summary>
     protected override void OnParametersSet()
     {
         if (this.Workflow == null || this._workspaceDisposed || this._workspaceQuestionId == this.Workflow.QuestionId)
@@ -70,8 +70,8 @@
         this._workspaceError = "";
     }
 
-    /// <summary>Titolo della domanda o del fallimento in base al comando catturato</summary>
-    /// <returns>Titolo del dialog</returns>
+    /// <summary>Title of the question or of the failure, based on the captured command</summary>
+    /// <returns>Dialog title</returns>
     private string GetTitle()
     {
         if (this.Workflow.Phase != Bivium.Models.WorkspaceWorkflowPhase.Failed)
@@ -84,9 +84,9 @@
         };
     }
 
-    /// <summary>Risponde con identità stabile; la selezione resta nel runtime server</summary>
-    /// <param name="cancelled">Annullamento esplicito, mai dispose</param>
-    /// <returns>Completamento del callback adapter</returns>
+    /// <summary>Responds with a stable identity; the selection stays in the server runtime</summary>
+    /// <param name="cancelled">Explicit cancellation, never dispose</param>
+    /// <returns>Completion of the adapter callback</returns>
     private async System.Threading.Tasks.Task RespondWorkspaceAsync(bool cancelled)
     {
         if (this._workspaceDisposed || this.Workflow?.Kind is not (Bivium.Models.WorkspaceWorkflowKind.DeleteEntries or Bivium.Models.WorkspaceWorkflowKind.EditorAlert or Bivium.Models.WorkspaceWorkflowKind.ResetWorkspace) || this.Workflow.Phase is not (Bivium.Models.WorkspaceWorkflowPhase.AwaitingConfirmation or Bivium.Models.WorkspaceWorkflowPhase.Failed))
@@ -102,9 +102,9 @@
             await this.OnResetConfirmed.InvokeAsync();
     }
 
-    /// <summary>Conferma la domanda immutabile; non attende l'operazione eventualmente ammessa</summary>
-    /// <param name="cancellationToken">Lifecycle del drain</param>
-    /// <returns>True per la stessa domanda acknowledged o per la sua operazione già ammessa</returns>
+    /// <summary>Confirms the immutable question; does not wait for the operation, if any, that was admitted</summary>
+    /// <param name="cancellationToken">Drain lifecycle</param>
+    /// <returns>True for the same acknowledged question or for its already admitted operation</returns>
     internal System.Threading.Tasks.Task<bool> FlushForHandoffAsync(System.Threading.CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -114,7 +114,7 @@
         return System.Threading.Tasks.Task.FromResult(accepted);
     }
 
-    /// <summary>Detach del solo adapter; non risponde né cancella l'intento server-owned</summary>
+    /// <summary>Detaches the adapter only; neither responds nor cancels the server-owned intent</summary>
     public void Dispose()
     {
         this._workspaceDisposed = true;

@@ -255,7 +255,7 @@ namespace Bivium.Services
             return this.CalculateDirectorySize(path, out fileCount, out dirCount, CancellationToken.None);
         }
 
-        /// <summary>Calcolo preesistente con lifetime e progresso del task chiamante</summary>
+        /// <summary>Pre-existing calculation with the lifetime and progress of the calling task</summary>
         public long CalculateDirectorySize(string path, out int fileCount, out int dirCount, CancellationToken cancellationToken, Action<int, int> onProgress = null)
         {
             cancellationToken.ThrowIfCancellationRequested();

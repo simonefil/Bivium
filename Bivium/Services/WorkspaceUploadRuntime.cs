@@ -5,22 +5,22 @@ using System.Threading;
 
 namespace Bivium.Services
 {
-    /// <summary>Lifetime workspace; il gate serializza stream, retry e cleanup, mai il takeover</summary>
+    /// <summary>Workspace lifetime; the gate serializes stream, retry and cleanup, never the takeover</summary>
     internal sealed class WorkspaceUploadRuntime
     {
-        /// <summary>Ultimo stato immutabile, protetto dal lock workspace</summary>
+        /// <summary>Last immutable state, protected by the workspace lock</summary>
         internal WorkspaceUploadSnapshot Snapshot { get; set; }
 
-        /// <summary>Un solo writer fisico o cleanup alla volta</summary>
+        /// <summary>Only one physical writer or cleanup at a time</summary>
         internal SemaphoreSlim Gate { get; } = new SemaphoreSlim(1, 1);
 
-        /// <summary>Solo temporanei creati con CreateNew; protetto dal gate, rimosso dopo move o cleanup</summary>
+        /// <summary>Only temporary files created with CreateNew; protected by the gate, removed after move or cleanup</summary>
         internal Dictionary<Guid, string> OwnedTemporaryPaths { get; } = new Dictionary<Guid, string>();
 
-        /// <summary>Cancellato solo da cancel/reset/stop, non da dispose del circuito</summary>
+        /// <summary>Cancelled only by cancel/reset/stop, not by circuit dispose</summary>
         internal CancellationTokenSource Lifetime { get; } = new CancellationTokenSource();
 
-        /// <summary>Cattura lo snapshot iniziale della sessione</summary>
+        /// <summary>Captures the initial snapshot of the session</summary>
         internal WorkspaceUploadRuntime(WorkspaceUploadSnapshot snapshot) => this.Snapshot = snapshot;
     }
 }

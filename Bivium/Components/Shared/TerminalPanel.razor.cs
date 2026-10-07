@@ -31,7 +31,7 @@ namespace Bivium.Components.Shared
         private BiviumWorkspaceService _workspaceService { get; set; }
 
         /// <summary>
-        /// Notifiche accessibili (aria-live) per le richieste di notifica del terminale
+        /// Accessible notifications (aria-live) for terminal notification requests
         /// </summary>
         [Inject]
         private Radzen.NotificationService _notificationService { get; set; }
@@ -70,12 +70,12 @@ namespace Bivium.Components.Shared
         [Parameter]
         public EventCallback OnStateChanged { get; set; }
 
-        /// <summary>Stato visuale ricevuto dallo stacking JS</summary>
+        /// <summary>Visual state received from the JS stacking</summary>
         [Parameter]
         public bool IsActive { get; set; }
 
         /// <summary>
-        /// Verifica la lease tramite il proprietario Commander prima della rinomina
+        /// Verifies the lease through the Commander owner before renaming
         /// </summary>
         [Parameter]
         public Func<bool> CanInvoke { get; set; }
@@ -115,7 +115,7 @@ namespace Bivium.Components.Shared
         private CancellationTokenSource _subscriptionCancellation;
 
         /// <summary>
-        /// Generazione della lease a cui appartiene la sottoscrizione corrente
+        /// Lease generation the current subscription belongs to
         /// </summary>
         private long _subscribedLeaseGeneration;
 
@@ -134,22 +134,22 @@ namespace Bivium.Components.Shared
         /// </summary>
         private bool _isMinimized = false;
 
-        /// <summary>Richiesta di attivazione invalidabile dal manager JS</summary>
+        /// <summary>Activation request that the JS manager can invalidate</summary>
         private long _pendingActivation;
 
-        /// <summary>Revisione proprietaria del ticket post-render</summary>
+        /// <summary>Revision owning the post-render ticket</summary>
         private long _pendingActivationRevision;
 
-        /// <summary>Restore provvisorio non ancora confermato dal manager JS</summary>
+        /// <summary>Provisional restore not yet confirmed by the JS manager</summary>
         private bool _restorePending;
 
-        /// <summary>Origine conservata fra restore ripetuti prima dell'esito</summary>
+        /// <summary>Origin preserved across repeated restores before the outcome</summary>
         private bool _restoreWasMinimized;
 
-        /// <summary>Ordine locale lifecycle per scartare continuazioni obsolete</summary>
+        /// <summary>Local lifecycle order used to discard stale continuations</summary>
         private long _lifecycleRevision;
 
-        /// <summary>Pubblica lo snapshot iniziale dopo l'assegnazione del riferimento parent</summary>
+        /// <summary>Publishes the initial snapshot after the parent reference is assigned</summary>
         private bool _initialStatePublished;
 
         /// <summary>
@@ -228,12 +228,12 @@ namespace Bivium.Components.Shared
         private IJSObjectReference _interopModule;
 
         /// <summary>
-        /// Modulo geometrico dei pulsanti di chiusura esterni ai tab nativi
+        /// Geometry module for the close buttons outside the native tabs
         /// </summary>
         private IJSObjectReference _tabStripModule;
 
         /// <summary>
-        /// Wrapper stabile della strip, senza alterare l'ID interno di RadzenTabs
+        /// Stable wrapper of the strip, without altering the internal RadzenTabs ID
         /// </summary>
         private ElementReference _tabStripElement;
 
@@ -272,7 +272,7 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Ricollega gli eventi quando il recovery riacquisisce una nuova generazione della lease
+        /// Reattaches the events when recovery reacquires a new lease generation
         /// </summary>
         protected override async System.Threading.Tasks.Task OnParametersSetAsync()
         {
@@ -301,14 +301,14 @@ namespace Bivium.Components.Shared
         {
             if (this._isDisposed || (!firstRender && !this._isVisible && this._sessions.Count == 0))
                 return;
-            // Il drain usa lo stato già persistito, senza generare nuovi resize o dialog dai render
+            // The drain uses the already persisted state, without generating new resizes or dialogs from renders
             if (this._workspaceService.GetSnapshot().Handoff != null)
                 return;
 
             bool publishInitialState = !this._initialStatePublished;
             if (publishInitialState)
             {
-                // Il parent deve conoscere lo snapshot montato anche se l'interop non è disponibile
+                // The parent must know the mounted snapshot even if interop is unavailable
                 this._initialStatePublished = true;
                 await this.OnStateChanged.InvokeAsync();
                 if (this._isDisposed)
@@ -377,7 +377,7 @@ namespace Bivium.Components.Shared
             }
             catch (UnauthorizedAccessException)
             {
-                // Un freeze o cambio lease concorrente non deve interrompere il circuito
+                // A concurrent freeze or lease change must not interrupt the circuit
             }
         }
 
@@ -431,7 +431,7 @@ namespace Bivium.Components.Shared
             _ = this.RestoreAsync();
         }
 
-        /// <summary>Ripristina e attiva la stessa finestra dopo il render visibile</summary>
+        /// <summary>Restores and activates the same window after the visible render</summary>
         public async Task RestoreAsync()
         {
             if (this._isDisposed || !this.IsOpen())
@@ -462,10 +462,10 @@ namespace Bivium.Components.Shared
             await this.OnStateChanged.InvokeAsync();
         }
 
-        /// <summary>Indica apertura UI, senza dedurla dalla sola esistenza di PTY</summary>
+        /// <summary>Indicates UI open state, without inferring it from PTY existence alone</summary>
         public bool IsOpen() => this._isVisible || this._isMinimized;
 
-        /// <summary>Titolo della finestra terminale</summary>
+        /// <summary>Terminal window title</summary>
         public string GetTitle() => "Terminal";
 
         /// <summary>
@@ -511,10 +511,10 @@ namespace Bivium.Components.Shared
 
         #region JavaScript Callbacks
 
-        /// <summary>Checkpoint visuale della sessione, senza inviare screen/history al workspace</summary>
-        /// <param name="generation">Lease catturata dal renderer</param>
-        /// <param name="view">Vista della singola sessione</param>
-        /// <returns>Revisione acknowledged oppure -1</returns>
+        /// <summary>Visual checkpoint of the session, without sending screen/history to the workspace</summary>
+        /// <param name="generation">Lease captured by the renderer</param>
+        /// <param name="view">View of the single session</param>
+        /// <returns>Acknowledged revision, or -1</returns>
         [JSInvokable]
         public long OnTerminalViewChanged(long generation, WorkspaceTerminalViewState view)
         {
@@ -524,10 +524,10 @@ namespace Bivium.Components.Shared
             return this._workspaceService.PublishTerminalViewState(this.GetClientToken(), view, owner);
         }
 
-        /// <summary>Checkpoint della strip, indipendente dalla selezione del tab attivo</summary>
-        /// <param name="generation">Lease catturata</param>
-        /// <param name="view">Scroll e anchor header</param>
-        /// <returns>Revisione acknowledged oppure -1</returns>
+        /// <summary>Strip checkpoint, independent of the active tab selection</summary>
+        /// <param name="generation">Captured lease</param>
+        /// <param name="view">Header scroll and anchor</param>
+        /// <returns>Acknowledged revision, or -1</returns>
         [JSInvokable]
         public long OnTerminalStripViewChanged(long generation, WorkspaceTerminalStripViewState view)
         {
@@ -555,10 +555,10 @@ namespace Bivium.Components.Shared
         /// <param name="shift">Shift modifier</param>
         /// <param name="control">Control modifier</param>
         /// <param name="alt">Alt modifier</param>
-        /// <param name="meta">Modificatore Meta/Super</param>
-        /// <param name="code">Identità fisica DOM del tasto</param>
-        /// <param name="repeat">Ripetizione di una pressione mantenuta</param>
-        /// <param name="release">Rilascio del tasto</param>
+        /// <param name="meta">Meta/Super modifier</param>
+        /// <param name="code">Physical DOM identity of the key</param>
+        /// <param name="repeat">Repeat of a held key press</param>
+        /// <param name="release">Key release</param>
         [JSInvokable]
         public void OnTerminalKey(int sessionId, string keyName, string character, bool shift, bool control, bool alt, bool meta, string code, bool repeat, bool release)
         {
@@ -690,7 +690,7 @@ namespace Bivium.Components.Shared
         /// Receives geometry and viewport at the end of drag or resize
         /// </summary>
         /// <param name="update">New normalized geometry from the browser</param>
-        /// <returns>Snapshot autorevole per l'ack della geometria, oppure null per callback obsolete</returns>
+        /// <returns>Authoritative snapshot for the geometry ack, or null for stale callbacks</returns>
         [JSInvokable]
         public FloatingWindowSnapshot OnWindowGeometryChanged(FloatingWindowGeometryUpdate update)
         {
@@ -710,18 +710,18 @@ namespace Bivium.Components.Shared
             return this._workspaceService.GetSnapshot().FloatingWindows.Terminal;
         }
 
-        /// <summary>Sequenza della registrazione geometrica corrente</summary>
+        /// <summary>Sequence of the current geometry registration</summary>
         private long _handoffGeometrySequence;
 
-        /// <summary>I dialog terminali sono ora nel runtime workflow; restano solo transizioni renderer</summary>
+        /// <summary>Terminal dialogs now live in the workflow runtime; only renderer transitions remain</summary>
         internal bool HasNonTransferableWork => this._restorePending || this._pendingActivation != 0;
 
-        /// <summary>Proxy JS che include i callback del renderer nella barriera dei publisher</summary>
+        /// <summary>JS proxy that includes the renderer callbacks in the publisher barrier</summary>
         private IJSObjectReference _publicationReference;
 
-        /// <summary>Drena soltanto lo stato terminale già persistito; non trasferisce dialog o input non inviati</summary>
-        /// <param name="cancellationToken">Limite del tentativo</param>
-        /// <returns>True quando geometria e lifecycle sono acknowledged</returns>
+        /// <summary>Drains only the already persisted terminal state; does not transfer dialogs or unsent input</summary>
+        /// <param name="cancellationToken">Attempt limit</param>
+        /// <returns>True when geometry and lifecycle are acknowledged</returns>
         internal async Task<bool> FlushForHandoffAsync(CancellationToken cancellationToken)
         {
             if (this._isDisposed || this._restorePending || this._pendingActivation != 0)
@@ -742,10 +742,10 @@ namespace Bivium.Components.Shared
 
         #region Private UI Methods
 
-        /// <summary>Persiste solo il lifecycle conclusivo, senza annullare intenti più recenti</summary>
-        /// <param name="revision">Revisione proprietaria della richiesta</param>
-        /// <param name="result">Esito JS distinto da un ticket obsoleto</param>
-        /// <returns>Notifica asincrona dell'eventuale rollback</returns>
+        /// <summary>Persists only the final lifecycle, without cancelling more recent intents</summary>
+        /// <param name="revision">Revision owning the request</param>
+        /// <param name="result">JS outcome, distinct from a stale ticket</param>
+        /// <returns>Asynchronous notification of any rollback</returns>
         private async Task CompleteRestoreAsync(long revision, string result)
         {
             if (this._isDisposed || revision != this._lifecycleRevision || !this._restorePending)
@@ -800,18 +800,18 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Calcola l'indice visuale Radzen dall'identità autoritativa della sessione attiva
+        /// Computes the Radzen visual index from the authoritative identity of the active session
         /// </summary>
-        /// <returns>Indice corrente oppure -1 quando non esistono sessioni</returns>
+        /// <returns>Current index, or -1 when no sessions exist</returns>
         private int GetSelectedTabIndex()
         {
             return this._sessions.FindIndex(session => session.Id == this._activeSessionId);
         }
 
         /// <summary>
-        /// Traduce l'indice visuale Radzen nell'identità stabile della sessione
+        /// Translates the Radzen visual index into the stable session identity
         /// </summary>
-        /// <param name="index">Indice selezionato dal controllo</param>
+        /// <param name="index">Index selected by the control</param>
         private async System.Threading.Tasks.Task HandleSelectedTabChangedAsync(int index)
         {
             if (index >= 0 && index < this._sessions.Count)
@@ -819,10 +819,10 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Proietta la rinomina F2 sull'header Radzen della singola sessione
+        /// Projects the F2 rename onto the Radzen header of the single session
         /// </summary>
-        /// <param name="session">Sessione rappresentata dall'header</param>
-        /// <returns>Attributi evento dell'header</returns>
+        /// <param name="session">Session represented by the header</param>
+        /// <returns>Header event attributes</returns>
         private Dictionary<string, object> GetTabHeaderAttributes(TerminalSessionSnapshot session)
         {
             Dictionary<string, object> result = new Dictionary<string, object>();
@@ -833,10 +833,10 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Avvia la rinomina soltanto quando F2 proviene dall'header del tab
+        /// Starts the rename only when F2 comes from the tab header
         /// </summary>
-        /// <param name="session">Sessione rappresentata dall'header</param>
-        /// <param name="args">Evento tastiera</param>
+        /// <param name="session">Session represented by the header</param>
+        /// <param name="args">Keyboard event</param>
         private void HandleTabHeaderKeyDown(TerminalSessionSnapshot session, KeyboardEventArgs args)
         {
             if (args.Key == "F2" && !args.CtrlKey && !args.ShiftKey && !args.AltKey)
@@ -844,7 +844,7 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Apre il dialog nativo di rinomina senza input nel button del tab
+        /// Opens the native rename dialog without an input in the tab button
         /// </summary>
         /// <param name="session">Session to rename</param>
         private void BeginRename(TerminalSessionSnapshot session)
@@ -858,7 +858,7 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Apre la rinomina della sessione attiva derivata dallo snapshot
+        /// Opens the rename of the active session derived from the snapshot
         /// </summary>
         private void BeginRenameActiveTab()
         {
@@ -874,7 +874,7 @@ namespace Bivium.Components.Shared
                 return;
 
             string url = "/api/terminal/history?sessionId=" + this._activeSessionId + "&attachmentId=" + Uri.EscapeDataString(this.AttachmentId) + "&generation=" + this.LeaseGeneration;
-            // Download tramite anchor: non dipende dal permesso popup perso dopo il round-trip SignalR
+            // Download through an anchor: does not depend on the popup permission lost after the SignalR round-trip
             if (this._jsModule != null)
                 _ = this._jsModule.InvokeVoidAsync("downloadTerminalHistory", url);
         }
@@ -907,7 +907,7 @@ namespace Bivium.Components.Shared
             }
         }
 
-        /// <summary>Cattura i soli tab della domanda; nessun callback circuito viene trattenuto</summary>
+        /// <summary>Captures only the tabs of the question; no circuit callback is retained</summary>
         private void BeginTerminalClose(int[] sessionIds, bool closeWindow, string title, string message, string confirmationText)
         {
             if (this._isDisposed || this.CanInvoke?.Invoke() == false || this._workspaceService.GetWorkflow(this.GetClientToken())?.IsActive == true)
@@ -945,10 +945,10 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Proietta lo stato di progresso nella severità nativa del badge
+        /// Projects the progress state onto the native badge severity
         /// </summary>
-        /// <param name="session">Snapshot della sessione</param>
-        /// <returns>Severità Radzen senza palette applicativa</returns>
+        /// <param name="session">Session snapshot</param>
+        /// <returns>Radzen severity without an application palette</returns>
         private Radzen.BadgeStyle GetProgressBadgeStyle(TerminalSessionSnapshot session)
         {
             return session.ProgressState switch
@@ -1225,9 +1225,9 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Mostra la notifica del terminale; il click apre e seleziona la sessione che l'ha prodotta
+        /// Shows the terminal notification; clicking it opens and selects the session that produced it
         /// </summary>
-        /// <param name="clientEvent">Notifica testuale transitoria, non persistita nel workspace</param>
+        /// <param name="clientEvent">Transient text notification, not persisted in the workspace</param>
         private void NotifyTerminalEvent(TerminalClientEvent clientEvent)
         {
             int sessionId = clientEvent.SessionId;
@@ -1245,7 +1245,7 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Opens and selects the session that produced a notification
         /// </summary>
-        /// <param name="sessionId">Sessione da mostrare</param>
+        /// <param name="sessionId">Session to show</param>
         private async System.Threading.Tasks.Task OpenNotificationSessionAsync(int sessionId)
         {
             if (this._isDisposed || !this._sessions.Exists(session => session.Id == sessionId))
@@ -1276,7 +1276,7 @@ namespace Bivium.Components.Shared
 
             _ = this.InvokeAsync(async () =>
             {
-                // La revisione può essere avanzata mentre la notifica attendeva il dispatcher
+                // The revision may have advanced while the notification was waiting for the dispatcher
                 if (this._isDisposed || workspace.Revision <= this._workspaceRevision)
                     return;
 
@@ -1296,7 +1296,7 @@ namespace Bivium.Components.Shared
         private void ApplyWindowSnapshot(BiviumWorkspaceSnapshot workspace)
         {
             FloatingWindowSnapshot window = workspace.FloatingWindows.Terminal;
-            // Gli aggiornamenti dei pannelli conservano il lifecycle di origine finché JS non decide il restore
+            // Panel updates preserve the origin lifecycle until JS decides the restore
             bool pendingOrigin = this._restorePending && window.Visible == !this._restoreWasMinimized && window.Minimized == this._restoreWasMinimized;
             if (!pendingOrigin)
             {
@@ -1333,13 +1333,13 @@ namespace Bivium.Components.Shared
             {
                 BiviumWorkspaceSnapshot workspace;
 
-                // Un solo retry conserva la mutazione locale sullo snapshot concorrente
+                // A single retry preserves the local mutation on the concurrent snapshot
                 bool updated = this._workspaceService.TryUpdateTerminalWindow(this.GetClientToken(), this._workspaceRevision, window, out workspace);
                 if (!updated)
                     updated = this._workspaceService.TryUpdateTerminalWindow(this.GetClientToken(), workspace.Revision, window, out workspace);
                 if (!updated)
                 {
-                    // Non dichiarare persistito uno stato rifiutato anche al secondo tentativo
+                    // Do not declare a state persisted if it was rejected on the second attempt too
                     this.HandleWorkspaceChanged(workspace);
                     return;
                 }
@@ -1401,7 +1401,7 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Moves focus to the active renderer
         /// </summary>
-        /// <param name="activation">Richiesta JS da rivalidare anche nel frame differito</param>
+        /// <param name="activation">JS request to revalidate in the deferred frame as well</param>
         private async System.Threading.Tasks.Task FocusActiveSessionAsync(long? activation = null)
         {
             try
@@ -1491,9 +1491,9 @@ namespace Bivium.Components.Shared
         #region IAsyncDisposable
 
         /// <summary>
-        /// Rilascia observer e frame della strip prima del modulo geometrico
+        /// Releases the strip observers and frames before the geometry module
         /// </summary>
-        /// <param name="module">Modulo geometrico da rilasciare</param>
+        /// <param name="module">Geometry module to release</param>
         private async System.Threading.Tasks.Task DisposeTabStripModuleAsync(IJSObjectReference module)
         {
             if (module == null)

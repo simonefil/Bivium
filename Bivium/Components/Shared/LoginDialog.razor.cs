@@ -40,15 +40,15 @@ namespace Bivium.Components.Shared
 
         private IJSObjectReference _jsModule;
 
-        /// <summary>Campo username montato nella pagina gated</summary>
+        /// <summary>Username field mounted in the gated page</summary>
         private Radzen.Blazor.RadzenTextBox _usernameInput;
 
         #endregion
 
         #region Private Methods
 
-        /// <summary>Imposta il focus soltanto al primo mount della pagina</summary>
-        /// <param name="firstRender">Primo render reale</param>
+        /// <summary>Sets the focus only on the first mount of the page</summary>
+        /// <param name="firstRender">First real render</param>
         protected override async System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender)
         {
             if (firstRender)
@@ -106,9 +106,9 @@ namespace Bivium.Components.Shared
             }
         }
 
-        /// <summary>Distingue credenziali rifiutate da server irraggiungibile o in errore</summary>
-        /// <param name="response">Esito della richiesta browser</param>
-        /// <returns>Messaggio per l'utente</returns>
+        /// <summary>Distinguishes rejected credentials from an unreachable or failing server</summary>
+        /// <param name="response">Result of the browser request</param>
+        /// <returns>Message for the user</returns>
         private string GetFailureText(JsFetchResult response)
         {
             if (response.Status == 0)
@@ -126,7 +126,7 @@ namespace Bivium.Components.Shared
 
         #region Public Methods
 
-        /// <summary>Rilascia il modulo JS importato, tollerando il circuito già chiuso</summary>
+        /// <summary>Releases the imported JS module, tolerating an already closed circuit</summary>
         public async System.Threading.Tasks.ValueTask DisposeAsync()
         {
             if (this._jsModule == null)
@@ -137,7 +137,7 @@ namespace Bivium.Components.Shared
             }
             catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException)
             {
-                // Circuito già rilasciato
+                // Circuit already released
             }
             this._jsModule = null;
         }

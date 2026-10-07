@@ -48,28 +48,28 @@
 }
 
 @code {
-    /// <summary>Snapshot runtime da proiettare, senza reinvocare il comando</summary>
+    /// <summary>Runtime snapshot to project, without re-invoking the command</summary>
     [Parameter] public Bivium.Models.WorkspaceWorkflowSnapshot Workflow { get; set; }
-    /// <summary>Attachment dell'adapter corrente</summary>
+    /// <summary>Attachment of the current adapter</summary>
     [Parameter] public string AttachmentId { get; set; } = "";
-    /// <summary>Generazione dell'adapter corrente</summary>
+    /// <summary>Generation of the current adapter</summary>
     [Parameter] public long LeaseGeneration { get; set; }
-    /// <summary>Ultimo checkpoint acknowledged del draft</summary>
+    /// <summary>Last acknowledged checkpoint of the draft</summary>
     private Bivium.Models.WorkspaceWorkflowSnapshot _workspaceSnapshot;
-    /// <summary>Valore locale; un checkpoint rifiutato non lo sovrascrive silenziosamente</summary>
+    /// <summary>Local value; a rejected checkpoint does not silently overwrite it</summary>
     private string _workspaceValue = "";
-    /// <summary>Risposta catturata una volta, riutilizzabile soltanto con la stessa identità</summary>
+    /// <summary>Response captured once, reusable only with the same identity</summary>
     private Bivium.Models.WorkspaceWorkflowResponse _workspaceResponse;
-    /// <summary>Errore del publisher o della risposta</summary>
+    /// <summary>Publisher or response error</summary>
     private string _workspaceError = "";
-    /// <summary>Ferma il publisher rifiutato, senza retry cieco</summary>
+    /// <summary>Stops the rejected publisher, without blind retry</summary>
     private bool _draftRejected;
-    /// <summary>Dispose rilascia l'adapter senza rispondere al workflow</summary>
+    /// <summary>Dispose releases the adapter without responding to the workflow</summary>
     private bool _workspaceDisposed;
-    /// <summary>Campo del nome, focalizzato dall'owner al mount</summary>
+    /// <summary>Name field, focused by the owner on mount</summary>
     private Radzen.Blazor.RadzenTextBox _inputElement;
 
-    /// <summary>Hydration del solo stato; non conclude la domanda e non esegue filesystem</summary>
+    /// <summary>State-only hydration; does not conclude the question and does not run filesystem operations</summary>
     protected override void OnParametersSet()
     {
         if (this.Workflow == null || this._workspaceDisposed)
@@ -84,22 +84,22 @@
         {
             this._workspaceSnapshot = this.Workflow;
             this._workspaceValue = this.Workflow.Draft;
-            // Una validazione rifiutata avanza la revisione della stessa domanda: la prossima conferma è una nuova risposta
+            // A rejected validation advances the revision of the same question: the next confirmation is a new response
             if (this._workspaceResponse != null && this._workspaceResponse.Revision != this.Workflow.Revision)
                 this._workspaceResponse = null;
         }
     }
 
-    /// <summary>Focus sul campo al primo mount; la selezione iniziale segue data-bivium-selection-length</summary>
-    /// <param name="firstRender">True soltanto al primo DOM mount</param>
-    /// <returns>Completamento del focus</returns>
+    /// <summary>Focuses the field on first mount; the initial selection follows data-bivium-selection-length</summary>
+    /// <param name="firstRender">True only on the first DOM mount</param>
+    /// <returns>Completion of the focus</returns>
     private async System.Threading.Tasks.Task HandleContentRenderedAsync(bool firstRender)
     {
         if (firstRender && !this._workspaceDisposed && this._inputElement != null && this.Workflow?.Phase == Bivium.Models.WorkspaceWorkflowPhase.AwaitingInput)
             await this._inputElement.Element.FocusAsync();
     }
 
-    /// <summary>Pubblica un valore tipizzato, senza delegate o comando circuito</summary>
+    /// <summary>Publishes a typed value, without delegate or circuit command</summary>
     private void HandleWorkspaceValueChanged()
     {
         this._workspaceValue ??= "";
@@ -116,16 +116,16 @@
         }
     }
 
-    /// <summary>Il rename con il nome originale non ha nulla da confermare</summary>
-    /// <returns>True se il valore coincide con il nome della sorgente</returns>
+    /// <summary>A rename with the original name has nothing to confirm</summary>
+    /// <returns>True if the value matches the source name</returns>
     private bool IsUnchangedRename()
     {
         return this.Workflow.Kind == Bivium.Models.WorkspaceWorkflowKind.RenameEntry && this._workspaceValue == System.IO.Path.GetFileName(this.Workflow.InvocationParameters.SourcePath);
     }
 
-    /// <summary>Risponde soltanto alla domanda/revisione catturate e con ResponseId stabile</summary>
-    /// <param name="cancelled">Annullamento esplicito dell'utente, mai dispose</param>
-    /// <returns>Completamento del callback adapter</returns>
+    /// <summary>Responds only to the captured question/revision and with a stable ResponseId</summary>
+    /// <param name="cancelled">Explicit user cancellation, never dispose</param>
+    /// <returns>Completion of the adapter callback</returns>
     private System.Threading.Tasks.Task RespondWorkspaceAsync(bool cancelled)
     {
         if (this._workspaceDisposed || this._workspaceSnapshot == null || (this._workspaceSnapshot.Phase != Bivium.Models.WorkspaceWorkflowPhase.AwaitingInput && this._workspaceSnapshot.Phase != Bivium.Models.WorkspaceWorkflowPhase.Failed) || (!cancelled && (this._draftRejected || this.IsUnchangedRename())))
@@ -139,9 +139,9 @@
         return System.Threading.Tasks.Task.CompletedTask;
     }
 
-    /// <summary>Barriera semantica del draft; non attende il task filesystem</summary>
-    /// <param name="cancellationToken">Lifecycle del drain</param>
-    /// <returns>True solo per lo stesso valore acknowledged nel runtime</returns>
+    /// <summary>Semantic barrier of the draft; does not wait for the filesystem task</summary>
+    /// <param name="cancellationToken">Drain lifecycle</param>
+    /// <returns>True only for the same value acknowledged in the runtime</returns>
     internal System.Threading.Tasks.Task<bool> FlushForHandoffAsync(System.Threading.CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -150,7 +150,7 @@
         return System.Threading.Tasks.Task.FromResult(accepted);
     }
 
-    /// <summary>Detach del solo adapter; non risponde né cancella il workflow</summary>
+    /// <summary>Detaches the adapter only; neither responds nor cancels the workflow</summary>
     public void Dispose()
     {
         this._workspaceDisposed = true;

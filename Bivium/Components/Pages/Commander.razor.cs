@@ -85,12 +85,12 @@ namespace Bivium.Components.Pages
         private IHttpContextAccessor _httpContextAccessor { get; set; }
 
         /// <summary>
-        /// Stato di rendering del tema per il circuito corrente
+        /// Theme rendering state for the current circuit
         /// </summary>
         [Inject]
         private Radzen.ThemeService _themeService { get; set; }
 
-        /// <summary>Servizio scoped per conferme native anche senza lease attiva</summary>
+        /// <summary>Scoped service for native confirmations even without an active lease</summary>
         [Inject]
         private DialogService _dialogService { get; set; }
 
@@ -142,7 +142,7 @@ namespace Bivium.Components.Pages
         /// </summary>
         private ClipboardState _clipboard = new ClipboardState();
 
-        /// <summary>Proiezione desktop autorevole, disponibile anche prima del mount JS</summary>
+        /// <summary>Authoritative desktop projection, available even before the JS mount</summary>
         private BiviumWorkspaceSnapshot _desktopWorkspace;
 
         /// <summary>
@@ -165,7 +165,7 @@ namespace Bivium.Components.Pages
         /// </summary>
         private ConfirmDialog _confirmDialog;
 
-        /// <summary>Domanda server-owned sulla chiusura dell'editor con modifiche non salvate</summary>
+        /// <summary>Server-owned question about closing the editor with unsaved changes</summary>
         private EditorCloseDialog _editorCloseDialog;
 
         /// <summary>
@@ -178,16 +178,16 @@ namespace Bivium.Components.Pages
         /// </summary>
         private InputDialog _inputDialog;
 
-        /// <summary>Proiezione autorizzata del runtime workflow, mai continuazione del comando locale</summary>
+        /// <summary>Authorized projection of the workflow runtime, never a continuation of the local command</summary>
         private WorkspaceWorkflowSnapshot _workspaceWorkflow;
 
-        /// <summary>Projection Upload letta soltanto dal browser che possiede la lease</summary>
+        /// <summary>Upload projection read only by the browser that owns the lease</summary>
         private WorkspaceUploadSnapshot _workspaceUpload;
         private Guid _observedCompletedUploadId;
-        /// <summary>Errore dei workflow form migrati, ripristinabile senza callback legacy</summary>
+        /// <summary>Error of the migrated form workflows, recoverable without legacy callbacks</summary>
         private WorkspaceFormFailureDialog _formFailureDialog;
         private WorkspaceTerminalDialog _terminalWorkflowDialog;
-        /// <summary>Ultimo risultato riconciliato nell'adapter, senza rieseguire l'operazione</summary>
+        /// <summary>Last result reconciled in the adapter, without re-running the operation</summary>
         private Guid _observedCompletedOperationId;
 
         /// <summary>
@@ -245,19 +245,19 @@ namespace Bivium.Components.Pages
         /// </summary>
         private TerminalPanel _terminalPanel;
 
-        /// <summary>Lifecycle del takeover e del drain, distinto dalle operazioni file</summary>
+        /// <summary>Lifecycle of the takeover and of the drain, distinct from file operations</summary>
         private readonly CancellationTokenSource _handoffLifetimeCancellation = new CancellationTokenSource();
 
-        /// <summary>Tentativo posseduto dall'adapter corrente</summary>
+        /// <summary>Attempt owned by the current adapter</summary>
         private Guid _handoffDrainId;
 
-        /// <summary>Attesa bounded del drain, cancellata anche su snapshot che invalida la richiesta</summary>
+        /// <summary>Bounded wait for the drain, also cancelled on a snapshot that invalidates the request</summary>
         private CancellationTokenSource _handoffDrainCancellation;
 
-        /// <summary>Previene richieste duplicate dallo stesso pulsante durante l'attesa</summary>
+        /// <summary>Prevents duplicate requests from the same button during the wait</summary>
         private bool _takeoverInProgress;
 
-        /// <summary>Identità attiva ricevuta dall'unico stack JS</summary>
+        /// <summary>Active identity received from the single JS stack</summary>
         private string _activeWindowId = "";
 
         /// <summary>
@@ -321,17 +321,17 @@ namespace Bivium.Components.Pages
         private bool _singlePanelMode = false;
 
         /// <summary>
-        /// Percentuale persistita occupata dal pannello sinistro nel layout Radzen
+        /// Persisted percentage occupied by the left panel in the Radzen layout
         /// </summary>
         private double _outerPanelSizePercent = 50;
 
         /// <summary>
-        /// Indice del pannello compresso nel layout Radzen, oppure -1
+        /// Index of the collapsed panel in the Radzen layout, or -1
         /// </summary>
         private int _collapsedPanelIndex = -1;
 
         /// <summary>
-        /// Viewport stretto: in modalità doppia viene mostrato solo il pannello attivo
+        /// Narrow viewport: in dual mode only the active panel is shown
         /// </summary>
         private bool _compactLayout;
 
@@ -440,18 +440,18 @@ namespace Bivium.Components.Pages
         /// </summary>
         private bool _isDisposed = false;
 
-        /// <summary>Conferma locale takeover del browser non-owner, non trasferita nel workflow di A</summary>
+        /// <summary>Local confirmation of the takeover by the non-owner browser, not transferred into A's workflow</summary>
         private RadzenDialogLifetime _workspaceConfirmationLifetime;
 
         /// <summary>
-        /// Tema selezionato dal Commander
+        /// Theme selected by Commander
         /// </summary>
         private string _currentTheme = RadzenThemeCatalog.DEFAULT_THEME;
 
-        /// <summary>Disponibilità del solo contesto tastiera comunicata dal browser</summary>
+        /// <summary>Availability of the keyboard context only, communicated by the browser</summary>
         private bool _keyboardGeneral, _keyboardControl, _keyboardNavigation, _keyboardPanelSwitch, _keyboardTerminal;
 
-        /// <summary>Modal DOM bloccante, distinto dalle finestre modeless e dai popup menu</summary>
+        /// <summary>Blocking DOM modal, distinct from modeless windows and popup menus</summary>
         private bool _keyboardModal;
 
         #endregion
@@ -614,7 +614,7 @@ namespace Bivium.Components.Pages
                 WorkspaceAttachResult result = await this._workspaceService.TryTakeoverAsync(this._attachmentId, expectedGeneration, this._handoffLifetimeCancellation.Token);
                 if (this._isDisposed)
                     return;
-                // Una notifica successiva può aver già trasferito di nuovo il lease
+                // A later notification may have already transferred the lease again
                 BiviumWorkspaceSnapshot current = this._workspaceService.GetSnapshot();
                 result.ActiveLease = current.ActiveClientLease;
                 result.WorkspaceRevision = current.Revision;
@@ -673,7 +673,7 @@ namespace Bivium.Components.Pages
                 if (workspaceReset && hasControl && !changed && this.CanMutateWorkspace())
                 {
                     try { this.InitializePanels(); }
-                    catch (UnauthorizedAccessException) { /* Un takeover o freeze concorrente lascia l'inizializzazione al nuovo owner */ }
+                    catch (UnauthorizedAccessException) { /* A concurrent takeover or freeze leaves the initialization to the new owner */ }
                 }
                 this.RefreshWorkspaceWorkflow();
                 this.StateHasChanged();
@@ -682,9 +682,9 @@ namespace Bivium.Components.Pages
             });
         }
 
-        /// <summary>Coordina freeze e publisher; i workflow non migrati costituiscono soltanto una guardia transitoria</summary>
-        /// <param name="handoff">Richiesta server-owned osservata</param>
-        /// <returns>Drain bounded senza trasferire credenziali, upload o workflow locali</returns>
+        /// <summary>Coordinates freeze and publisher; non-migrated workflows are only a transitional guard</summary>
+        /// <param name="handoff">Observed server-owned request</param>
+        /// <returns>Bounded drain without transferring credentials, uploads or local workflows</returns>
         private async Task ProcessWorkspaceHandoffAsync(WorkspaceHandoffSnapshot handoff)
         {
             WorkspaceClientToken token = this.GetClientToken();
@@ -749,7 +749,7 @@ namespace Bivium.Components.Pages
                 BiviumWorkspaceSnapshot observed = this._workspaceService.GetSnapshot();
                 if (!this._workspaceService.TryUpdatePanels(token, observed.Revision, panels, out _))
                     throw new InvalidOperationException("Desktop state changed during the final checkpoint. Retry activation.");
-                // La clipboard è già server-owned: non ripubblicare la copia UI dopo il completamento di un move
+                // The clipboard is already server-owned: do not republish the UI copy after a move completes
                 WorkspaceHandoffStamp stamp = this._workspaceService.GetHandoffStamp(token, handoff.Id);
                 if (!this._workspaceService.TryCompleteHandoff(token, handoff.Id, stamp))
                     throw new InvalidOperationException("Desktop revisions changed before activation. Retry activation.");
@@ -760,7 +760,7 @@ namespace Bivium.Components.Pages
             }
             finally
             {
-                // Il begin può aver congelato il DOM anche se il suo ack è arrivato dopo la cancellazione
+                // The begin may have frozen the DOM even if its ack arrived after the cancellation
                 if (this._jsModule != null)
                 {
                     try
@@ -772,22 +772,22 @@ namespace Bivium.Components.Pages
                     {
                     }
                 }
-                // Conserva l'ownership dell'adapter fino al cleanup JS: C non deve partire contro il freeze B
+                // Keeps the adapter ownership until the JS cleanup: C must not start against freeze B
                 if (this._handoffDrainId == handoff.Id)
                 {
                     this._handoffDrainId = Guid.Empty;
                     this._handoffDrainCancellation = null;
                 }
-                // Un reset confermato prima del freeze può annullare il tentativo mentre il drain è occupato.
-                // Solo dopo il cleanup, l'owner ancora valido inizializza i pannelli già svuotati dal server.
+                // A reset confirmed before the freeze may cancel the attempt while the drain is busy.
+                // Only after the cleanup, the still-valid owner initializes the panels already emptied by the server.
                 if (!this._isDisposed && !this._panelsInitialized && this._hasActiveLease && this._workspaceService.GetSnapshot().Panels == null && this.CanMutateWorkspace())
                 {
                     try { this.InitializePanels(); }
-                    catch (UnauthorizedAccessException) { /* Il nuovo owner inizializzerà lo snapshot reset */ }
+                    catch (UnauthorizedAccessException) { /* The new owner will initialize the reset snapshot */ }
                 }
                 if (!this._isDisposed)
                     this.StateHasChanged();
-                // Una richiesta C può essere stata notificata mentre il drain B occupava l'adapter
+                // A C request may have been notified while drain B occupied the adapter
                 if (!this._isDisposed && this._handoffDrainId == Guid.Empty)
                 {
                     BiviumWorkspaceSnapshot current = this._workspaceService.GetSnapshot();
@@ -798,8 +798,8 @@ namespace Bivium.Components.Pages
             }
         }
 
-        /// <summary>Guardie tecniche da rimuovere singolarmente dopo la migrazione dei workflow</summary>
-        /// <returns>True quando il tentativo deve preservare A senza revoca</returns>
+        /// <summary>Technical guards to remove one by one after the workflow migration</summary>
+        /// <returns>True when the attempt must preserve A without revocation</returns>
         private bool HasNonTransferableHandoffWork()
         {
             bool migratedQuestion = this._workspaceWorkflow?.IsActive == true || this._workspaceUpload?.Visible == true;
@@ -886,8 +886,8 @@ namespace Bivium.Components.Pages
             return result;
         }
 
-        /// <summary>Permette soltanto i callback di persistenza durante il freeze, non nuovi comandi</summary>
-        /// <returns>Autorità del publisher corrente</returns>
+        /// <summary>Allows only the persistence callbacks during the freeze, not new commands</summary>
+        /// <returns>Authority of the current publisher</returns>
         private bool CanPublishWorkspace() => !this._isDisposed && this._hasActiveLease && this._workspaceService.ValidatePublication(this.GetClientToken());
 
         /// <summary>
@@ -1176,16 +1176,16 @@ namespace Bivium.Components.Pages
         }
 
         /// <summary>
-        /// Aggiorna la proiezione responsive al cambio del media query Radzen
+        /// Updates the responsive projection when the Radzen media query changes
         /// </summary>
-        /// <param name="matches">True quando il viewport è stretto</param>
+        /// <param name="matches">True when the viewport is narrow</param>
         private void HandleCompactLayoutChanged(bool matches)
         {
             this._compactLayout = matches;
         }
 
         /// <summary>
-        /// Alterna il pannello visibile nella sola proiezione responsive
+        /// Toggles the visible panel in the responsive projection only
         /// </summary>
         private void SwitchResponsivePanel()
         {
@@ -1412,28 +1412,28 @@ namespace Bivium.Components.Pages
 
 
         /// <summary>
-        /// Applica una modifica semantica all'albero sinistro dopo la rivalidazione del lease
+        /// Applies a semantic change to the left tree after lease revalidation
         /// </summary>
-        /// <param name="change">Modifica richiesta dalla variante Radzen</param>
+        /// <param name="change">Change requested by the Radzen variant</param>
         private void HandleLeftTreeExpansionChanged(DirectoryTreeExpansionChange change)
         {
             this.HandleTreeExpansionChanged(this._leftPanel, change);
         }
 
         /// <summary>
-        /// Applica una modifica semantica all'albero destro dopo la rivalidazione del lease
+        /// Applies a semantic change to the right tree after lease revalidation
         /// </summary>
-        /// <param name="change">Modifica richiesta dalla variante Radzen</param>
+        /// <param name="change">Change requested by the Radzen variant</param>
         private void HandleRightTreeExpansionChanged(DirectoryTreeExpansionChange change)
         {
             this.HandleTreeExpansionChanged(this._rightPanel, change);
         }
 
         /// <summary>
-        /// Riduce una modifica di espansione nel PanelState autoritativo
+        /// Reduces an expansion change into the authoritative PanelState
         /// </summary>
-        /// <param name="panel">Pannello destinatario</param>
-        /// <param name="change">Modifica semantica richiesta</param>
+        /// <param name="panel">Target panel</param>
+        /// <param name="change">Requested semantic change</param>
         private void HandleTreeExpansionChanged(PanelState panel, DirectoryTreeExpansionChange change)
         {
             if (change == null || string.IsNullOrEmpty(change.Path) || !this.CanMutateWorkspace())
@@ -1445,28 +1445,28 @@ namespace Bivium.Components.Pages
         }
 
         /// <summary>
-        /// Applica il layout verticale del pannello sinistro
+        /// Applies the vertical layout of the left panel
         /// </summary>
-        /// <param name="change">Geometria richiesta</param>
+        /// <param name="change">Requested geometry</param>
         private void HandleLeftTreeLayoutChanged(PanelTreeLayoutChange change)
         {
             this.HandleTreeLayoutChanged(this._leftPanel, change);
         }
 
         /// <summary>
-        /// Applica il layout verticale del pannello destro
+        /// Applies the vertical layout of the right panel
         /// </summary>
-        /// <param name="change">Geometria richiesta</param>
+        /// <param name="change">Requested geometry</param>
         private void HandleRightTreeLayoutChanged(PanelTreeLayoutChange change)
         {
             this.HandleTreeLayoutChanged(this._rightPanel, change);
         }
 
         /// <summary>
-        /// Valida e riduce una modifica del layout verticale
+        /// Validates and reduces a vertical layout change
         /// </summary>
-        /// <param name="panel">Pannello destinatario</param>
-        /// <param name="change">Geometria richiesta</param>
+        /// <param name="panel">Target panel</param>
+        /// <param name="change">Requested geometry</param>
         private void HandleTreeLayoutChanged(PanelState panel, PanelTreeLayoutChange change)
         {
             if (change == null || !this.CanPublishWorkspace())
@@ -1476,9 +1476,9 @@ namespace Bivium.Components.Pages
         }
 
         /// <summary>
-        /// Persiste la nuova proporzione orizzontale dei pannelli
+        /// Persists the new horizontal proportion of the panels
         /// </summary>
-        /// <param name="args">Dati conclusivi del resize Radzen</param>
+        /// <param name="args">Final data of the Radzen resize</param>
         private void HandleOuterSplitterResize(RadzenSplitterResizeEventArgs args)
         {
             if (!this.CanPublishWorkspace())
@@ -1488,9 +1488,9 @@ namespace Bivium.Components.Pages
         }
 
         /// <summary>
-        /// Persiste il pannello compresso dall'utente
+        /// Persists the panel collapsed by the user
         /// </summary>
-        /// <param name="args">Pannello compresso da Radzen</param>
+        /// <param name="args">Panel collapsed by Radzen</param>
         private void HandleOuterSplitterCollapse(RadzenSplitterEventArgs args)
         {
             if (this.CanMutateWorkspace() && args.PaneIndex is 0 or 1)
@@ -1502,9 +1502,9 @@ namespace Bivium.Components.Pages
         }
 
         /// <summary>
-        /// Rimuove lo stato di compressione quando il pannello viene espanso
+        /// Removes the collapse state when the panel is expanded
         /// </summary>
-        /// <param name="args">Pannello espanso da Radzen</param>
+        /// <param name="args">Panel expanded by Radzen</param>
         private void HandleOuterSplitterExpand(RadzenSplitterEventArgs args)
         {
             if (this.CanMutateWorkspace() && this._collapsedPanelIndex == args.PaneIndex)
@@ -1512,27 +1512,27 @@ namespace Bivium.Components.Pages
         }
 
         /// <summary>
-        /// Forza il render proprietario dopo una mutazione già passata dal reducer
+        /// Forces the owner render after a mutation that already went through the reducer
         /// </summary>
         private void HandlePanelUiStateChanged()
         {
         }
 
         /// <summary>
-        /// Limita la geometria orizzontale a valori finiti e utilizzabili
+        /// Clamps the horizontal geometry to finite and usable values
         /// </summary>
-        /// <param name="value">Percentuale proposta</param>
-        /// <returns>Percentuale valida tra 20 e 80</returns>
+        /// <param name="value">Proposed percentage</param>
+        /// <returns>Valid percentage between 20 and 80</returns>
         private double ClampOuterPanelSize(double value)
         {
             return double.IsFinite(value) ? Math.Clamp(value, 20, 80) : 50;
         }
 
         /// <summary>
-        /// Limita la geometria verticale a valori finiti e utilizzabili
+        /// Clamps the vertical geometry to finite and usable values
         /// </summary>
-        /// <param name="value">Percentuale proposta</param>
-        /// <returns>Percentuale valida tra 15 e 85</returns>
+        /// <param name="value">Proposed percentage</param>
+        /// <returns>Valid percentage between 15 and 85</returns>
         private double ClampTreeSize(double value)
         {
             return double.IsFinite(value) ? Math.Clamp(value, 15, 85) : 30;
@@ -1668,10 +1668,10 @@ namespace Bivium.Components.Pages
         }
 
         /// <summary>
-        /// Restituisce l'entry identificata dal focus semantico, con fallback per il cursore legacy
+        /// Returns the entry identified by the semantic focus, with fallback to the legacy cursor
         /// </summary>
-        /// <param name="panel">Pannello da consultare</param>
-        /// <returns>Entry focalizzata oppure null se non disponibile</returns>
+        /// <param name="panel">Panel to consult</param>
+        /// <returns>Focused entry or null if unavailable</returns>
         private FileSystemEntry GetFocusedEntry(PanelState panel)
         {
             int index = this.FindPanelEntryIndex(panel, panel.FocusedPath);
@@ -1681,10 +1681,10 @@ namespace Bivium.Components.Pages
         }
 
         /// <summary>
-        /// Applica una richiesta atomica mantenendo selezione, focus e anchor sotto il controllo di Commander
+        /// Applies an atomic request keeping selection, focus and anchor under Commander control
         /// </summary>
-        /// <param name="panel">Pannello destinatario</param>
-        /// <param name="request">Interazione richiesta dalla superficie UI</param>
+        /// <param name="panel">Target panel</param>
+        /// <param name="request">Interaction requested by the UI surface</param>
         private void HandleFileListInteraction(PanelState panel, FileListInteractionRequest request)
         {
             if (panel == null || request == null || !this.IsCommandWorkflowAvailable() || !this.CanMutateWorkspace())
@@ -1842,10 +1842,10 @@ namespace Bivium.Components.Pages
 
         #region Context Menu
 
-        /// <summary>Apertura visuale con identità e sorgenti catturate</summary>
+        /// <summary>Visual opening with captured identity and sources</summary>
         private WorkspaceContextMenuDraft _contextDraft;
 
-        /// <summary>Hydration dell'apertura, senza reinvocare richiesta o ricalcolare flag</summary>
+        /// <summary>Hydration of the opening, without re-invoking the request or recomputing flags</summary>
         private void HydrateContextMenu()
         {
             this._contextDraft = this._workspaceService.GetContextMenuDraft(this.GetClientToken());
@@ -1863,9 +1863,9 @@ namespace Bivium.Components.Pages
             this._contextMenuArchiveBaseName = draft.ArchiveBaseName;
         }
 
-        /// <summary>CAS della posizione della stessa apertura; non ammette entry o flag sostitutivi</summary>
-        /// <param name="draft">Posizione catturata dal portal</param>
-        /// <returns>Nuova revisione oppure -1</returns>
+        /// <summary>CAS of the position of the same opening; does not allow replacement entries or flags</summary>
+        /// <param name="draft">Position captured by the portal</param>
+        /// <returns>New revision or -1</returns>
         private long PublishContextVisual(WorkspaceContextMenuDraft draft)
         {
             if (this._isDisposed || this._contextDraft == null || draft.Id != this._contextDraft.Id || draft.Revision != this._contextDraft.Revision)
@@ -1878,8 +1878,8 @@ namespace Bivium.Components.Pages
             return acknowledged.Revision;
         }
 
-        /// <summary>I comandi esistenti operano solo se il contesto catturato è ancora lo stesso</summary>
-        /// <returns>False se pannelli o selezione sono cambiati, senza retarget implicito</returns>
+        /// <summary>Existing commands operate only if the captured context is still the same</summary>
+        /// <returns>False if panels or selection changed, without implicit retarget</returns>
         private bool CanInvokeCapturedContext()
         {
             WorkspaceContextMenuDraft draft = this._contextDraft;
@@ -1969,7 +1969,7 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void CloseContextMenu()
         {
-            // La chiusura sintetica del freeze non deve cancellare l'apertura catturata
+            // The synthetic close of the freeze must not cancel the captured opening
             if (!this.CanMutateWorkspace())
                 return;
             if (this._contextDraft != null)
@@ -1986,8 +1986,8 @@ namespace Bivium.Components.Pages
 
         #region File Operations
 
-        /// <summary>Proietta solo finestre UI aperte, incluse quelle minimizzate</summary>
-        /// <returns>Stato transitorio della taskbar</returns>
+        /// <summary>Projects only open UI windows, including minimized ones</summary>
+        /// <returns>Transient taskbar state</returns>
         private IReadOnlyList<DesktopWindowState> GetOpenWindows()
         {
             List<DesktopWindowState> result = new List<DesktopWindowState>();
@@ -2003,8 +2003,8 @@ namespace Bivium.Components.Pages
             return result;
         }
 
-        /// <summary>Proietta lo stacking salvato, senza dipendere dall'ordine di mount dei componenti</summary>
-        /// <returns>Finestra visibile con ordine MRU più recente</returns>
+        /// <summary>Projects the saved stacking, without depending on the component mount order</summary>
+        /// <returns>Visible window with the most recent MRU order</returns>
         private string GetActiveDesktopWindowId()
         {
             FloatingWindowsSnapshot windows = (this._desktopWorkspace ?? this._workspaceService.GetSnapshot()).FloatingWindows;
@@ -2025,16 +2025,16 @@ namespace Bivium.Components.Pages
             return id;
         }
 
-        /// <summary>Disponibilità pura dell'attivazione, anche durante operazioni file</summary>
-        /// <returns>True senza accessi al servizio workspace</returns>
+        /// <summary>Pure availability of the activation, even during file operations</summary>
+        /// <returns>True without accessing the workspace service</returns>
         private bool CanActivateWindows()
         {
             return this._canAccess && this._hasActiveLease && this._panelsInitialized && !this._isDisposed
                 && !this._keyboardModal && this._workspaceConfirmationLifetime == null;
         }
 
-        /// <summary>Rivalida la lease e attiva una sessione UI esistente</summary>
-        /// <param name="id">Identità stabile della finestra</param>
+        /// <summary>Revalidates the lease and activates an existing UI session</summary>
+        /// <param name="id">Stable window identity</param>
         private async Task RestoreWindowAsync(string id)
         {
             if (!this.CanActivateWindows() || !this.CanMutateWorkspace())
@@ -2056,23 +2056,23 @@ namespace Bivium.Components.Pages
             }
         }
 
-        /// <summary>Aggiorna la taskbar senza introdurre uno stack C# parallelo</summary>
+        /// <summary>Updates the taskbar without introducing a parallel C# stack</summary>
         private void HandleDesktopWindowStateChanged()
         {
             if (!this._isDisposed)
                 this.StateHasChanged();
         }
 
-        /// <summary>Disponibilità pura del workflow, indipendente dal focus modeless</summary>
-        /// <returns>True se un nuovo workflow può iniziare</returns>
+        /// <summary>Pure availability of the workflow, independent of the modeless focus</summary>
+        /// <returns>True if a new workflow can start</returns>
         private bool IsCommandWorkflowAvailable()
         {
             return this._canAccess && this._hasActiveLease && this._panelsInitialized && !this._isDisposed
                 && this._workspaceWorkflow?.IsActive != true && this._workspaceUpload?.Visible != true && this._desktopWorkspace?.Operation?.IsRunning != true && this._workspaceConfirmationLifetime == null && !this._keyboardModal;
         }
 
-        /// <summary>Costruisce l'unica proiezione condivisa usando soltanto stato in memoria</summary>
-        /// <returns>Disponibilità azioni e shortcut esistenti</returns>
+        /// <summary>Builds the single shared projection using only in-memory state</summary>
+        /// <returns>Availability of existing actions and shortcuts</returns>
         private IReadOnlyList<CommanderCommandState> GetCommandStates()
         {
             PanelState active = this.GetActivePanel();
@@ -2148,24 +2148,24 @@ namespace Bivium.Components.Pages
             return result;
         }
 
-        /// <summary>Applica ai dispatch la stessa regola della proiezione e rivalida il lease</summary>
-        /// <param name="id">Comando richiesto</param>
-        /// <returns>True soltanto se eseguibile adesso</returns>
+        /// <summary>Applies to dispatches the same rule as the projection and revalidates the lease</summary>
+        /// <param name="id">Requested command</param>
+        /// <returns>True only if executable now</returns>
         private bool CanExecuteCommand(string id)
         {
             return this.GetCommandStates().Any(command => command.Id == id && command.Enabled) && this.CanMutateWorkspace();
         }
 
-        /// <summary>Verifica estensione e dimensione editor senza leggere il filesystem</summary>
-        /// <param name="entry">Entry già caricata</param>
-        /// <returns>True se compatibile con la policy editor esistente</returns>
+        /// <summary>Checks editor extension and size without reading the filesystem</summary>
+        /// <param name="entry">Already loaded entry</param>
+        /// <returns>True if compatible with the existing editor policy</returns>
         private bool IsEditableEntry(FileSystemEntry entry)
         {
             return entry != null && !entry.IsDirectory && entry.SizeBytes <= MAX_EDITOR_SIZE
                 && this._settings.CurrentValue.EditableExtensions.Any(extension => string.Equals(extension, Path.GetExtension(entry.Name), StringComparison.OrdinalIgnoreCase));
         }
 
-        /// <summary>Apre About attraverso lo stesso ingresso usato dalla tastiera</summary>
+        /// <summary>Opens About through the same entry used by the keyboard</summary>
         private void DoAbout()
         {
             if (!this.CanExecuteCommand("about"))
@@ -2288,7 +2288,7 @@ namespace Bivium.Components.Pages
             this.PersistWorkspaceClipboard();
         }
 
-        /// <summary>Commit clipboard interna; un rifiuto ripristina lo stato autorevole senza retry</summary>
+        /// <summary>Internal clipboard commit; a rejection restores the authoritative state without retry</summary>
         private void PersistWorkspaceClipboard()
         {
             BiviumWorkspaceSnapshot workspace = this._workspaceService.GetSnapshot();
@@ -2405,14 +2405,14 @@ namespace Bivium.Components.Pages
             }
         }
 
-        /// <summary>Invoca una volta il workflow server-owned con argomenti catturati</summary>
-        /// <param name="kind">Comando tipizzato</param>
-        /// <param name="sourcePath">Sorgente catturata</param>
-        /// <param name="parentPath">Destinazione catturata</param>
-        /// <param name="title">Titolo locale preesistente</param>
-        /// <param name="label">Etichetta locale preesistente</param>
-        /// <param name="draft">Draft iniziale</param>
-        /// <param name="selectionLength">Selezione iniziale</param>
+        /// <summary>Invokes the server-owned workflow once with captured arguments</summary>
+        /// <param name="kind">Typed command</param>
+        /// <param name="sourcePath">Captured source</param>
+        /// <param name="parentPath">Captured destination</param>
+        /// <param name="title">Pre-existing local title</param>
+        /// <param name="label">Pre-existing local label</param>
+        /// <param name="draft">Initial draft</param>
+        /// <param name="selectionLength">Initial selection</param>
         private void BeginWorkspaceInput(WorkspaceWorkflowKind kind, string sourcePath, string parentPath, string title, string label, string draft, int selectionLength)
         {
             WorkspaceWorkflowInvocation invocation = new WorkspaceWorkflowInvocation(sourcePath, parentPath, this._activePanel, title, label, selectionLength);
@@ -2421,7 +2421,7 @@ namespace Bivium.Components.Pages
             this.StateHasChanged();
         }
 
-        /// <summary>Hydrate e riconcilia risultati; non risponde a domande e non esegue filesystem mutante</summary>
+        /// <summary>Hydrates and reconciles results; does not answer questions and does not run mutating filesystem operations</summary>
         private void RefreshWorkspaceWorkflow()
         {
             this._workspaceWorkflow = this._hasActiveLease ? this._workspaceService.GetWorkflow(this.GetClientToken()) : null;
@@ -2649,9 +2649,9 @@ namespace Bivium.Components.Pages
         }
 
         /// <summary>
-        /// Valida, persiste e applica il tema scelto nella variante Radzen
+        /// Validates, persists and applies the chosen theme in the Radzen variant
         /// </summary>
-        /// <param name="theme">Nome del tema scelto</param>
+        /// <param name="theme">Name of the chosen theme</param>
         private async System.Threading.Tasks.Task DoThemeChange(string theme)
         {
             if (!this.CanExecuteCommand("theme"))
@@ -2666,8 +2666,8 @@ namespace Bivium.Components.Pages
                 this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js");
             }
 
-            // La scrittura di appsettings.json e le verifiche di autenticazione e lease vivono solo in SettingsController:
-            // non esiste un servizio settings da invocare direttamente, quindi il circuito passa dallo stesso endpoint HTTP.
+            // Writing appsettings.json and the authentication and lease checks live only in SettingsController:
+            // there is no settings service to invoke directly, so the circuit goes through the same HTTP endpoint.
             string json = JsonSerializer.Serialize(normalizedTheme);
             JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("putJsonResult", "/api/Settings/theme", json, this._attachmentId, this._leaseGeneration);
             if (!response.Ok)
@@ -2749,10 +2749,10 @@ namespace Bivium.Components.Pages
             return System.Threading.Tasks.Task.CompletedTask;
         }
 
-        /// <summary>Apre soltanto il workflow chiuso; effetti e risposte appartengono al servizio workspace</summary>
-        /// <param name="kind">Alert editor oppure intento reset</param>
-        /// <param name="title">Titolo catturato</param>
-        /// <param name="message">Testo immutabile</param>
+        /// <summary>Opens only the closed workflow; effects and answers belong to the workspace service</summary>
+        /// <param name="kind">Editor alert or reset intent</param>
+        /// <param name="title">Captured title</param>
+        /// <param name="message">Immutable text</param>
         private void BeginWorkspaceConfirmation(WorkspaceWorkflowKind kind, string title, string message)
         {
             this._workspaceWorkflow = this._workspaceService.BeginConfirmationWorkflow(this.GetClientToken(), kind, title, message);
@@ -2760,7 +2760,7 @@ namespace Bivium.Components.Pages
             this.StateHasChanged();
         }
 
-        /// <summary>Solo feedback del reset già consumato; non termina PTY e non reinvoca reset</summary>
+        /// <summary>Feedback only for the already consumed reset; does not terminate PTY and does not re-invoke reset</summary>
         private void HandleWorkspaceResetConfirmed()
         {
             if (this._isDisposed || !this.CanPublishWorkspace())
@@ -2770,11 +2770,11 @@ namespace Bivium.Components.Pages
             this.StateHasChanged();
         }
 
-        /// <summary>Attende solo la conferma locale takeover, con ownership limitata all'apertura corrente</summary>
-        /// <param name="title">Titolo del dialog</param>
-        /// <param name="message">Messaggio da confermare</param>
-        /// <param name="confirmText">Etichetta dell'azione confermata</param>
-        /// <returns>True soltanto per conferma esplicita</returns>
+        /// <summary>Waits only for the local takeover confirmation, with ownership limited to the current opening</summary>
+        /// <param name="title">Dialog title</param>
+        /// <param name="message">Message to confirm</param>
+        /// <param name="confirmText">Label of the confirmed action</param>
+        /// <returns>True only for explicit confirmation</returns>
         private async System.Threading.Tasks.Task<bool> ConfirmWorkspaceActionAsync(string title, string message, string confirmText)
         {
             if (this._isDisposed || this._workspaceConfirmationLifetime != null)
@@ -2845,7 +2845,7 @@ namespace Bivium.Components.Pages
             this.BeginWorkspaceExtraction(destinationDir, archivePaths, true);
         }
 
-        /// <summary>Il gesto comando ammette lo stesso runner senza nuove conferme</summary>
+        /// <summary>The command gesture allows the same runner without new confirmations</summary>
         private void BeginWorkspaceExtraction(string destination, List<string> paths, bool ownFolder)
         {
             WorkspaceWorkflowInvocation invocation = new WorkspaceWorkflowInvocation("", destination, this._activePanel, "Extract", "", -1, paths.ToImmutableArray(), ExtractToOwnFolder: ownFolder);
@@ -3167,8 +3167,8 @@ namespace Bivium.Components.Pages
             }
         }
 
-        /// <summary>Esegue sull'editor locale la scelta consumata dalla domanda di chiusura</summary>
-        /// <param name="choice">Save oppure discard</param>
+        /// <summary>Executes on the local editor the choice consumed by the close question</summary>
+        /// <param name="choice">Save or discard</param>
         private async System.Threading.Tasks.Task HandleEditorCloseResolved(string choice)
         {
             if (this._editorDialog != null)
@@ -3219,14 +3219,14 @@ namespace Bivium.Components.Pages
 
         #region Keyboard Handling
 
-        /// <summary>Riceve solo capacità del contesto DOM, senza trasferire regole di dominio al JS</summary>
-        /// <param name="general">Tasti ordinari inoltrabili</param>
-        /// <param name="control">Combinazioni Ctrl inoltrabili</param>
-        /// <param name="navigation">Tasti della superficie file inoltrabili</param>
-        /// <param name="panelSwitch">Tab inoltrabile</param>
-        /// <param name="terminal">F12 inoltrabile con la precedenza esistente</param>
-        /// <param name="modal">Modal bloccante visibile</param>
-        /// <param name="activeWindowId">Finestra modeless visibile più alta nello stack JS</param>
+        /// <summary>Receives only DOM context capabilities, without transferring domain rules to the JS</summary>
+        /// <param name="general">Forwardable ordinary keys</param>
+        /// <param name="control">Forwardable Ctrl combinations</param>
+        /// <param name="navigation">Forwardable keys of the file surface</param>
+        /// <param name="panelSwitch">Forwardable Tab</param>
+        /// <param name="terminal">Forwardable F12 with the existing precedence</param>
+        /// <param name="modal">Visible blocking modal</param>
+        /// <param name="activeWindowId">Highest visible modeless window in the JS stack</param>
         [JSInvokable]
         public void OnKeyboardContextChanged(bool general, bool control, bool navigation, bool panelSwitch, bool terminal, bool modal, string activeWindowId)
         {
@@ -3692,40 +3692,40 @@ namespace Bivium.Components.Pages
         }
 
         /// <summary>
-        /// Mostra l'esito positivo conclusivo senza sostituire il testo della status bar
+        /// Shows the final success outcome without replacing the status bar text
         /// </summary>
-        /// <param name="summary">Titolo sintetico</param>
-        /// <param name="detail">Dettaglio dell'esito</param>
+        /// <param name="summary">Short title</param>
+        /// <param name="detail">Outcome detail</param>
         private void NotifySuccess(string summary, string detail)
         {
             this.NotificationService.Notify(NotificationSeverity.Success, summary, detail, 4000);
         }
 
         /// <summary>
-        /// Mostra un warning conclusivo senza sostituire il testo della status bar
+        /// Shows a final warning without replacing the status bar text
         /// </summary>
-        /// <param name="summary">Titolo sintetico</param>
-        /// <param name="detail">Dettaglio del warning</param>
+        /// <param name="summary">Short title</param>
+        /// <param name="detail">Warning detail</param>
         private void NotifyWarning(string summary, string detail)
         {
             this.NotificationService.Notify(NotificationSeverity.Warning, summary, detail, 6000);
         }
 
         /// <summary>
-        /// Mostra un errore conclusivo senza sostituire il testo della status bar
+        /// Shows a final error without replacing the status bar text
         /// </summary>
-        /// <param name="summary">Titolo sintetico</param>
-        /// <param name="detail">Dettaglio dell'errore</param>
+        /// <param name="summary">Short title</param>
+        /// <param name="detail">Error detail</param>
         private void NotifyError(string summary, string detail)
         {
             this.NotificationService.Notify(NotificationSeverity.Error, summary, detail, 8000);
         }
 
         /// <summary>
-        /// Presenta un warning conclusivo con il canale previsto dalla variante UI
+        /// Presents a final warning through the channel provided by the UI variant
         /// </summary>
-        /// <param name="summary">Titolo sintetico</param>
-        /// <param name="detail">Dettaglio del warning</param>
+        /// <param name="summary">Short title</param>
+        /// <param name="detail">Warning detail</param>
         private void ShowOperationWarning(string summary, string detail)
         {
             this.NotifyWarning(summary, detail);
@@ -3823,22 +3823,22 @@ namespace Bivium.Components.Pages
         #endregion
 
         /// <summary>
-        /// Distingue la navigazione ordinaria dai trasferimenti tra gli stack della cronologia
+        /// Distinguishes ordinary navigation from transfers between the history stacks
         /// </summary>
         private enum PanelNavigationKind
         {
             /// <summary>
-            /// Nuova destinazione
+            /// New destination
             /// </summary>
             Ordinary,
 
             /// <summary>
-            /// Destinazione precedente
+            /// Previous destination
             /// </summary>
             Back,
 
             /// <summary>
-            /// Destinazione successiva
+            /// Next destination
             /// </summary>
             Forward
         }

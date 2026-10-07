@@ -2,32 +2,32 @@ using System;
 
 namespace Bivium.Models
 {
-    /// <summary>Misure ricevute dall'adapter JS delle finestre desktop</summary>
+    /// <summary>Measurements received from the JS adapter of the desktop windows</summary>
     public sealed class FloatingWindowGeometryUpdate
     {
-        /// <summary>Identità catturata dal mount JS, non letta nuovamente dal DOM</summary>
+        /// <summary>Identity captured by the JS mount, not read again from the DOM</summary>
         public string SessionId { get; set; } = "";
-        /// <summary>Sequenza monotona della registrazione per scartare callback riordinati</summary>
+        /// <summary>Monotonic registration sequence used to discard reordered callbacks</summary>
         public long Sequence { get; set; }
-        /// <summary>Generazione del lease catturata dalla registrazione JS</summary>
+        /// <summary>Lease generation captured by the JS registration</summary>
         public long LeaseGeneration { get; set; }
-        /// <summary>Coordinata orizzontale</summary>
+        /// <summary>Horizontal coordinate</summary>
         public double Left { get; set; }
-        /// <summary>Coordinata verticale</summary>
+        /// <summary>Vertical coordinate</summary>
         public double Top { get; set; }
-        /// <summary>Larghezza misurata</summary>
+        /// <summary>Measured width</summary>
         public double Width { get; set; }
-        /// <summary>Altezza misurata</summary>
+        /// <summary>Measured height</summary>
         public double Height { get; set; }
-        /// <summary>Larghezza viewport sorgente</summary>
+        /// <summary>Source viewport width</summary>
         public double ViewportWidth { get; set; }
-        /// <summary>Altezza viewport sorgente</summary>
+        /// <summary>Source viewport height</summary>
         public double ViewportHeight { get; set; }
-        /// <summary>Ordine MRU</summary>
+        /// <summary>MRU order</summary>
         public long MruOrder { get; set; }
-        /// <summary>Identità semantica del controllo focalizzato</summary>
+        /// <summary>Semantic identity of the focused control</summary>
         public string FocusTarget { get; set; } = "";
-        /// <summary>Scarta misure non finite o prive di un rettangolo visibile</summary>
+        /// <summary>Discards non-finite measurements or those without a visible rectangle</summary>
         public bool IsValid => double.IsFinite(this.Left) && double.IsFinite(this.Top) && double.IsFinite(this.Width) && double.IsFinite(this.Height) && double.IsFinite(this.ViewportWidth) && double.IsFinite(this.ViewportHeight) && this.Width > 0 && this.Height > 0 && this.ViewportWidth > 0 && this.ViewportHeight > 0 && this.MruOrder >= 0;
     }
 }

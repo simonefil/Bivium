@@ -8,19 +8,19 @@ using XTerm.Common;
 namespace Bivium.Services
 {
     /// <summary>
-    /// Provenienza delle celle archiviate, invalidata dalle scritture e dal riciclo di XTerm
+    /// Provenance of the archived cells, invalidated by writes and by XTerm recycling
     /// </summary>
     internal sealed class TerminalHistoryRowState
     {
         #region Proprietà
 
         /// <summary>
-        /// Celle già consolidate nello storico esterno, indipendentemente dal loro testo
+        /// Cells already consolidated in the external history, regardless of their text
         /// </summary>
         public bool[] Archived { get; }
 
         /// <summary>
-        /// Provenienza di una riga vuota, che non possiede celle serializzate
+        /// Provenance of an empty row, which owns no serialized cells
         /// </summary>
         public bool EmptyArchived { get; set; }
 
@@ -29,9 +29,9 @@ namespace Bivium.Services
         #region Costruttore
 
         /// <summary>
-        /// Alloca un bit logico per ciascuna colonna della riga
+        /// Allocates one logical bit for each column of the row
         /// </summary>
-        /// <param name="length">Numero di colonne</param>
+        /// <param name="length">Number of columns</param>
         public TerminalHistoryRowState(int length)
         {
             this.Archived = new bool[length];
@@ -42,10 +42,10 @@ namespace Bivium.Services
         #region Metodi pubblici
 
         /// <summary>
-        /// Recupera lo stato soltanto finché la riga conserva la propria cache
+        /// Retrieves the state only while the row keeps its own cache
         /// </summary>
-        /// <param name="line">Riga reale del buffer</param>
-        /// <returns>Provenienza valida della riga corrente</returns>
+        /// <param name="line">Actual buffer row</param>
+        /// <returns>Valid provenance of the current row</returns>
         public static TerminalHistoryRowState Get(BufferLine line)
         {
             if (line.Cache is TerminalHistoryRowState state)
@@ -56,11 +56,11 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Estrae i frammenti ancora mutabili senza confrontare testo di righe diverse
+        /// Extracts the still-mutable fragments without comparing text of different rows
         /// </summary>
-        /// <param name="snapshot">Contenuto immutabile da filtrare</param>
-        /// <param name="selected">Colonne da consolidare, oppure tutte se null</param>
-        /// <returns>Frammenti nell'ordine originale</returns>
+        /// <param name="snapshot">Immutable content to filter</param>
+        /// <param name="selected">Columns to consolidate, or all if null</param>
+        /// <returns>Fragments in the original order</returns>
         public List<TerminalLineSnapshot> Extract(TerminalLineSnapshot snapshot, bool[] selected = null)
         {
             List<TerminalLineSnapshot> result = new List<TerminalLineSnapshot>();
@@ -106,7 +106,7 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Consolida anche il padding, che il reflow può incorporare in una riga mista
+        /// Also consolidates the padding, which the reflow can merge into a mixed row
         /// </summary>
         public void Commit()
         {
@@ -118,22 +118,22 @@ namespace Bivium.Services
     }
 
     /// <summary>
-    /// Trasporta la provenienza usando Resize pubblico su una copia con marcatori numerici
+    /// Carries the provenance using the public Resize on a copy with numeric markers
     /// </summary>
     internal sealed class TerminalHistoryReflow
     {
         #region Variabili di classe
 
-        /// <summary>Buffer reale, ridimensionato dal chiamante tra costruzione e Complete</summary>
+        /// <summary>Real buffer, resized by the caller between construction and Complete</summary>
         private readonly TerminalBuffer _buffer;
 
-        /// <summary>Copia marcata necessaria soltanto per il reflow delle colonne normali</summary>
+        /// <summary>Marked copy needed only for the reflow of normal columns</summary>
         private readonly TerminalBuffer _shadow;
 
-        /// <summary>Provenienza congelata prima del resize</summary>
+        /// <summary>Provenance frozen before the resize</summary>
         private readonly List<SourceRow> _sources = new List<SourceRow>();
 
-        /// <summary>Identità delle righe quando il resize non esegue reflow</summary>
+        /// <summary>Row identities when the resize performs no reflow</summary>
         private readonly Dictionary<BufferLine, int> _indices = new Dictionary<BufferLine, int>();
 
         #endregion
@@ -141,13 +141,13 @@ namespace Bivium.Services
         #region Costruttore
 
         /// <summary>
-        /// Congela soltanto gli snapshot del viewport; lo scrollback richiede solo bit di provenienza
+        /// Freezes only the viewport snapshots; the scrollback requires only provenance bits
         /// </summary>
-        /// <param name="buffer">Buffer normale o alternate della sessione</param>
-        /// <param name="cols">Nuova larghezza</param>
-        /// <param name="rows">Nuova altezza</param>
-        /// <param name="normal">True per il buffer che supporta il reflow</param>
-        /// <param name="serialize">Serializzatore del protocollo Bivium</param>
+        /// <param name="buffer">Normal or alternate buffer of the session</param>
+        /// <param name="cols">New width</param>
+        /// <param name="rows">New height</param>
+        /// <param name="normal">True for the buffer that supports reflow</param>
+        /// <param name="serialize">Bivium protocol serializer</param>
         public TerminalHistoryReflow(TerminalBuffer buffer, int cols, int rows, bool normal, Func<BufferLine, TerminalLineSnapshot> serialize)
         {
             this._buffer = buffer;
@@ -187,7 +187,7 @@ namespace Bivium.Services
                 BufferLine copy = this._shadow.Lines[row];
                 copy.Resize(line.Length, BufferCell.Space);
                 copy.IsWrapped = line.IsWrapped;
-                // Entrambi i metadati impediscono il reflow del gruppo nella stessa API pubblica
+                // Both metadata items prevent the group reflow in the same public API
                 copy.LineAttribute = line.HasSizedRuns ? LineAttribute.DoubleWidth : line.LineAttribute;
                 for (int column = 0; column < line.Length; column++)
                 {
@@ -213,9 +213,9 @@ namespace Bivium.Services
         #region Metodi pubblici
 
         /// <summary>
-        /// Archivia ciò che il resize sposta fuori dal viewport e riassocia le celle superstiti
+        /// Archives what the resize moves out of the viewport and re-associates the surviving cells
         /// </summary>
-        /// <param name="archive">Archivio segmentato della sessione</param>
+        /// <param name="archive">Segmented archive of the session</param>
         public void Complete(TerminalHistoryArchive archive)
         {
             for (int row = this._buffer.BaseY; row < Math.Min(this._buffer.Lines.Length, this._buffer.BaseY + this._buffer.Rows); row++)
@@ -225,8 +225,8 @@ namespace Bivium.Services
                         source.Visible[sourceColumn] = true;
             }
 
-            // L'archivio è append-only: se sparisce un suffisso, consolida anche il prefisso
-            // ancora visibile. Le sue celle restano a schermo ma l'export non le ripete
+            // The archive is append-only: if a suffix disappears, it also consolidates the prefix
+            // that is still visible. Its cells stay on screen but the export does not repeat them
             int lastSource = -1;
             int lastColumn = -1;
             for (int index = 0; index < this._sources.Count; index++)
@@ -282,13 +282,13 @@ namespace Bivium.Services
         #region Metodi privati
 
         /// <summary>
-        /// Legge l'identità dal marcatore, mai dal testo o dal colore del terminale reale
+        /// Reads the identity from the marker, never from the text or color of the real terminal
         /// </summary>
-        /// <param name="row">Riga dopo il resize</param>
-        /// <param name="column">Colonna dopo il resize</param>
-        /// <param name="source">Riga originaria</param>
-        /// <param name="sourceColumn">Colonna originaria</param>
-        /// <returns>True per una cella superstite con provenienza nota</returns>
+        /// <param name="row">Row after the resize</param>
+        /// <param name="column">Column after the resize</param>
+        /// <param name="source">Original row</param>
+        /// <param name="sourceColumn">Original column</param>
+        /// <returns>True for a surviving cell with known provenance</returns>
         private bool TryGetSource(int row, int column, out SourceRow source, out int sourceColumn)
         {
             source = null;
@@ -305,7 +305,7 @@ namespace Bivium.Services
                     return false;
                 BufferCell cell = this._shadow.Lines[row][column];
                 BufferCell actual = this._buffer.Lines[row][column];
-                // OSC 66 può cancellare un run durante il clipping: quella cella non è sopravvissuta
+                // OSC 66 can erase a run during clipping: that cell did not survive
                 if (actual.CodePoint != cell.CodePoint || actual.ClusterId != cell.ClusterId || actual.Width != cell.Width)
                     return false;
                 if (cell.Attributes.GetFgColorMode() != 1 || cell.Attributes.GetBgColorMode() != 1)
@@ -324,22 +324,22 @@ namespace Bivium.Services
         #region Classi annidate
 
         /// <summary>
-        /// Una sola allocazione di identità per riga, senza oggetti o copie di testo per cella
+        /// A single identity allocation per row, without objects or text copies per cell
         /// </summary>
         private sealed class SourceRow
         {
             /// <summary>
-            /// Provenienza già consolidata nella riga originaria
+            /// Provenance already consolidated in the original row
             /// </summary>
             public TerminalHistoryRowState State { get; set; }
 
             /// <summary>
-            /// Snapshot della riga originaria quando apparteneva al viewport
+            /// Snapshot of the original row when it belonged to the viewport
             /// </summary>
             public TerminalLineSnapshot Snapshot { get; set; }
 
             /// <summary>
-            /// Celle originarie ancora visibili dopo il resize
+            /// Original cells still visible after the resize
             /// </summary>
             public bool[] Visible { get; set; }
         }

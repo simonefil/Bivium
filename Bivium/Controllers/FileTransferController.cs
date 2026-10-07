@@ -227,7 +227,7 @@ namespace Bivium.Controllers
             }
         }
 
-        /// <summary>Manifest e ricevute non sono mai restituiti a un attachment senza lease</summary>
+        /// <summary>Manifest and receipts are never returned to an attachment without a lease</summary>
         [HttpGet("upload-state")]
         public IActionResult GetUploadState()
         {
@@ -237,7 +237,7 @@ namespace Bivium.Controllers
             return upload == null ? this.StatusCode(409, "Workspace lease revoked") : this.Ok(upload);
         }
 
-        /// <summary>Checkpoint del manifest via HTTP, senza dipendere dalle dimensioni dei messaggi SignalR</summary>
+        /// <summary>Manifest checkpoint over HTTP, without depending on SignalR message sizes</summary>
         [HttpPost("upload-manifest")]
         [RequestSizeLimit(WorkspaceUploadManifestRequest.MAX_REQUEST_BYTES)]
         public IActionResult SetUploadManifest([FromQuery] Guid id, [FromQuery] long revision, [FromBody] WorkspaceUploadManifestRequest manifest)
@@ -256,7 +256,7 @@ namespace Bivium.Controllers
             catch (ArgumentException ex) { return this.UploadFailure(token, id, 400, ex.Message); }
         }
 
-        /// <summary>Avvio esplicito dopo la riselezione verificata della sorgente</summary>
+        /// <summary>Explicit start after the verified reselection of the source</summary>
         [HttpPost("upload-start")]
         public IActionResult StartUpload([FromQuery] Guid id, [FromQuery] long revision)
         {
@@ -267,7 +267,7 @@ namespace Bivium.Controllers
             catch (InvalidOperationException ex) { return this.Conflict(ex.Message); }
         }
 
-        /// <summary>La conclusione deriva dalle ricevute server e dalla finalizzazione directory</summary>
+        /// <summary>Completion derives from the server receipts and the directory finalization</summary>
         [HttpPost("upload-complete")]
         public IActionResult CompleteUpload([FromQuery] Guid id)
         {
@@ -283,7 +283,7 @@ namespace Bivium.Controllers
 
         #region Private Methods
 
-        /// <summary>Conserva l'errore HTTP nel workspace senza consentire pubblicazioni da lease obsolete</summary>
+        /// <summary>Keeps the HTTP error in the workspace without allowing publications from stale leases</summary>
         private IActionResult UploadFailure(WorkspaceClientToken token, Guid sessionId, int status, string message)
         {
             this._workspaceService.RecordUploadError(token, sessionId, message);

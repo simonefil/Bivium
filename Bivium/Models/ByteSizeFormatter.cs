@@ -1,17 +1,17 @@
 namespace Bivium.Models
 {
     /// <summary>
-    /// Formattazione condivisa delle dimensioni in byte per la UI
+    /// Shared formatting of byte sizes for the UI
     /// </summary>
     public static class ByteSizeFormatter
     {
         #region Metodi pubblici
 
         /// <summary>
-        /// Formatta un numero di byte in B, KB, MB o GB con un decimale
+        /// Formats a byte count as B, KB, MB or GB with one decimal
         /// </summary>
-        /// <param name="bytes">Dimensione in byte</param>
-        /// <returns>Dimensione leggibile</returns>
+        /// <param name="bytes">Size in bytes</param>
+        /// <returns>Human-readable size</returns>
         public static string Format(long bytes)
         {
             string result;

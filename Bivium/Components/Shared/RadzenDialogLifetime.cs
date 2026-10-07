@@ -6,51 +6,51 @@ using System.Threading;
 namespace Bivium.Components.Shared
 {
     /// <summary>
-    /// Traccia l'ownership di un dialog Radzen senza chiudere dialog sovrapposti di altri adapter
+    /// Tracks the ownership of a Radzen dialog without closing overlapping dialogs of other adapters
     /// </summary>
     internal sealed class RadzenDialogLifetime : IDisposable
     {
-        #region Variabili di classe
+        #region Class Variables
 
         /// <summary>
-        /// Servizio scoped condiviso dal circuito
+        /// Scoped service shared by the circuit
         /// </summary>
         private readonly DialogService _dialogService;
 
         /// <summary>
-        /// Opzioni che identificano l'apertura posseduta dall'adapter
+        /// Options identifying the opening owned by the adapter
         /// </summary>
         private DialogOptions _ownedOptions;
 
         /// <summary>
-        /// Numero di dialog aperti sopra quello posseduto
+        /// Number of dialogs open above the owned one
         /// </summary>
         private int _dialogsAbove;
 
         /// <summary>
-        /// Indica che il dialog posseduto è presente nello stack Radzen
+        /// Indicates that the owned dialog is present in the Radzen stack
         /// </summary>
         private bool _isOpen;
 
         /// <summary>
-        /// Indica che le sottoscrizioni sono già state rilasciate
+        /// Indicates that the subscriptions have already been released
         /// </summary>
         private bool _isDisposed;
 
-        /// <summary>Chiusura differita finché il dialog posseduto torna in cima</summary>
+        /// <summary>Close deferred until the owned dialog returns to the top</summary>
         private bool _closeRequested;
 
-        /// <summary>Dispatcher del circuito per chiusure dopo il ritorno di OnClose Radzen</summary>
+        /// <summary>Circuit dispatcher for closes after the Radzen OnClose returns</summary>
         private readonly SynchronizationContext _dispatcher;
 
         #endregion
 
-        #region Costruttore
+        #region Constructor
 
         /// <summary>
-        /// Crea il tracker per il servizio dialog del circuito corrente
+        /// Creates the tracker for the dialog service of the current circuit
         /// </summary>
-        /// <param name="dialogService">Servizio dialog scoped</param>
+        /// <param name="dialogService">Scoped dialog service</param>
         public RadzenDialogLifetime(DialogService dialogService)
         {
             this._dialogService = dialogService;
@@ -61,12 +61,12 @@ namespace Bivium.Components.Shared
 
         #endregion
 
-        #region Metodi pubblici
+        #region Public Methods
 
         /// <summary>
-        /// Registra le opzioni univoche della prossima apertura posseduta
+        /// Registers the unique options of the next owned opening
         /// </summary>
-        /// <param name="options">Opzioni passate a <see cref="DialogService.OpenAsync(string, Microsoft.AspNetCore.Components.RenderFragment{DialogService}, DialogOptions, CancellationToken?)"/></param>
+        /// <param name="options">Options passed to <see cref="DialogService.OpenAsync(string, Microsoft.AspNetCore.Components.RenderFragment{DialogService}, DialogOptions, CancellationToken?)"/></param>
         public void Begin(DialogOptions options)
         {
             this._ownedOptions = options;
@@ -76,9 +76,9 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Dimentica l'apertura terminata se appartiene ancora alle opzioni indicate
+        /// Forgets the finished opening if it still belongs to the given options
         /// </summary>
-        /// <param name="options">Opzioni dell'apertura terminata</param>
+        /// <param name="options">Options of the finished opening</param>
         public void Complete(DialogOptions options)
         {
             if (!ReferenceEquals(this._ownedOptions, options))
@@ -90,16 +90,16 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Restituisce se il dialog posseduto è aperto e in cima allo stack
+        /// Returns whether the owned dialog is open and at the top of the stack
         /// </summary>
-        /// <returns><see langword="true"/> solo quando una chiusura non coinvolge dialog altrui</returns>
+        /// <returns><see langword="true"/> only when a close does not involve other owners' dialogs</returns>
         public bool CanClose()
         {
             return this._isOpen && this._dialogsAbove == 0;
         }
 
         /// <summary>
-        /// Rilascia le sottoscrizioni al servizio scoped
+        /// Releases the subscriptions to the scoped service
         /// </summary>
         public void Dispose()
         {
@@ -112,7 +112,7 @@ namespace Bivium.Components.Shared
                 this.Unsubscribe();
         }
 
-        /// <summary>Richiede la chiusura senza coinvolgere altri owner nello stack</summary>
+        /// <summary>Requests closing without involving other owners in the stack</summary>
         public void RequestClose()
         {
             this._closeRequested = true;
@@ -120,7 +120,7 @@ namespace Bivium.Components.Shared
                 this._dialogService.Close();
         }
 
-        /// <summary>Rilascia le sottoscrizioni dopo la chiusura posseduta</summary>
+        /// <summary>Releases the subscriptions after the owned close</summary>
         private void Unsubscribe()
         {
             this._dialogService.OnOpen -= this.HandleOpen;
@@ -129,15 +129,15 @@ namespace Bivium.Components.Shared
 
         #endregion
 
-        #region Metodi privati
+        #region Private Methods
 
         /// <summary>
-        /// Aggiorna la profondità quando Radzen apre un dialog
+        /// Updates the depth when Radzen opens a dialog
         /// </summary>
-        /// <param name="title">Titolo dell'apertura</param>
-        /// <param name="componentType">Tipo del contenuto</param>
-        /// <param name="parameters">Parametri del contenuto</param>
-        /// <param name="options">Opzioni che identificano l'apertura</param>
+        /// <param name="title">Title of the opening</param>
+        /// <param name="componentType">Content type</param>
+        /// <param name="parameters">Content parameters</param>
+        /// <param name="options">Options identifying the opening</param>
         private void HandleOpen(string title, Type componentType, Dictionary<string, object> parameters, DialogOptions options)
         {
             if (ReferenceEquals(options, this._ownedOptions))
@@ -152,9 +152,9 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Aggiorna la profondità quando Radzen chiude il dialog in cima allo stack
+        /// Updates the depth when Radzen closes the dialog at the top of the stack
         /// </summary>
-        /// <param name="result">Risultato del dialog chiuso</param>
+        /// <param name="result">Result of the closed dialog</param>
         private void HandleClose(dynamic result)
         {
             if (!this._isOpen)
@@ -175,7 +175,7 @@ namespace Bivium.Components.Shared
             }
         }
 
-        /// <summary>Radzen rimuove stack e task dopo OnClose: non chiudere ricorsivamente dentro l'evento</summary>
+        /// <summary>Radzen removes the stack and task after OnClose: do not close recursively inside the event</summary>
         private void CloseWhenTopmost()
         {
             if (this._closeRequested && this.CanClose())

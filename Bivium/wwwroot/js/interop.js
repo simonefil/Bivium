@@ -3,12 +3,12 @@
 
 import { invokeCircuitMethod as invokeConnectedCircuitMethod, isCircuitConnected, registerCircuitParticipant } from './connection.js';
 
-// Condiviso anche fra import con query string diverse: nessun publisher del desktop sfugge al drain.
+// Shared also across imports with different query strings: no desktop publisher escapes the drain.
 const publicationKey = Symbol.for('bivium.desktopPublications');
 const desktopPublications = globalThis[publicationKey] ??= { pending: new Set(), panelTrackers: new Set(), windows: new Set(), freeze: null, failures: 0, composing: false };
 desktopPublications.pathTrackers ??= new Set();
 desktopPublications.surfaceTrackers ??= new Set();
-// Guardia per i test node, dove il modulo viene importato senza DOM
+// Guard for node tests, where the module is imported without a DOM
 if (typeof window !== 'undefined' && !desktopPublications.compositionRegistered) {
     desktopPublications.compositionRegistered = true;
     window.addEventListener('compositionstart', function () { desktopPublications.composing = true; }, true);
@@ -16,10 +16,10 @@ if (typeof window !== 'undefined' && !desktopPublications.compositionRegistered)
 }
 
 /**
- * Esegue la hydration visuale al frame successivo. Le schede in background sospendono requestAnimationFrame:
- * il timeout garantisce che gli adapter escano da restoring e non blocchino il takeover.
- * @param {Function} callback - Lavoro da eseguire una sola volta.
- * @returns {Function} Annulla la richiesta se non è ancora partita.
+ * Runs the visual hydration on the next frame. Background tabs suspend requestAnimationFrame:
+ * the timeout guarantees that adapters leave restoring and do not block the takeover.
+ * @param {Function} callback - Work to run exactly once.
+ * @returns {Function} Cancels the request if it has not started yet.
  */
 export function requestVisualFrame(callback) {
     let done = false;
@@ -40,7 +40,7 @@ export function requestVisualFrame(callback) {
     return cancel;
 }
 
-/** Proxy di trasporto per includere i callback terminali esistenti senza duplicarne la security. */
+/** Transport proxy to include the existing terminal callbacks without duplicating their security. */
 export function createDesktopPublicationReference(reference) {
     return { invokeMethodAsync: (...args) => {
         const pending = reference.invokeMethodAsync(...args);
@@ -63,7 +63,7 @@ function invokeCircuitMethod(...args) {
     return pending;
 }
 
-/** Blocca ingressi browser, non heartbeat/disconnessione; il server blocca separatamente i nuovi comandi. */
+/** Blocks browser inputs, not heartbeat/disconnection; the server separately blocks new commands. */
 // Only called from an explicitly confirmed workspace clipboard request, never during hydration.
 export async function writeWorkspaceClipboardText(text) {
     const pending = navigator.clipboard.writeText(text);
@@ -81,7 +81,7 @@ export function beginWorkspaceHandoff(id, remainingMilliseconds = 10000, workflo
     if (!isCircuitConnected() || (modal && (!workflowId || workflowModal?.dataset.workspaceWorkflowId !== workflowId)) || desktopPublications.freeze || desktopPublications.composing) return false;
     const root = document.getElementById('workspace-desktop');
     if (!root) return false;
-    // Le superfici dichiarate dall'app devono avere completato il mount dell'adapter
+    // Surfaces declared by the app must have completed the adapter mount
     const surfaceKey = Symbol.for('bivium.surfaceAdapter');
     for (const surface of document.querySelectorAll('[data-workspace-menu-surface], [data-workspace-context-surface], [data-workspace-format-surface], [data-workspace-dropdown-surface], [data-workspace-renamer-surface], [data-workspace-terminal-view], [data-workspace-terminal-strip], [data-workspace-surface]:not([data-workspace-surface=""])')) {
         if (!surface[surfaceKey]?.ready()) return false;
@@ -90,20 +90,20 @@ export function beginWorkspaceHandoff(id, remainingMilliseconds = 10000, workflo
     if (active?.classList.contains('terminal-ime-input') && active.value) return false;
     for (const registration of desktopPublications.windows) registration.captureFocus();
     for (const registration of desktopPublications.pathTrackers) registration.capture();
-    // Capture precede mouseup/inert e qualsiasi chiusura di popup causata dal freeze
+    // Capture precedes mouseup/inert and any popup closing caused by the freeze
     for (const registration of desktopPublications.surfaceTrackers) {
         if (!registration.ready()) return false;
         registration.capture();
     }
-    // I TextBox renamer sono Immediate: non reinviare onchange, che rigenererebbe preview Rand già materializzate.
-    // Solo i Numeric mantengono un valore fino al change; il loro normale commit precede il freeze.
+    // Renamer TextBoxes are Immediate: do not resend onchange, which would regenerate already materialized Rand previews.
+    // Only Numeric controls keep a value until change; their normal commit precedes the freeze.
     if (active?.matches('input') && active.closest('.renamer-window .rz-numeric')) {
         active.dispatchEvent(new Event('change', { bubbles: true }));
     }
     const controller = new AbortController();
     const freeze = { id, root, controller, active, modal, workflowId, failures: desktopPublications.failures };
     desktopPublications.freeze = freeze;
-    // Conclude drag/resize, ma i tracker visuali non pubblicano la chiusura sintetica
+    // Ends drag/resize, but the visual trackers do not publish the synthetic closing
     document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
     const block = function (event) {
         if (!desktopPublications.freeze) return;
@@ -115,16 +115,16 @@ export function beginWorkspaceHandoff(id, remainingMilliseconds = 10000, workflo
     }
     root.inert = true;
     if (modal) modal.inert = true;
-    // Fallback browser-only: sblocca l'input, mai il lease, se il circuito non può più eseguire il cleanup
+    // Browser-only fallback: unlocks input, never the lease, if the circuit can no longer run the cleanup
     freeze.timer = window.setTimeout(function () { endWorkspaceHandoff(id, isCircuitConnected()); }, Math.max(1, Math.min(10000, remainingMilliseconds)));
     return true;
 }
 
 /**
- * Attende che un ripristino visuale in corso termini, entro la vita del freeze che lo richiede.
- * @param {Function} isRestoring - Stato corrente del ripristino.
- * @param {object} freeze - Freeze proprietario del tentativo.
- * @returns {Promise<boolean>} False se il freeze è terminato o il circuito è caduto.
+ * Waits for an ongoing visual restore to finish, within the lifetime of the freeze that requests it.
+ * @param {Function} isRestoring - Current restore state.
+ * @param {object} freeze - Freeze owning the attempt.
+ * @returns {Promise<boolean>} False if the freeze has ended or the circuit has dropped.
  */
 async function waitForVisualRestore(isRestoring, freeze) {
     while (isRestoring()) {
@@ -134,13 +134,13 @@ async function waitForVisualRestore(isRestoring, freeze) {
     return desktopPublications.freeze === freeze;
 }
 
-/** Flush esplicito dei timer scroll e di tutte le chiamate già in volo, senza un'attesa sotto lock server. */
+/** Explicit flush of the scroll timers and of all in-flight calls, without waiting under a server lock. */
 export async function flushDesktopPublications(id) {
     const freeze = desktopPublications.freeze;
     if (!freeze || freeze.id !== id || !isCircuitConnected()) return false;
     try {
         for (const registration of desktopPublications.surfaceTrackers) if (!registration.ready()) return false;
-        // Un ripristino appena avviato (reload recente) si attende: rifiutarlo farebbe fallire il takeover
+        // A just-started restore (recent reload) is awaited: rejecting it would make the takeover fail
         for (const registration of desktopPublications.pathTrackers) {
             if (!await waitForVisualRestore(function () { return registration.restoring; }, freeze)) return false;
             registration.capture();
@@ -159,8 +159,8 @@ export async function flushDesktopPublications(id) {
             await Promise.all(Array.from(desktopPublications.pending));
             if (desktopPublications.freeze !== freeze || !isCircuitConnected()) return false;
         }
-        // Dopo i commit Numeric ammessi prima del freeze: aggiorna solo il visuale Renamer,
-        // conservando focus/popup pre-freeze e senza reinviare valori o eventi di form.
+        // After the Numeric commits allowed before the freeze: updates only the Renamer visuals,
+        // preserving pre-freeze focus/popup and without resending form values or events.
         for (const registration of desktopPublications.surfaceTrackers) registration.captureFinal?.();
         while (desktopPublications.pending.size) {
             await Promise.all(Array.from(desktopPublications.pending));
@@ -174,7 +174,7 @@ export async function flushDesktopPublications(id) {
     }
 }
 
-/** Libera esclusivamente il freeze proprietario del tentativo; non sblocca una richiesta successiva. */
+/** Releases only the freeze owning the attempt; does not unlock a later request. */
 export function endWorkspaceHandoff(id, restoreFocus = false) {
     const freeze = desktopPublications.freeze;
     if (!freeze || freeze.id !== id) return;
@@ -186,7 +186,7 @@ export function endWorkspaceHandoff(id, restoreFocus = false) {
     if (restoreFocus && freeze.active?.isConnected) freeze.active.focus({ preventScroll: true });
 }
 
-/** Base dello stack modeless: sotto header/footer, dialog e popup Radzen (vedi --bivium-floating-window-zindex in app.css). */
+/** Base of the modeless stack: below header/footer, dialogs and Radzen popups (see --bivium-floating-window-zindex in app.css). */
 function getFloatingWindowBaseZIndex() {
     const value = Number.parseInt(getComputedStyle(document.documentElement).getPropertyValue('--bivium-floating-window-zindex'), 10);
     return Number.isFinite(value) ? value : 100;
@@ -630,7 +630,7 @@ export function captureKeyboard(dotNetRef) {
         const nativeOwner = activeEl?.closest?.(nativeOwnerSelector);
         // Semantic input widgets own their keys (including Ctrl chords), after reserved F12.
         if (activeEl?.closest?.(semanticControlSelector)) return;
-        // Typeahead appartiene al menu prima del dispatch Commander; chord espliciti e F12 restano invariati
+        // Typeahead belongs to the menu before the Commander dispatch; explicit chords and F12 stay unchanged
         if (!ctrl && !alt && !e.metaKey && /^[\p{L}\p{N}]$/u.test(key) && activeEl?.closest?.('[role="menubar"], [role="menu"], .rz-menu')) return;
 
         // Navigation belongs only to the file surface, never to native controls or trees.
@@ -983,7 +983,7 @@ export function scrollCursorIntoView(cursorIndex = -1) {
     const focusedRow = radzenPanel.querySelector('tr.bivium-focused');
     const index = cursorIndex >= 0 ? cursorIndex : Number(focusedRow?.dataset.entryIndex ?? -1);
     scrollToFileListEntry(scroller, index, '', false, function () {
-        // Il focus DOM segue il cursore solo se è già sulla superficie file (o nel body): mai rubato a input, menu o finestre
+        // DOM focus follows the cursor only if it is already on the file surface (or in the body): never stolen from inputs, menus or windows
         const active = document.activeElement;
         if (active && active !== document.body && !active.closest?.('.radzen-panel-filelist')) return;
         if (isBlockingModalOpen() || desktopPublications.freeze) return;
@@ -1012,7 +1012,7 @@ function scrollToFileListEntry(scroller, index, path, alignStart, onComplete) {
     let stableRows = '';
     let finished = false;
     let frame = 0;
-    // Le schede in background sospendono requestAnimationFrame: la scadenza non può dipendere dai frame
+    // Background tabs suspend requestAnimationFrame: the deadline cannot depend on frames
     let deadlineTimer = 0;
     const inputs = ['wheel', 'touchstart', 'pointerdown', 'keydown'];
     function finish() {
@@ -1092,9 +1092,9 @@ const radzenColumnResizers = new Map();
 const MIN_RADZEN_FILE_COLUMN_WIDTH = 48;
 
 /**
- * Registra scroll semantico e misura pagina sul contenitore Radzen stabile.
- * @param {string} panelId - Identificatore applicativo del pannello.
- * @param {object} dotNetReference - Proprietario dei callback.
+ * Registers semantic scroll and page measurement on the stable Radzen container.
+ * @param {string} panelId - Application identifier of the panel.
+ * @param {object} dotNetReference - Owner of the callbacks.
  */
 export function registerRadzenFilePanel(panelId, dotNetReference) {
     unregisterRadzenFilePanel(panelId);
@@ -1137,8 +1137,8 @@ export function registerRadzenFilePanel(panelId, dotNetReference) {
 }
 
 /**
- * Rimuove tracker e richieste di scroll di un pannello Radzen.
- * @param {string} panelId - Identificatore applicativo del pannello.
+ * Removes trackers and scroll requests of a Radzen panel.
+ * @param {string} panelId - Application identifier of the panel.
  */
 export function unregisterRadzenFilePanel(panelId) {
     const tracker = radzenFilePanelTrackers.get(panelId);
@@ -1152,10 +1152,10 @@ export function unregisterRadzenFilePanel(panelId) {
 }
 
 /**
- * Ripristina una riga Radzen per percorso usando l'indice soltanto come hint transitorio.
- * @param {string} panelId - Identificatore applicativo del pannello.
- * @param {string} path - Percorso semantico da risolvere.
- * @param {number} index - Indice corrente usato per materializzare la riga.
+ * Restores a Radzen row by path using the index only as a transient hint.
+ * @param {string} panelId - Application identifier of the panel.
+ * @param {string} path - Semantic path to resolve.
+ * @param {number} index - Current index used to materialize the row.
  */
 export function restoreRadzenFilePanelScroll(panelId, path, index) {
     const tracker = radzenFilePanelTrackers.get(panelId);
@@ -1167,9 +1167,9 @@ export function restoreRadzenFilePanelScroll(panelId, path, index) {
 }
 
 /**
- * Misura le larghezze visibili delle cinque colonne Radzen.
- * @param {string} hostId - Identificatore del wrapper stabile della griglia.
- * @returns {number[]} Larghezze dei cinque header, oppure un array vuoto.
+ * Measures the visible widths of the five Radzen columns.
+ * @param {string} hostId - Identifier of the stable grid wrapper.
+ * @returns {number[]} Widths of the five headers, or an empty array.
  */
 export async function measureRadzenFileColumns(hostId) {
     const host = document.getElementById(hostId);
@@ -1186,9 +1186,9 @@ export async function measureRadzenFileColumns(hostId) {
 }
 
 /**
- * Registra un resize immediato sui resizer Radzen senza attendere il roundtrip Blazor Server del pointerdown.
- * @param {string} hostId - Identificatore del wrapper stabile della griglia.
- * @param {object} dotNetReference - Proprietario del layout semantico.
+ * Registers an immediate resize on the Radzen resizers without waiting for the Blazor Server roundtrip of the pointerdown.
+ * @param {string} hostId - Identifier of the stable grid wrapper.
+ * @param {object} dotNetReference - Owner of the semantic layout.
  */
 export function registerRadzenColumnResizer(hostId, dotNetReference) {
     const host = document.getElementById(hostId);
@@ -1206,13 +1206,13 @@ export function registerRadzenColumnResizer(hostId, dotNetReference) {
         const completed = drag;
         drag = null;
         if (completed.handle.hasPointerCapture?.(completed.pointerId)) completed.handle.releasePointerCapture(completed.pointerId);
-        // pointercancel annulla il gesto: le larghezze tornano al layout semantico al prossimo render
+        // pointercancel cancels the gesture: widths return to the semantic layout on the next render
         if (!completed.changed || event.type === 'pointercancel') return;
         invokeCircuitMethod(dotNetReference, 'OnRadzenColumnWidthsChanged', completed.ids, completed.widths).catch(function () { });
         event.preventDefault();
     }
     handles.forEach(function (handle, handleIndex) {
-        // Impedisce al browser touch di trasformare il trascinamento in scroll
+        // Prevents the touch browser from turning the drag into a scroll
         handle.style.touchAction = 'none';
         handle.addEventListener('pointerdown', function (event) {
             if (!event.isPrimary || event.button !== 0) return;
@@ -1239,7 +1239,7 @@ export function registerRadzenColumnResizer(hostId, dotNetReference) {
             event.preventDefault();
             event.stopImmediatePropagation();
         }, { capture: true, signal: controller.signal });
-        // Radzen avvia il proprio resize sul mousedown compatibile: resta di competenza dell'adapter
+        // Radzen starts its own resize on the compatible mousedown: it remains the adapter's responsibility
         handle.addEventListener('mousedown', function (event) {
             event.preventDefault();
             event.stopImmediatePropagation();
@@ -1257,7 +1257,7 @@ export function registerRadzenColumnResizer(hostId, dotNetReference) {
     }, { signal: controller.signal });
     document.addEventListener('pointerup', finish, { signal: controller.signal });
     document.addEventListener('pointercancel', finish, { signal: controller.signal });
-    // Il mouseup sintetico di beginWorkspaceHandoff abbandona il gesto senza pubblicarlo
+    // The synthetic mouseup of beginWorkspaceHandoff abandons the gesture without publishing it
     document.addEventListener('mouseup', function (event) { if (!event.isTrusted) drag = null; }, { signal: controller.signal });
 
     const registration = {
@@ -1273,20 +1273,20 @@ export function registerRadzenColumnResizer(hostId, dotNetReference) {
 }
 
 /**
- * Rimuove l'adapter di resize colonne di una griglia Radzen.
- * @param {string} hostId - Identificatore del wrapper stabile della griglia.
+ * Removes the column resize adapter of a Radzen grid.
+ * @param {string} hostId - Identifier of the stable grid wrapper.
  */
 export function unregisterRadzenColumnResizer(hostId) {
     radzenColumnResizers.get(hostId)?.dispose();
 }
 
 /**
- * Installa Tab, conferma Enter, annullamento Escape e guardia del focus sull'input interno di RadzenAutoComplete.
- * @param {string} hostId - Identificatore del wrapper applicativo.
- * @param {object} dotNetReference - Proprietario del callback autocomplete.
- * @param {number} generation - Lease del mount.
- * @param {object} draft - Draft visuale da idratare.
- * @returns {boolean} True quando l'adapter è installato sull'input corrente.
+ * Installs Tab, Enter confirmation, Escape cancellation and focus guard on the inner input of RadzenAutoComplete.
+ * @param {string} hostId - Identifier of the application wrapper.
+ * @param {object} dotNetReference - Owner of the autocomplete callback.
+ * @param {number} generation - Mount lease.
+ * @param {object} draft - Visual draft to hydrate.
+ * @returns {boolean} True when the adapter is installed on the current input.
  */
 export function installRadzenPathAdapter(hostId, dotNetReference, generation, draft) {
     const host = document.getElementById(hostId);
@@ -1295,7 +1295,7 @@ export function installRadzenPathAdapter(hostId, dotNetReference, generation, dr
     const existing = radzenPathAdapters.get(hostId);
     if (existing?.input === input && existing.generation === generation && existing.basePath === draft.basePath) return true;
     existing?.dispose();
-    // La lista viene portata nel body all'apertura: il riferimento si cattura finché è ancora nel wrapper
+    // The list is moved into the body on open: the reference is captured while it is still in the wrapper
     let list = host.querySelector('.rz-autocomplete-list');
 
     const controller = new AbortController();
@@ -1329,7 +1329,7 @@ export function installRadzenPathAdapter(hostId, dotNetReference, generation, dr
         if (!list?.isConnected) list = document.getElementById(input.getAttribute('aria-controls') || '') || host.querySelector('.rz-autocomplete-list');
         return list;
     }
-    // Il popup portato nel body ruberebbe il focus: il blur chiuderebbe l'editor prima della selezione
+    // The popup moved into the body would steal focus: the blur would close the editor before the selection
     document.addEventListener('mousedown', function (event) {
         if (document.activeElement !== input || !(event.target instanceof Element)) return;
         const panel = event.target.closest('.rz-autocomplete-panel');
@@ -1345,11 +1345,11 @@ export function installRadzenPathAdapter(hostId, dotNetReference, generation, dr
             return;
         }
         if (event.key === 'Enter') {
-            // Con un suggerimento evidenziato Enter appartiene a Radzen, che lo seleziona
+            // With a highlighted suggestion Enter belongs to Radzen, which selects it
             const current = getList();
             if (current && isVisibleElement(current) && current.querySelector('.rz-state-highlight')) return;
             if (event.isComposing || desktopPublications.freeze) return;
-            // Conferma con il valore DOM reale, non con un ValueChanged eventualmente ancora in volo
+            // Confirms with the real DOM value, not with a ValueChanged possibly still in flight
             const value = input.value;
             pending = track(pending.then(function () {
                 if (disposed) return;
@@ -1387,7 +1387,7 @@ export function installRadzenPathAdapter(hostId, dotNetReference, generation, dr
     desktopPublications.pathTrackers.add(registration);
     requestVisualFrame(function () {
         if (disposed || !input.isConnected) return;
-        // Hydration visuale senza input/change né navigazione
+        // Visual hydration without input/change or navigation
         input.value = draft.text;
         input.setSelectionRange(draft.selectionStart, draft.selectionEnd);
         if (draft.focused && !desktopPublications.freeze && !isBlockingModalOpen()) input.focus({ preventScroll: true });
@@ -1397,8 +1397,8 @@ export function installRadzenPathAdapter(hostId, dotNetReference, generation, dr
 }
 
 /**
- * Rimuove l'adapter di un editor percorso Radzen.
- * @param {string} hostId - Identificatore del wrapper applicativo.
+ * Removes the adapter of a Radzen path editor.
+ * @param {string} hostId - Identifier of the application wrapper.
  */
 export function uninstallRadzenPathAdapter(hostId) {
     radzenPathAdapters.get(hostId)?.dispose();
@@ -1624,7 +1624,7 @@ export function initWindowDrag(windowId, titlebarId, resizeHandleId, dotNetRefer
     });
     visibilityObserver.observe(win, { attributes: true, attributeFilter: ['class'] });
 
-    // Drag e resize con pointer events: mouse, touch e penna, con capture sul controllo che avvia il gesto
+    // Drag and resize with pointer events: mouse, touch and pen, with capture on the control that starts the gesture
     titlebar.style.touchAction = 'none';
     titlebar.addEventListener('pointerdown', function (e) {
         if (!e.isPrimary || e.button !== 0 || activePointerId !== null || isBlockingModalOpen() || e.target.closest('button, input, select, textarea, a, [role="tab"], [role="button"], [contenteditable="true"], .rz-tabview-nav, .terminal-tab')) return;
@@ -1683,7 +1683,7 @@ export function initWindowDrag(windowId, titlebarId, resizeHandleId, dotNetRefer
     }
     document.addEventListener('pointerup', function (e) { if (e.pointerId === activePointerId) endInteraction(); }, { signal: eventSignal });
     document.addEventListener('pointercancel', function (e) { if (e.pointerId === activePointerId) endInteraction(); }, { signal: eventSignal });
-    // Il mouseup sintetico di beginWorkspaceHandoff conclude il gesto prima del freeze
+    // The synthetic mouseup of beginWorkspaceHandoff ends the gesture before the freeze
     document.addEventListener('mouseup', function (e) { if (!e.isTrusted) endInteraction(); }, { signal: eventSignal });
 
     window.addEventListener('resize', function () {
@@ -1742,7 +1742,7 @@ export function disposeWindowDrag(windowId) {
     if (registration) registration.dispose();
 }
 
-/** Conferma la geometria finale della registrazione ancora corrente, anche dopo un timer throttled. */
+/** Confirms the final geometry of the registration that is still current, even after a throttled timer. */
 export async function flushWindowGeometry(windowId) {
     const registration = windowDragRegistrations.get(windowId);
     if (!registration) return !document.getElementById(windowId);

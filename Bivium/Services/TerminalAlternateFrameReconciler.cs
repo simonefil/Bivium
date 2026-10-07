@@ -7,39 +7,39 @@ using XTerm.Common;
 namespace Bivium.Services
 {
     /// <summary>
-    /// Conserva le righe ritirate da frame successivi del buffer alternate
+    /// Preserves the rows retired by subsequent frames of the alternate buffer
     /// </summary>
     internal sealed class TerminalAlternateFrameReconciler
     {
         #region Variabili di classe
 
         /// <summary>
-        /// Ultimo frame completo confrontabile, limitato a un viewport
+        /// Last complete comparable frame, limited to one viewport
         /// </summary>
         private List<FrameRow> _candidate = new List<FrameRow>();
 
         /// <summary>
-        /// Indica che un boundary ha aperto un possibile redraw non ancora riconciliato
+        /// Indicates that a boundary opened a possible redraw that is not yet reconciled
         /// </summary>
         private bool _pending;
 
         /// <summary>
-        /// Snapshot di presentazione riutilizzabili soltanto per il viewport corrente
+        /// Presentation snapshots reusable only for the current viewport
         /// </summary>
         private List<CachedRow> _rowCache = new List<CachedRow>();
 
         /// <summary>
-        /// Buffer a cui appartiene la cache bounded
+        /// Buffer that owns the bounded cache
         /// </summary>
         private TerminalBuffer _cachedBuffer;
 
         /// <summary>
-        /// Geometria della cache bounded
+        /// Geometry of the bounded cache
         /// </summary>
         private int _cachedRows;
 
         /// <summary>
-        /// Larghezza della cache bounded
+        /// Width of the bounded cache
         /// </summary>
         private int _cachedCols;
 
@@ -48,7 +48,7 @@ namespace Bivium.Services
         #region Proprietà
 
         /// <summary>
-        /// Indica se la prossima write deve osservare il viewport
+        /// Indicates whether the next write must observe the viewport
         /// </summary>
         public bool Pending { get { return this._pending; } }
 
@@ -57,12 +57,12 @@ namespace Bivium.Services
         #region Metodi pubblici
 
         /// <summary>
-        /// Chiude il frame precedente e adotta sempre quello uscente come nuova base del redraw
+        /// Closes the previous frame and always adopts the outgoing one as the new redraw base
         /// </summary>
-        /// <param name="buffer">Buffer alternate corrente</param>
-        /// <param name="rows">Altezza corrente del viewport</param>
-        /// <param name="serialize">Serializzatore immutabile delle righe</param>
-        /// <param name="append">Destinazione dei frammenti consolidati</param>
+        /// <param name="buffer">Current alternate buffer</param>
+        /// <param name="rows">Current viewport height</param>
+        /// <param name="serialize">Immutable row serializer</param>
+        /// <param name="append">Destination of the consolidated fragments</param>
         public void BeforeRedraw(TerminalBuffer buffer, int rows, Func<BufferLine, TerminalLineSnapshot> serialize, Action<TerminalLineSnapshot> append)
         {
             ValidateArguments(buffer, serialize, append);
@@ -77,31 +77,31 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Tenta la riconciliazione dopo la write soltanto quando un boundary è pendente
+        /// Attempts reconciliation after the write only when a boundary is pending
         /// </summary>
-        /// <param name="buffer">Buffer alternate corrente</param>
-        /// <param name="rows">Altezza corrente del viewport</param>
-        /// <param name="serialize">Serializzatore immutabile delle righe</param>
-        /// <param name="append">Destinazione dei frammenti consolidati</param>
+        /// <param name="buffer">Current alternate buffer</param>
+        /// <param name="rows">Current viewport height</param>
+        /// <param name="serialize">Immutable row serializer</param>
+        /// <param name="append">Destination of the consolidated fragments</param>
         public void AfterWrite(TerminalBuffer buffer, int rows, Func<BufferLine, TerminalLineSnapshot> serialize, Action<TerminalLineSnapshot> append)
         {
             this.Reconcile(buffer, rows, serialize, append, false);
         }
 
         /// <summary>
-        /// Conclude la riconciliazione alla fine di una transazione atomica
+        /// Completes the reconciliation at the end of an atomic transaction
         /// </summary>
-        /// <param name="buffer">Buffer alternate corrente</param>
-        /// <param name="rows">Altezza corrente del viewport</param>
-        /// <param name="serialize">Serializzatore immutabile delle righe</param>
-        /// <param name="append">Destinazione dei frammenti consolidati</param>
+        /// <param name="buffer">Current alternate buffer</param>
+        /// <param name="rows">Current viewport height</param>
+        /// <param name="serialize">Immutable row serializer</param>
+        /// <param name="append">Destination of the consolidated fragments</param>
         public void CompleteWrite(TerminalBuffer buffer, int rows, Func<BufferLine, TerminalLineSnapshot> serialize, Action<TerminalLineSnapshot> append)
         {
             this.Reconcile(buffer, rows, serialize, append, true);
         }
 
         /// <summary>
-        /// Dimentica il candidato quando geometria o buffer cambiano
+        /// Forgets the candidate when geometry or buffer change
         /// </summary>
         public void Reset()
         {
@@ -118,13 +118,13 @@ namespace Bivium.Services
         #region Metodi privati
 
         /// <summary>
-        /// Riconcilia il frame corrente, con chiusura opzionale del boundary pendente
+        /// Reconciles the current frame, with optional closing of the pending boundary
         /// </summary>
-        /// <param name="buffer">Buffer alternate corrente</param>
-        /// <param name="rows">Altezza corrente del viewport</param>
-        /// <param name="serialize">Serializzatore immutabile delle righe</param>
-        /// <param name="append">Destinazione dei frammenti consolidati</param>
-        /// <param name="complete">True quando la transazione atomica è conclusa</param>
+        /// <param name="buffer">Current alternate buffer</param>
+        /// <param name="rows">Current viewport height</param>
+        /// <param name="serialize">Immutable row serializer</param>
+        /// <param name="append">Destination of the consolidated fragments</param>
+        /// <param name="complete">True when the atomic transaction is complete</param>
         private void Reconcile(TerminalBuffer buffer, int rows, Func<BufferLine, TerminalLineSnapshot> serialize, Action<TerminalLineSnapshot> append, bool complete)
         {
             ValidateArguments(buffer, serialize, append);
@@ -160,7 +160,7 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Valida le dipendenze richieste da entrambe le fasi
+        /// Validates the dependencies required by both phases
         /// </summary>
         private static void ValidateArguments(TerminalBuffer buffer, Func<BufferLine, TerminalLineSnapshot> serialize, Action<TerminalLineSnapshot> append)
         {
@@ -173,7 +173,7 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Congela le righe fino all'ultima che contiene celle significative
+        /// Freezes the rows up to the last one that contains significant cells
         /// </summary>
         private List<FrameRow> Capture(TerminalBuffer buffer, int rows, Func<BufferLine, TerminalLineSnapshot> serialize)
         {
@@ -215,7 +215,7 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Legge il primo prompt mark, che può cambiare senza invalidare la cache della riga
+        /// Reads the first prompt mark, which can change without invalidating the row cache
         /// </summary>
         private static int GetPromptColumn(BufferLine line)
         {
@@ -226,7 +226,7 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Archivia soltanto le righe che precedono un anchor ordinato e non ambiguo
+        /// Archives only the rows that precede an ordered, unambiguous anchor
         /// </summary>
         private bool TryArchiveRetiredPrefix(List<FrameRow> current, Action<TerminalLineSnapshot> append, out bool archived)
         {
@@ -258,7 +258,7 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Riconosce un viewport invariato senza confrontare testo o celle
+        /// Recognizes an unchanged viewport without comparing text or cells
         /// </summary>
         private static bool AreSameFrameReferences(List<FrameRow> previous, List<FrameRow> current)
         {
@@ -271,7 +271,7 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Conta l'header immutato nelle stesse posizioni del viewport
+        /// Counts the unchanged header at the same viewport positions
         /// </summary>
         private static int GetStationaryPrefixLength(List<FrameRow> previous, List<FrameRow> current)
         {
@@ -283,7 +283,7 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Conta il footer immutato nelle stesse posizioni del viewport
+        /// Counts the unchanged footer at the same viewport positions
         /// </summary>
         private static int GetStationarySuffixLength(List<FrameRow> previous, List<FrameRow> current, int prefix)
         {
@@ -301,7 +301,7 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Cerca un anchor contiguo che inizi il nuovo body dopo almeno una riga ritirata
+        /// Looks for a contiguous anchor that starts the new body after at least one retired row
         /// </summary>
         private static Anchor FindAnchor(List<FrameRow> previous, int previousStart, int previousEnd, List<FrameRow> current, int currentStart, int currentEnd)
         {
@@ -339,7 +339,7 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Conta le righe testuali usate come prova dell'ordine del body
+        /// Counts the text rows used as proof of the body order
         /// </summary>
         private static int CountMeaningfulRows(List<FrameRow> rows, int start, int count)
         {
@@ -351,7 +351,7 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Verifica che un anchor di una riga non abbia omonimi nel body precedente
+        /// Verifies that a single-row anchor has no namesakes in the previous body
         /// </summary>
         private static bool IsUnique(List<FrameRow> rows, int start, int end, FrameRow expected)
         {
@@ -367,7 +367,7 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Confronta il contratto plain-text e soft-wrap usando prima una firma O(1)
+        /// Compares the plain-text and soft-wrap contract, using an O(1) signature first
         /// </summary>
         private static bool AreEquivalent(FrameRow left, FrameRow right)
         {
@@ -379,12 +379,12 @@ namespace Bivium.Services
         #region Classi annidate
 
         /// <summary>
-        /// Associa uno snapshot alla riga e alla generazione di stato ancora valida
+        /// Associates a snapshot with the row and the still-valid state generation
         /// </summary>
         private sealed class CachedRow
         {
             /// <summary>
-            /// Crea una voce limitata al viewport corrente
+            /// Creates an entry limited to the current viewport
             /// </summary>
             public CachedRow(int position, BufferLine line, TerminalHistoryRowState state, FrameRow frame)
             {
@@ -395,33 +395,33 @@ namespace Bivium.Services
             }
 
             /// <summary>
-            /// Posizione nel viewport
+            /// Position in the viewport
             /// </summary>
             public int Position { get; }
 
             /// <summary>
-            /// Identità della riga XTerm.NET
+            /// XTerm.NET row identity
             /// </summary>
             public BufferLine Line { get; }
 
             /// <summary>
-            /// Generazione invalidata da qualsiasi mutazione della riga
+            /// Generation invalidated by any row mutation
             /// </summary>
             public TerminalHistoryRowState State { get; }
 
             /// <summary>
-            /// Snapshot riutilizzabile finché entrambe le identità restano valide
+            /// Snapshot reusable as long as both identities remain valid
             /// </summary>
             public FrameRow Frame { get; }
         }
 
         /// <summary>
-        /// Riga immutabile associata alla provenienza valida al momento della cattura
+        /// Immutable row associated with the provenance valid at capture time
         /// </summary>
         private sealed class FrameRow
         {
             /// <summary>
-            /// Crea una riga candidata
+            /// Creates a candidate row
             /// </summary>
             public FrameRow(int position, TerminalLineSnapshot snapshot, TerminalHistoryRowState state)
             {
@@ -432,33 +432,33 @@ namespace Bivium.Services
             }
 
             /// <summary>
-            /// Posizione nel viewport
+            /// Position in the viewport
             /// </summary>
             public int Position { get; }
 
             /// <summary>
-            /// Contenuto congelato
+            /// Frozen content
             /// </summary>
             public TerminalLineSnapshot Snapshot { get; }
 
             /// <summary>
-            /// Provenienza delle celle congelate
+            /// Provenance of the frozen cells
             /// </summary>
             public TerminalHistoryRowState State { get; }
 
             /// <summary>
-            /// Firma economica del contratto plain-text e soft-wrap
+            /// Cheap signature of the plain-text and soft-wrap contract
             /// </summary>
             public int Signature { get; }
         }
 
         /// <summary>
-        /// Posizione comprovata del body precedente che continua nel frame corrente
+        /// Proven position of the previous body that continues in the current frame
         /// </summary>
         private sealed class Anchor
         {
             /// <summary>
-            /// Crea un anchor sul frame precedente
+            /// Creates an anchor on the previous frame
             /// </summary>
             public Anchor(int previousIndex)
             {
@@ -466,7 +466,7 @@ namespace Bivium.Services
             }
 
             /// <summary>
-            /// Prima riga precedente ancora presente nel frame corrente
+            /// First previous row still present in the current frame
             /// </summary>
             public int PreviousIndex { get; }
         }

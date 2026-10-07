@@ -1,9 +1,9 @@
 namespace Bivium.Components.Panel
 {
     /// <summary>
-    /// Modifica atomica del layout verticale di un pannello
+    /// Atomic change of the vertical layout of a panel
     /// </summary>
-    /// <param name="SizePercent">Percentuale occupata dall'albero</param>
-    /// <param name="Collapsed">Indica se l'albero è compresso</param>
+    /// <param name="SizePercent">Percentage occupied by the tree</param>
+    /// <param name="Collapsed">Indicates whether the tree is collapsed</param>
     public sealed record PanelTreeLayoutChange(double SizePercent, bool Collapsed);
 }

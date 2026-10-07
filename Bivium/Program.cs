@@ -63,7 +63,7 @@ builder.Services.AddRadzenComponents();
 
 builder.Services.AddControllers(ConfigureControllers);
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
-// Il draft del menu contestuale porta selezione ed entry complete: con migliaia di file supera i 32 KB predefiniti
+// The context menu draft carries the full selection and entries: with thousands of files it exceeds the default 32 KB
 builder.Services.AddSignalR(options => options.MaximumReceiveMessageSize = 16 * 1024 * 1024);
 
 WebApplication app = builder.Build();

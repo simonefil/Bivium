@@ -10,36 +10,36 @@ using System.Threading.Tasks;
 
 namespace Bivium.Components.Shared
 {
-    /// <summary>Rendering Radzen originale; espone solo hydration visuale tramite API supportate dalla derivazione</summary>
+    /// <summary>Original Radzen rendering; exposes only visual hydration through APIs supported by the derivation</summary>
     public class WorkspaceVisualDropDown<TValue> : RadzenDropDown<TValue>, IAsyncDisposable
     {
-        #region Variabili di classe
+        #region Class Variables
 
-        /// <summary>Modulo del descriptor popup, senza publisher CAS separato</summary>
+        /// <summary>Popup descriptor module, without a separate CAS publisher</summary>
         private IJSObjectReference _surfaceModule;
-        /// <summary>Callback di restore del controllo ufficiale</summary>
+        /// <summary>Restore callback of the official control</summary>
         private DotNetObjectReference<WorkspaceVisualDropDown<TValue>> _surfaceReference;
-        /// <summary>Identità montata</summary>
+        /// <summary>Mounted identity</summary>
         private (Guid Id, Guid Question, WorkspaceWorkflowPhase Phase, long Lease, string Control) _installed;
-        /// <summary>Barriera delle continuazioni dopo il dispose</summary>
+        /// <summary>Continuation barrier after dispose</summary>
         private bool _disposed;
-        /// <summary>Valore bound precedente, distinto dal cursore visuale non confermato</summary>
+        /// <summary>Previous bound value, distinct from the unconfirmed visual cursor</summary>
         private TValue _boundValue;
-        /// <summary>Indica che esiste una baseline del valore bound</summary>
+        /// <summary>Indicates that a baseline of the bound value exists</summary>
         private bool _boundInitialized;
 
         #endregion
 
-        #region Metodi pubblici
+        #region Public Methods
 
-        /// <summary>Ripristina apertura e cursore protetto senza SelectItem, ValueChanged, Change o comando Compress</summary>
-        /// <param name="generation">Lease catturata dal descriptor</param>
-        /// <param name="ownerId">Sessione o workflow catturato</param>
-        /// <param name="questionId">Domanda Compress, vuota per Renamer</param>
-        /// <param name="phase">Fase catturata</param>
-        /// <param name="controlId">Identità app del controllo</param>
-        /// <param name="visual">Popup del draft dialog acknowledged</param>
-        /// <returns>True solo per un owner ancora autorizzato</returns>
+        /// <summary>Restores opening and protected cursor without SelectItem, ValueChanged, Change or the Compress command</summary>
+        /// <param name="generation">Lease captured by the descriptor</param>
+        /// <param name="ownerId">Captured session or workflow</param>
+        /// <param name="questionId">Compress question, empty for Renamer</param>
+        /// <param name="phase">Captured phase</param>
+        /// <param name="controlId">App identity of the control</param>
+        /// <param name="visual">Popup of the acknowledged dialog draft</param>
+        /// <returns>True only for a still authorized owner</returns>
         [JSInvokable]
         public async Task<bool> RestorePopupAsync(long generation, Guid ownerId, Guid questionId, WorkspaceWorkflowPhase phase, string controlId, WorkspaceFormatPopupVisual visual)
         {
@@ -57,7 +57,7 @@ namespace Bivium.Components.Shared
                         await this.OpenPopup("ArrowDown", false, false);
                     else
                     {
-                        // La stessa API pubblica usata da Radzen, senza il focus forzato di OpenPopup
+                        // The same public API used by Radzen, without OpenPopup's forced focus
                         await this.JSRuntime.InvokeVoidAsync("Radzen.togglePopup", this.Element, this.PopupID, true);
                         this.isPopupOpen = true;
                     }
@@ -75,8 +75,8 @@ namespace Bivium.Components.Shared
             return this.CanRestore(generation, ownerId, questionId, phase, controlId);
         }
 
-        /// <summary>Rilascia il descriptor e il controllo Radzen, mai il workflow</summary>
-        /// <returns>Cleanup del mount</returns>
+        /// <summary>Releases the descriptor and the Radzen control, never the workflow</summary>
+        /// <returns>Mount cleanup</returns>
         public async ValueTask DisposeAsync()
         {
             if (this._disposed)
@@ -103,10 +103,10 @@ namespace Bivium.Components.Shared
 
         #endregion
 
-        #region Metodi protected
+        #region Protected Methods
 
-        /// <summary>Un render dei parametri invariati non conferma né resetta l'highlight del popup aperto</summary>
-        /// <returns>Lifecycle originale Radzen</returns>
+        /// <summary>A render with unchanged parameters neither confirms nor resets the highlight of the open popup</summary>
+        /// <returns>Original Radzen lifecycle</returns>
         protected override async Task OnParametersSetAsync()
         {
             int cursor = this.selectedIndex;
@@ -122,8 +122,8 @@ namespace Bivium.Components.Shared
             this.Attributes = attributes;
         }
 
-        /// <summary>Installa il descriptor dopo il mount del controllo e del listbox Radzen</summary>
-        /// <param name="firstRender">Primo render</param>
+        /// <summary>Installs the descriptor after the mount of the Radzen control and listbox</summary>
+        /// <param name="firstRender">First render</param>
         protected override async Task OnAfterRenderAsync(bool firstRender)
         {
             await base.OnAfterRenderAsync(firstRender);
@@ -159,15 +159,15 @@ namespace Bivium.Components.Shared
 
         #endregion
 
-        #region Metodi privati
+        #region Private Methods
 
-        /// <summary>Rivalida il proprietario catturato anche dopo ogni await, senza confermare valori</summary>
-        /// <param name="generation">Lease del descriptor</param>
-        /// <param name="ownerId">Sessione o workflow catturato</param>
-        /// <param name="questionId">Domanda Compress, vuota per Renamer</param>
-        /// <param name="phase">Fase catturata</param>
-        /// <param name="controlId">Identità app del controllo</param>
-        /// <returns>True per il medesimo mount autorizzato</returns>
+        /// <summary>Revalidates the captured owner after every await as well, without confirming values</summary>
+        /// <param name="generation">Descriptor lease</param>
+        /// <param name="ownerId">Captured session or workflow</param>
+        /// <param name="questionId">Compress question, empty for Renamer</param>
+        /// <param name="phase">Captured phase</param>
+        /// <param name="controlId">App identity of the control</param>
+        /// <returns>True for the same authorized mount</returns>
         private bool CanRestore(long generation, Guid ownerId, Guid questionId, WorkspaceWorkflowPhase phase, string controlId)
         {
             WorkspaceClientToken token = new WorkspaceClientToken(this.AttachmentId, generation);
@@ -181,20 +181,20 @@ namespace Bivium.Components.Shared
 
         #endregion
 
-        #region Proprietà
+        #region Properties
 
-        /// <summary>Identità completa del mount visuale, indipendente dal valore selezionato</summary>
+        /// <summary>Full identity of the visual mount, independent of the selected value</summary>
         private (Guid Id, Guid Question, WorkspaceWorkflowPhase Phase, long Lease, string Control) ViewIdentity => (this.RenamerSessionId != Guid.Empty ? this.RenamerSessionId : this.Workflow?.Id ?? Guid.Empty, this.RenamerSessionId != Guid.Empty ? Guid.Empty : this.Workflow?.QuestionId ?? Guid.Empty, this.RenamerSessionId != Guid.Empty ? WorkspaceWorkflowPhase.Dismissed : this.Workflow?.Phase ?? WorkspaceWorkflowPhase.Dismissed, this.LeaseGeneration, this.Name);
 
-        /// <summary>Owner della domanda Compress catturata</summary>
+        /// <summary>Owner of the captured Compress question</summary>
         [Parameter] public WorkspaceWorkflowSnapshot Workflow { get; set; }
-        /// <summary>Owner della sessione Renamer, distinto dal workflow batch</summary>
+        /// <summary>Owner of the Renamer session, distinct from the batch workflow</summary>
         [Parameter] public Guid RenamerSessionId { get; set; }
-        /// <summary>Attachment del mount, mai trasferito dal payload visuale</summary>
+        /// <summary>Mount attachment, never transferred by the visual payload</summary>
         [Parameter] public string AttachmentId { get; set; } = "";
-        /// <summary>Lease del mount</summary>
+        /// <summary>Mount lease</summary>
         [Parameter] public long LeaseGeneration { get; set; }
-        /// <summary>Autorità delle sole pubblicazioni e hydration</summary>
+        /// <summary>Authority of publications and hydration only</summary>
         [Inject] private BiviumWorkspaceService WorkspaceService { get; set; }
 
         #endregion

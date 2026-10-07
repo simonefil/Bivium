@@ -4,16 +4,16 @@ using System.Collections.Generic;
 
 namespace Bivium.Services
 {
-    /// <summary>Stato del workflow protetto esclusivamente dal lock del workspace</summary>
+    /// <summary>Workflow state protected exclusively by the workspace lock</summary>
     internal sealed class WorkspaceWorkflowRuntime
     {
-        /// <summary>Workflow corrente; nessun componente o callback del circuito viene trattenuto</summary>
+        /// <summary>Current workflow; no circuit component or callback is retained</summary>
         internal WorkspaceWorkflowSnapshot Current { get; set; }
 
-        /// <summary>Risposte delle domande del workflow corrente, anche dopo l'avanzamento al conflitto successivo</summary>
+        /// <summary>Answers to the current workflow's questions, even after advancing to the next conflict</summary>
         internal Dictionary<Guid, WorkspaceWorkflowResponse> Responses { get; } = new Dictionary<Guid, WorkspaceWorkflowResponse>();
 
-        /// <summary>Riferimento piccolo per le notifiche globali</summary>
+        /// <summary>Small reference for global notifications</summary>
         internal WorkspaceWorkflowReference Reference => this.Current == null ? null : new WorkspaceWorkflowReference(this.Current.Id, this.Current.Revision, this.Current.Kind, this.Current.Phase);
     }
 }

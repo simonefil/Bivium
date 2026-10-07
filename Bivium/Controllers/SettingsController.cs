@@ -52,10 +52,10 @@ namespace Bivium.Controllers
         #region Public Methods
 
         /// <summary>
-        /// Aggiorna il tema Radzen predefinito e lo scrive in appsettings.json
+        /// Updates the default Radzen theme and writes it to appsettings.json
         /// </summary>
-        /// <param name="themeRequest">Nome del tema ufficiale Radzen</param>
-        /// <returns>Risultato dell'aggiornamento</returns>
+        /// <param name="themeRequest">Name of the official Radzen theme</param>
+        /// <returns>Update result</returns>
         [HttpPut("theme")]
         public IActionResult UpdateTheme([FromBody] string themeRequest)
         {
@@ -354,7 +354,7 @@ namespace Bivium.Controllers
 
         #region Private Methods
 
-        /// <summary>Commit condiviso con il runner; lease e validazioni restano responsabilità del chiamante</summary>
+        /// <summary>Commit shared with the runner; lease and validations remain the caller's responsibility</summary>
         internal static void CommitEditableSettings(IWebHostEnvironment environment, string key, object value, CancellationToken cancellationToken)
         {
             if (value is DefaultCreationPermissionsSettings permissions)
@@ -405,7 +405,7 @@ namespace Bivium.Controllers
             return this._workspaceService.GetRevocationToken(new WorkspaceClientToken(attachmentId, generation));
         }
 
-        /// <summary>Restituisce l'identità della richiesta per il commit atomico MFA</summary>
+        /// <summary>Returns the request identity for the atomic MFA commit</summary>
         private WorkspaceClientToken GetWorkspaceToken()
         {
             string attachmentId = this.Request.Headers["X-Bivium-Attachment"].ToString();

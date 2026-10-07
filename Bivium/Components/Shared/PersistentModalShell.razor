@@ -6,52 +6,52 @@
 @inject Bivium.Services.BiviumWorkspaceService WorkspaceService
 
 @code {
-    /// <summary>Identità semantica della form, indipendente dal titolo</summary>
+    /// <summary>Semantic identity of the form, independent of the title</summary>
     [Parameter] public string Surface { get; set; } = "";
-    /// <summary>Lease e domanda/sessione catturate dal Commander</summary>
+    /// <summary>Lease and question/session captured by the Commander</summary>
     [CascadingParameter] public Bivium.Models.WorkspaceSurfaceOwner SurfaceOwner { get; set; }
-    /// <summary>Adapter del solo stato visuale</summary>
+    /// <summary>Adapter of the visual state only</summary>
     private IJSObjectReference _surfaceModule;
-    /// <summary>Callback posseduto dal mount shell</summary>
+    /// <summary>Callback owned by the shell mount</summary>
     private DotNetObjectReference<PersistentModalShell> _surfaceReference;
-    /// <summary>Identità visuale acknowledged</summary>
+    /// <summary>Acknowledged visual identity</summary>
     private Bivium.Models.WorkspaceDialogVisualDraft _visualDraft;
-    /// <summary>Lease installata sul bridge</summary>
+    /// <summary>Lease installed on the bridge</summary>
     private long _visualGeneration = -1;
-    /// <summary>Contenuto appartenente all'owner, senza ricreare la form</summary>
+    /// <summary>Content belonging to the owner, without recreating the form</summary>
     [Parameter] public RenderFragment ChildContent { get; set; }
-    /// <summary>Titolo accessibile nativo</summary>
+    /// <summary>Native accessible title</summary>
     [Parameter] public string Label { get; set; } = "Dialog";
-    /// <summary>Annullamento richiesto dall'utente, una sola volta per apertura</summary>
+    /// <summary>Cancellation requested by the user, once per opening</summary>
     [Parameter] public EventCallback OnCancel { get; set; }
-    /// <summary>Notifica DOM pronto: true al primo mount, false sui refresh</summary>
+    /// <summary>Notifies DOM ready: true on first mount, false on refreshes</summary>
     [Parameter] public EventCallback<bool> OnContentRendered { get; set; }
-    /// <summary>Abilita X, Escape e backdrop quando l'owner permette la chiusura</summary>
+    /// <summary>Enables X, Escape and backdrop when the owner allows closing</summary>
     [Parameter] public bool CanClose { get; set; } = true;
-    /// <summary>Il click sul backdrop chiude soltanto le form senza campi di input; Escape e Cancel restano sempre disponibili</summary>
+    /// <summary>A backdrop click closes only forms without input fields; Escape and Cancel always remain available</summary>
     [Parameter] public bool CloseOnOverlayClick { get; set; }
-    /// <summary>Larghezza di presentazione del dialog</summary>
+    /// <summary>Presentation width of the dialog</summary>
     [Parameter] public string Width { get; set; } = "min(94vw, 58rem)";
 
-    /// <summary>Ownership dell'apertura nel servizio condiviso</summary>
+    /// <summary>Ownership of the opening in the shared service</summary>
     private RadzenDialogLifetime _lifetime;
-    /// <summary>Bridge montato nel contenuto nativo</summary>
+    /// <summary>Bridge mounted in the native content</summary>
     private ModalContentHost _host;
-    /// <summary>Opzioni aggiornabili dell'apertura posseduta</summary>
+    /// <summary>Updatable options of the owned opening</summary>
     private DialogOptions _options;
-    /// <summary>Guardia di rilascio e callback</summary>
+    /// <summary>Release and callback guard</summary>
     private bool _isDisposed;
 
-    /// <summary>Il render automatico del callback non deve generare una nuova notifica ricorsiva</summary>
+    /// <summary>The automatic render of the callback must not generate a new recursive notification</summary>
     private bool _skipNextRenderNotification;
 
-    /// <summary>Inizializza il tracker prima dell'apertura</summary>
+    /// <summary>Initializes the tracker before the opening</summary>
     protected override void OnInitialized()
     {
         this._lifetime = new RadzenDialogLifetime(this.DialogService);
     }
 
-    /// <summary>Propaga lo stato dell'owner al bridge e alle opzioni native</summary>
+    /// <summary>Propagates the owner state to the bridge and the native options</summary>
     protected override void OnParametersSet()
     {
         if (this._isDisposed || this._options == null)
@@ -63,7 +63,7 @@
             this._options.ShowClose = this.CanClose;
             this._options.CloseDialogOnOverlayClick = closeOnOverlayClick;
             this._options.Width = this.Width;
-            // La title bar nativa legge le opzioni soltanto quando RadzenDialog rirenderizza
+            // The native title bar reads the options only when RadzenDialog re-renders
             this.DialogService.Refresh();
         }
         bool visualOwnerChanged = this._visualDraft != null && this.SurfaceOwner != null && (this._visualGeneration != this.SurfaceOwner.Generation || (this.Surface != "upload" && (this._visualDraft.OwnerId != this.SurfaceOwner.WorkflowId || this._visualDraft.QuestionId != this.SurfaceOwner.QuestionId || this._visualDraft.Phase != this.SurfaceOwner.Phase)));
@@ -71,8 +71,8 @@
         this._skipNextRenderNotification = false;
     }
 
-    /// <summary>Apre una volta dopo il mount dell'owner</summary>
-    /// <param name="firstRender">Primo render della shell</param>
+    /// <summary>Opens once after the owner mount</summary>
+    /// <param name="firstRender">First render of the shell</param>
     protected override void OnAfterRender(bool firstRender)
     {
         if (!firstRender || this._isDisposed)
@@ -82,10 +82,10 @@
         {
             Width = this.Width,
             ShowClose = this.CanClose,
-            // Il listener Escape Radzen cattura l'opzione al mount; CanClose rivalida lo stato corrente
+            // The Radzen Escape listener captures the option on mount; CanClose revalidates the current state
             CloseDialogOnEsc = true,
             CloseDialogOnOverlayClick = this.CanClose && this.CloseOnOverlayClick,
-            // L'owner che riceve OnContentRendered imposta il focus: il focus Radzen differito di 500 ms lo sovrascriverebbe
+            // The owner receiving OnContentRendered sets the focus: the Radzen focus deferred by 500 ms would overwrite it
             AutoFocusFirstElement = !this.OnContentRendered.HasDelegate,
             CanClose = () => System.Threading.Tasks.Task.FromResult(!this._isDisposed && this.CanClose)
         };
@@ -93,8 +93,8 @@
         _ = this.ObserveOpenAsync(this._options);
     }
 
-    /// <summary>Osserva chiusura ed errori senza un await pendente nel lifecycle Blazor</summary>
-    /// <param name="options">Opzioni univoche dell'apertura</param>
+    /// <summary>Observes closing and errors without a pending await in the Blazor lifecycle</summary>
+    /// <param name="options">Unique options of the opening</param>
     private async System.Threading.Tasks.Task ObserveOpenAsync(DialogOptions options)
     {
         try
@@ -105,7 +105,7 @@
         }
         catch (Exception ex)
         {
-            this.Logger.LogError(ex, "Errore durante il lifecycle del dialog persistente Radzen");
+            this.Logger.LogError(ex, "Error during the lifecycle of the persistent Radzen dialog");
         }
         finally
         {
@@ -113,8 +113,8 @@
         }
     }
 
-    /// <summary>Inoltra il mount reale soltanto mentre l'owner è vivo</summary>
-    /// <param name="firstRender">True soltanto al primo DOM mount</param>
+    /// <summary>Forwards the real mount only while the owner is alive</summary>
+    /// <param name="firstRender">True only on the first DOM mount</param>
     private async System.Threading.Tasks.Task HandleContentRenderedAsync(bool firstRender)
     {
         this._skipNextRenderNotification = this.OnContentRendered.HasDelegate;
@@ -147,10 +147,10 @@
             this._visualGeneration = owner.Generation;
     }
 
-    /// <summary>Checkpoint visuale, distinto dal publisher del valore della form</summary>
-    /// <param name="generation">Lease catturata</param>
-    /// <param name="draft">Identità, focus, selezione e scroll</param>
-    /// <returns>Revisione acknowledged oppure -1</returns>
+    /// <summary>Visual checkpoint, distinct from the form value publisher</summary>
+    /// <param name="generation">Captured lease</param>
+    /// <param name="draft">Identity, focus, selection and scroll</param>
+    /// <returns>Acknowledged revision or -1</returns>
     [JSInvokable]
     public long OnDialogSurfaceChanged(long generation, Bivium.Models.WorkspaceDialogVisualDraft draft)
     {
@@ -162,7 +162,7 @@
         return revision;
     }
 
-    /// <summary>Owner Hide non annulla nuovamente l'owner e non chiude dialog sovrapposti</summary>
+    /// <summary>Owner Hide does not cancel the owner again and does not close overlapping dialogs</summary>
     public async System.Threading.Tasks.ValueTask DisposeAsync()
     {
         if (this._isDisposed)

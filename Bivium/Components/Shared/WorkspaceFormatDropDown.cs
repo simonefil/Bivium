@@ -2,7 +2,7 @@ using Bivium.Models;
 
 namespace Bivium.Components.Shared
 {
-    /// <summary>Specializzazione compatibile del descriptor visuale generico per il formato Compress</summary>
+    /// <summary>Compatible specialization of the generic visual descriptor for the Compress format</summary>
     public sealed class WorkspaceFormatDropDown : WorkspaceVisualDropDown<ArchiveFormat>
     {
     }

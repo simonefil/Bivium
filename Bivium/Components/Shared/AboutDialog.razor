@@ -26,7 +26,7 @@
     private readonly WorkspaceFormBinding _binding = new WorkspaceFormBinding();
     private WorkspaceAboutDraft _draft;
 
-    /// <summary>About è ripristinato dagli stessi dati catturati all'invocazione</summary>
+    /// <summary>About is restored from the same data captured at invocation</summary>
     protected override void OnParametersSet()
     {
         if (this._binding.Adopt(this.Workflow, this.LeaseGeneration))

@@ -3,18 +3,18 @@ using System.Collections.Immutable;
 
 namespace Bivium.Models
 {
-    /// <summary>Endpoint della selezione sulla timeline esistente, oppure riga del buffer alternativo</summary>
+    /// <summary>Selection endpoint on the existing timeline, or row of the alternate buffer</summary>
     public sealed record WorkspaceTerminalPosition(long Row, int Column);
 
-    /// <summary>Vista leggera della singola sessione; nessun testo, screen o history nel checkpoint</summary>
+    /// <summary>Lightweight view of a single session; no text, screen or history in the checkpoint</summary>
     public sealed record WorkspaceTerminalViewState(long Revision, int SessionId, long ObservedRevision, bool AlternateBuffer, long TopRow, double RowFraction, double HorizontalCells, bool Following, long PromptRow = -1, WorkspaceTerminalPosition SelectionAnchor = null, WorkspaceTerminalPosition SelectionFocus = null);
 
-    /// <summary>Scroll strip ancorato alla sessione rappresentata dall'header, non all'indice del tab</summary>
+    /// <summary>Scroll strip anchored to the session represented by the header, not to the tab index</summary>
     public sealed record WorkspaceTerminalStripViewState(long Revision, int AnchorSessionId = 0, double AnchorFraction = 0, double Left = 0, double Top = 0);
 
-    /// <summary>Popup ufficiale identificato dal controllo applicativo</summary>
+    /// <summary>Official popup identified by the application control</summary>
     public sealed record WorkspaceDropDownViewState(string ControlId, WorkspaceFormatPopupVisual Popup);
 
-    /// <summary>Vista unica della sessione Renamer: popup, scroll, focus e selezioni, mai valori della form</summary>
+    /// <summary>Single view of the Renamer session: popup, scroll, focus and selections, never form values</summary>
     public sealed record WorkspaceRenamerViewState(long Revision, Guid SessionId, ImmutableArray<WorkspaceDropDownViewState> Popups, string FocusKey = "", bool Focused = false, ImmutableArray<WorkspaceSurfaceScroll> Scrolls = default, ImmutableArray<WorkspaceSurfaceSelection> Selections = default);
 }

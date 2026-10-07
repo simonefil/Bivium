@@ -16,17 +16,17 @@ namespace Bivium.Services
     {
         #region Variabili di classe
 
-        /// <summary>Manifest e ricevute del trasferimento attuale</summary>
+        /// <summary>Manifest and receipts of the current transfer</summary>
         private WorkspaceUploadRuntime _uploadRuntime;
 
         #endregion
 
         #region Metodi pubblici
 
-        /// <summary>Apre il dialog server-owned senza accedere a file browser</summary>
-        /// <param name="token">Lease del comando</param>
-        /// <param name="destination">Destinazione già autorizzata</param>
-        /// <returns>Sessione vuota senza handle browser</returns>
+        /// <summary>Opens the server-owned dialog without accessing browser files</summary>
+        /// <param name="token">Command lease</param>
+        /// <param name="destination">Already authorized destination</param>
+        /// <returns>Empty session with no browser handles</returns>
         internal WorkspaceUploadSnapshot BeginUpload(WorkspaceClientToken token, string destination)
         {
             BiviumWorkspaceSnapshot snapshot;
@@ -48,9 +48,9 @@ namespace Bivium.Services
             return upload;
         }
 
-        /// <summary>Legge manifest e ricevute soltanto per l'owner autorizzato</summary>
-        /// <param name="token">Lease del lettore</param>
-        /// <returns>Stato dettagliato oppure null per lettori non autorizzati</returns>
+        /// <summary>Reads manifest and receipts only for the authorized owner</summary>
+        /// <param name="token">Reader lease</param>
+        /// <returns>Detailed state or null for unauthorized readers</returns>
         internal WorkspaceUploadSnapshot GetUpload(WorkspaceClientToken token)
         {
             lock (this._lock)
@@ -61,13 +61,13 @@ namespace Bivium.Services
             }
         }
 
-        /// <summary>Checkpoint CAS della selezione, consentito solo prima del primo trasferimento</summary>
-        /// <param name="token">Lease del publisher</param>
-        /// <param name="id">Sessione attesa</param>
-        /// <param name="revision">Revisione acknowledged</param>
-        /// <param name="files">Metadati delle sorgenti browser</param>
-        /// <param name="directories">Directory relative, compresi i parent</param>
-        /// <returns>True soltanto per il checkpoint ammesso</returns>
+        /// <summary>CAS checkpoint of the selection, allowed only before the first transfer</summary>
+        /// <param name="token">Publisher lease</param>
+        /// <param name="id">Expected session</param>
+        /// <param name="revision">Acknowledged revision</param>
+        /// <param name="files">Browser source metadata</param>
+        /// <param name="directories">Relative directories, including parents</param>
+        /// <returns>True only for the admitted checkpoint</returns>
         internal bool TrySetUploadManifest(WorkspaceClientToken token, Guid id, long revision, WorkspaceUploadSource[] files, string[] directories)
         {
             BiviumWorkspaceSnapshot snapshot;
@@ -83,7 +83,7 @@ namespace Bivium.Services
             }
             if (files == null || directories == null || files.Length > WorkspaceUploadManifestRequest.MAX_ENTRIES || directories.Length > WorkspaceUploadManifestRequest.MAX_ENTRIES - files.Length)
                 throw new ArgumentException("Upload manifest exceeds entry limits or is invalid");
-            // Tutti i bound precedono indici, split, ordinamento e accessi filesystem
+            // All bounds precede indexes, split, sorting and filesystem accesses
             long metadataCharacters = 0;
             foreach (WorkspaceUploadSource source in files)
             {
@@ -128,7 +128,7 @@ namespace Bivium.Services
                     throw new ArgumentException("Invalid or duplicate upload directory path");
                 folders.Add(new WorkspaceUploadDirectory(relative));
             }
-            // Riserva anche il namespace temporaneo: nessun finale/directory può coincidere con esso
+            // Also reserves the temporary namespace: no final name/directory may coincide with it
             foreach (WorkspaceUploadFile file in captured)
             {
                 string temporary = Path.GetFullPath(GetUploadTempPath(current, file));
@@ -138,7 +138,7 @@ namespace Bivium.Services
                 if (separator >= 0 && !relativeDirectories.Contains(file.Source.RelativePath.Substring(0, separator)))
                     throw new ArgumentException("Upload directory was not selected");
             }
-            // Il parent immediato di ogni directory garantisce transitivamente tutti gli antenati
+            // The immediate parent of each directory transitively guarantees all ancestors
             foreach (string relative in directories)
             {
                 int separator = relative.LastIndexOf('/');
@@ -158,11 +158,11 @@ namespace Bivium.Services
             return true;
         }
 
-        /// <summary>Avvio o ripresa espliciti dopo la verifica della sorgente nel browser</summary>
-        /// <param name="token">Lease dell'owner</param>
-        /// <param name="id">Sessione catturata</param>
-        /// <param name="revision">Ricevute verificate dal browser</param>
-        /// <returns>Stato di trasferimento ammesso</returns>
+        /// <summary>Explicit start or resume after the source is verified in the browser</summary>
+        /// <param name="token">Owner lease</param>
+        /// <param name="id">Captured session</param>
+        /// <param name="revision">Receipts verified by the browser</param>
+        /// <returns>Admitted transfer state</returns>
         internal WorkspaceUploadSnapshot StartUpload(WorkspaceClientToken token, Guid id, long revision)
         {
             return this.ChangeUpload(token, id, current =>
@@ -173,10 +173,10 @@ namespace Bivium.Services
             });
         }
 
-        /// <summary>Stop locale del trasporto; non elimina i chunk acknowledged</summary>
+        /// <summary>Local transport stop; does not delete acknowledged chunks</summary>
         internal WorkspaceUploadSnapshot PauseUpload(WorkspaceClientToken token, Guid id, string error = "") => this.ChangeUpload(token, id, current => !current.Visible ? current : current with { Phase = current.Phase == WorkspaceUploadPhase.Selecting ? WorkspaceUploadPhase.Selecting : string.IsNullOrEmpty(error) ? WorkspaceUploadPhase.Paused : WorkspaceUploadPhase.Failed, Error = string.IsNullOrEmpty(error) ? current.Error : error }, true);
 
-        /// <summary>Un errore HTTP rimane nel runtime anche se il browser perde la risposta</summary>
+        /// <summary>An HTTP error remains in the runtime even if the browser loses the response</summary>
         internal void RecordUploadError(WorkspaceClientToken token, Guid id, string error)
         {
             try { this.ChangeUpload(token, id, current => current.Visible ? current with { Error = error } : current, true); }
@@ -184,7 +184,7 @@ namespace Bivium.Services
             catch (InvalidOperationException) { }
         }
 
-        /// <summary>Pausa esplicita o per handoff: attende la quiescenza del writer server e conserva i chunk acknowledged</summary>
+        /// <summary>Explicit pause or for handoff: waits for the server writer to quiesce and preserves acknowledged chunks</summary>
         internal async Task<WorkspaceUploadSnapshot> PauseUploadTransferAsync(WorkspaceClientToken token, Guid id, CancellationToken cancellationToken)
         {
             WorkspaceUploadRuntime runtime = this.RequireUploadRuntime(token, id);
@@ -209,7 +209,7 @@ namespace Bivium.Services
             return upload;
         }
 
-        /// <summary>Il server conferma la fine dai file e dalle directory, non da un contatore browser</summary>
+        /// <summary>The server confirms completion from the files and directories, not from a browser counter</summary>
         internal WorkspaceUploadSnapshot CompleteUpload(WorkspaceClientToken token, Guid id) => this.ChangeUpload(token, id, current =>
         {
             string fileError = current.Files.FirstOrDefault(file => !string.IsNullOrEmpty(file.Error))?.Error;
@@ -220,9 +220,9 @@ namespace Bivium.Services
             return current with { Phase = WorkspaceUploadPhase.Succeeded, Visible = false, CurrentPath = "", Error = "" };
         });
 
-        /// <summary>Cancel esplicito; cleanup dei soli temporanei della sessione</summary>
-        /// <param name="token">Lease del gesto esplicito</param>
-        /// <param name="id">Sessione da annullare</param>
+        /// <summary>Explicit cancel; cleanup of the session temporary files only</summary>
+        /// <param name="token">Lease of the explicit gesture</param>
+        /// <param name="id">Session to cancel</param>
         internal async Task CancelUploadAsync(WorkspaceClientToken token, Guid id)
         {
             WorkspaceUploadRuntime runtime;
@@ -241,7 +241,7 @@ namespace Bivium.Services
             await this.CleanupUploadAsync(runtime).ConfigureAwait(false);
         }
 
-        /// <summary>Riceve il protocollo chunked esistente con rollback del solo chunk non acknowledged</summary>
+        /// <summary>Receives the existing chunked protocol with rollback of the non-acknowledged chunk only</summary>
         internal async Task ReceiveUploadChunkAsync(WorkspaceClientToken token, Guid sessionId, Guid fileId, string destination, string relative, string name, int chunkIndex, int totalChunks, Stream body, CancellationToken requestCancellation, bool verifyOnly = false)
         {
             long revision = this.GetSnapshot().Revision;
@@ -264,12 +264,12 @@ namespace Bivium.Services
                     snapshot = this._snapshot;
                     subscribers = verifyOnly || snapshot.Revision == revision ? [] : this.GetSubscribers();
                 }
-                // Anche i callback che resettano o cancellano la sessione devono poter acquisire il gate
+                // Callbacks that reset or cancel the session must also be able to acquire the gate
                 this.NotifySubscribers(subscribers, snapshot);
             }
         }
 
-        /// <summary>Writer serializzato; nessuna notifica al circuito mentre possiede il gate fisico</summary>
+        /// <summary>Serialized writer; no notification to the circuit while it holds the physical gate</summary>
         private async Task ReceiveUploadChunkCoreAsync(WorkspaceClientToken token, Guid sessionId, Guid fileId, string destination, string relative, string name, int chunkIndex, int totalChunks, Stream body, CancellationToken requestCancellation, bool verifyOnly)
         {
             WorkspaceUploadRuntime runtime = this.RequireUploadRuntime(token, sessionId);
@@ -359,7 +359,7 @@ namespace Bivium.Services
                         string target = this.ResolveUploadPath(destination, relative);
                         File.Move(tempPath, target, true);
                         runtime.OwnedTemporaryPaths.Remove(fileId);
-                        // Il move è irreversibile: ricevuta e stato vengono pubblicati anche se i default falliscono
+                        // The move is irreversible: receipt and state are published even if the defaults fail
                         accepted = true;
                         try
                         {
@@ -394,7 +394,7 @@ namespace Bivium.Services
             }
         }
 
-        /// <summary>Directory idempotenti; i default restano limitati alle directory create dalla sessione</summary>
+        /// <summary>Idempotent directories; defaults remain limited to the directories created by the session</summary>
         internal void ReceiveUploadDirectory(WorkspaceClientToken token, Guid sessionId, string destination, string relative, bool finalize)
         {
             this.ChangeUpload(token, sessionId, current =>
@@ -430,7 +430,7 @@ namespace Bivium.Services
 
         #region Metodi privati
 
-        /// <summary>Mutazione breve con autorità lease e notifiche fuori dal lock</summary>
+        /// <summary>Short mutation with lease authority and notifications outside the lock</summary>
         private WorkspaceUploadSnapshot ChangeUpload(WorkspaceClientToken token, Guid id, Func<WorkspaceUploadSnapshot, WorkspaceUploadSnapshot> change, bool publication = false)
         {
             BiviumWorkspaceSnapshot snapshot;
@@ -453,14 +453,14 @@ namespace Bivium.Services
             return upload;
         }
 
-        /// <summary>Acquisisce il runtime senza mantenere il lock durante lo stream</summary>
+        /// <summary>Acquires the runtime without holding the lock during the stream</summary>
         private WorkspaceUploadRuntime RequireUploadRuntime(WorkspaceClientToken token, Guid id)
         {
             lock (this._lock)
                 return this.RequireUploadRuntimeLocked(token, id);
         }
 
-        /// <summary>Ogni commit byte rivalida owner, sessione e lifetime</summary>
+        /// <summary>Every byte commit revalidates owner, session and lifetime</summary>
         private WorkspaceUploadRuntime RequireUploadRuntimeLocked(WorkspaceClientToken token, Guid id, WorkspaceUploadRuntime expected = null, bool publication = false)
         {
             if (this.IsStopped || !(publication ? this.ValidateLeaseLocked(token) : this.ValidateMutationLocked(token)))
@@ -471,10 +471,10 @@ namespace Bivium.Services
             return runtime;
         }
 
-        /// <summary>Riusa esattamente la validazione relativa del controller esistente</summary>
-        /// <param name="destination">Destinazione catturata</param>
-        /// <param name="relative">Percorso relativo browser</param>
-        /// <returns>Percorso assoluto validato</returns>
+        /// <summary>Reuses exactly the relative validation of the existing controller</summary>
+        /// <param name="destination">Captured destination</param>
+        /// <param name="relative">Browser relative path</param>
+        /// <returns>Validated absolute path</returns>
         private string ResolveUploadPath(string destination, string relative)
         {
             if (!this._workflowSecurity.IsPathSafe(destination) || !Directory.Exists(destination) || !FileTransferController.TryResolveUploadPath(destination, relative, out string target, out _))
@@ -482,13 +482,13 @@ namespace Bivium.Services
             return target;
         }
 
-        /// <summary>Naming e directory temporanea invariati; ID server-owned della singola sorgente</summary>
+        /// <summary>Naming and temporary directory unchanged; server-owned ID of the single source</summary>
         private static string GetUploadTempPath(WorkspaceUploadSnapshot upload, WorkspaceUploadFile file) => Path.Combine(upload.Destination, "." + file.Source.Name + "." + file.Id.ToString("N") + ".uploading");
 
-        /// <summary>Almeno un chunk anche per file vuoti, come nel protocollo esistente</summary>
+        /// <summary>At least one chunk even for empty files, as in the existing protocol</summary>
         private static int GetUploadChunkCount(long size) => (int)Math.Max(1, (size + WorkspaceUploadSnapshot.CHUNK_SIZE - 1) / WorkspaceUploadSnapshot.CHUNK_SIZE);
 
-        /// <summary>Riferimento globale leggero; dettagli separati e autorizzati</summary>
+        /// <summary>Lightweight global reference; separate, authorized details</summary>
         private BiviumWorkspaceSnapshot CommitUploadStateLocked()
         {
             WorkspaceUploadSnapshot upload = this._uploadRuntime?.Snapshot;
@@ -497,8 +497,8 @@ namespace Bivium.Services
             return this._snapshot;
         }
 
-        /// <summary>Annulla il trasporto e aspetta il rollback prima di rimuovere i temporanei posseduti</summary>
-        /// <param name="runtime">Sessione posseduta dal workspace</param>
+        /// <summary>Cancels the transport and waits for the rollback before removing the owned temporary files</summary>
+        /// <param name="runtime">Session owned by the workspace</param>
         private async Task CleanupUploadAsync(WorkspaceUploadRuntime runtime)
         {
             runtime.Lifetime.Cancel();

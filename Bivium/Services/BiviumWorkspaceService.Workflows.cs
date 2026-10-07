@@ -14,38 +14,38 @@ namespace Bivium.Services
     {
         #region Costanti
 
-        /// <summary>Risposta alla chiusura editor: salva e poi chiude</summary>
+        /// <summary>Response to the editor close: saves, then closes</summary>
         internal const string EDITOR_CLOSE_SAVE = "save";
 
-        /// <summary>Risposta alla chiusura editor: scarta le modifiche e chiude</summary>
+        /// <summary>Response to the editor close: discards the changes and closes</summary>
         internal const string EDITOR_CLOSE_DISCARD = "discard";
 
         #endregion
 
         #region Variabili di classe
 
-        /// <summary>Runtime form e domanda senza ownership di circuito</summary>
+        /// <summary>Form and question runtime with no circuit ownership</summary>
         private readonly WorkspaceWorkflowRuntime _workflowRuntime = new WorkspaceWorkflowRuntime();
 
         #endregion
 
         #region Metodi pubblici
 
-        /// <summary>Legge il workflow solo per il lease autorevole, anche durante il drain</summary>
-        /// <param name="token">Lease del lettore</param>
-        /// <returns>Workflow immutabile oppure null</returns>
+        /// <summary>Reads the workflow only for the authoritative lease, also during the drain</summary>
+        /// <param name="token">Reader lease</param>
+        /// <returns>Immutable workflow or null</returns>
         internal WorkspaceWorkflowSnapshot GetWorkflow(WorkspaceClientToken token)
         {
             lock (this._lock)
                 return !this.IsStopped && this.ValidateLeaseLocked(token) ? this._workflowRuntime.Current : null;
         }
 
-        /// <summary>Apre una domanda Input con percorsi già catturati e validazione path esistente</summary>
-        /// <param name="token">Lease che invoca il comando</param>
-        /// <param name="kind">Comando chiuso</param>
-        /// <param name="parameters">Argomenti catturati dall'invocazione</param>
-        /// <param name="draft">Valore iniziale</param>
-        /// <returns>Workflow ammesso</returns>
+        /// <summary>Opens an Input question with already captured paths and the existing path validation</summary>
+        /// <param name="token">Lease that invokes the command</param>
+        /// <param name="kind">Closed command</param>
+        /// <param name="parameters">Arguments captured by the invocation</param>
+        /// <param name="draft">Initial value</param>
+        /// <returns>Admitted workflow</returns>
         internal WorkspaceWorkflowSnapshot BeginInputWorkflow(WorkspaceClientToken token, WorkspaceWorkflowKind kind, WorkspaceWorkflowInvocation parameters, string draft)
         {
             if (parameters == null || kind is not (WorkspaceWorkflowKind.CreateFile or WorkspaceWorkflowKind.CreateDirectory or WorkspaceWorkflowKind.RenameEntry) || !this._workflowSecurity.IsPathSafe(parameters.ParentPath) || (kind == WorkspaceWorkflowKind.RenameEntry && !this._workflowSecurity.IsPathSafe(parameters.SourcePath)))
@@ -70,10 +70,10 @@ namespace Bivium.Services
             return workflow;
         }
 
-        /// <summary>Apre la conferma delete sulla selezione immutabile, senza eseguire filesystem</summary>
-        /// <param name="token">Lease che invoca il comando</param>
-        /// <param name="parameters">Selezione e presentazione catturate</param>
-        /// <returns>Domanda server-owned ammessa</returns>
+        /// <summary>Opens the delete confirmation on the immutable selection, without touching the filesystem</summary>
+        /// <param name="token">Lease that invokes the command</param>
+        /// <param name="parameters">Captured selection and presentation</param>
+        /// <returns>Admitted server-owned question</returns>
         internal WorkspaceWorkflowSnapshot BeginDeleteWorkflow(WorkspaceClientToken token, WorkspaceWorkflowInvocation parameters)
         {
             BiviumWorkspaceSnapshot snapshot;
@@ -101,12 +101,12 @@ namespace Bivium.Services
             return workflow;
         }
 
-        /// <summary>Cattura alert editor, chiusura editor con modifiche o intento reset, senza letture o effetti alla hydration</summary>
-        /// <param name="token">Lease che apre la domanda</param>
-        /// <param name="kind">Soltanto alert editor, chiusura editor o reset workspace</param>
-        /// <param name="title">Titolo immutabile preesistente</param>
-        /// <param name="message">Testo immutabile già materializzato</param>
-        /// <returns>Domanda trasferibile con identità stabile</returns>
+        /// <summary>Captures the editor alert, the editor close with changes or the reset intent, with no reads or effects on hydration</summary>
+        /// <param name="token">Lease that opens the question</param>
+        /// <param name="kind">Only editor alert, editor close or workspace reset</param>
+        /// <param name="title">Existing immutable title</param>
+        /// <param name="message">Already materialized immutable text</param>
+        /// <returns>Transferable question with a stable identity</returns>
         internal WorkspaceWorkflowSnapshot BeginConfirmationWorkflow(WorkspaceClientToken token, WorkspaceWorkflowKind kind, string title, string message)
         {
             if (kind is not (WorkspaceWorkflowKind.EditorAlert or WorkspaceWorkflowKind.ResetWorkspace or WorkspaceWorkflowKind.EditorClose))
@@ -130,13 +130,13 @@ namespace Bivium.Services
             return workflow;
         }
 
-        /// <summary>Pubblica il solo draft; non risponde alla domanda né esegue comandi</summary>
-        /// <param name="token">Lease del publisher</param>
-        /// <param name="id">Workflow montato</param>
-        /// <param name="expectedRevision">Revisione del draft precedente</param>
-        /// <param name="draft">Valore corrente</param>
-        /// <param name="workflow">Workflow dopo il tentativo</param>
-        /// <returns>True solo per il checkpoint acknowledged</returns>
+        /// <summary>Publishes the draft only; neither answers the question nor executes commands</summary>
+        /// <param name="token">Publisher lease</param>
+        /// <param name="id">Mounted workflow</param>
+        /// <param name="expectedRevision">Revision of the previous draft</param>
+        /// <param name="draft">Current value</param>
+        /// <param name="workflow">Workflow after the attempt</param>
+        /// <returns>True only for the acknowledged checkpoint</returns>
         internal bool TryUpdateWorkflowDraft(WorkspaceClientToken token, Guid id, long expectedRevision, string draft, out WorkspaceWorkflowSnapshot workflow)
         {
             BiviumWorkspaceSnapshot snapshot;
@@ -154,7 +154,7 @@ namespace Bivium.Services
                 }
                 if (workflow.Draft != (draft ?? ""))
                 {
-                    // L'errore inline di validazione nome descrive il valore rifiutato, non quello modificato
+                    // The inline name validation error describes the rejected value, not the modified one
                     workflow = workflow with { Revision = workflow.Revision + 1, Draft = draft ?? "", ErrorMessage = IsFormKind(workflow.Kind) ? workflow.ErrorMessage : "" };
                     this._workflowRuntime.Current = workflow;
                     this.CommitWorkflowStateLocked();
@@ -166,10 +166,10 @@ namespace Bivium.Services
             return true;
         }
 
-        /// <summary>Consuma la risposta e ammette un piano chiuso atomicamente con il lease</summary>
-        /// <param name="token">Lease che risponde</param>
-        /// <param name="response">Risposta tipizzata con identità consume-once</param>
-        /// <returns>Esito; una risposta duplicata non avvia nuovamente il task</returns>
+        /// <summary>Consumes the response and admits a closed plan atomically with the lease</summary>
+        /// <param name="token">Responding lease</param>
+        /// <param name="response">Typed response with a consume-once identity</param>
+        /// <returns>Outcome; a duplicate response does not start the task again</returns>
         internal WorkspaceWorkflowResponseResult RespondToWorkflow(WorkspaceClientToken token, WorkspaceWorkflowResponse response)
         {
             BiviumWorkspaceSnapshot snapshot;
@@ -178,7 +178,7 @@ namespace Bivium.Services
             Action completeReset = null;
             WorkspaceUploadRuntime resetUpload = null;
             TerminalRuntimeService resetTerminal = null;
-            // Risoluzione fuori lock: il singleton terminale dipende dal workspace
+            // Resolution outside the lock: the terminal singleton depends on the workspace
             if (response?.Cancelled == false)
             {
                 WorkspaceWorkflowSnapshot observed = this.GetWorkflow(token);
@@ -200,7 +200,7 @@ namespace Bivium.Services
                     return WorkspaceWorkflowResponseResult.Stale;
                 if (workflow.Kind == WorkspaceWorkflowKind.Properties && workflow.Phase == WorkspaceWorkflowPhase.Running && response.Cancelled)
                 {
-                    // Chiudere la form non cancella il calcolo già ammesso
+                    // Closing the form does not cancel the already admitted calculation
                     this._workflowRuntime.Current = workflow with { Revision = workflow.Revision + 1, Phase = WorkspaceWorkflowPhase.Dismissed };
                 }
                 else if ((workflow.Phase == WorkspaceWorkflowPhase.Failed && (!IsEditableFormKind(workflow.Kind) || response.Cancelled)) || workflow.Phase == WorkspaceWorkflowPhase.Cancelled)
@@ -239,12 +239,12 @@ namespace Bivium.Services
                 {
                     if (workflow.Kind is not (WorkspaceWorkflowKind.DeleteEntries or WorkspaceWorkflowKind.BatchRename or WorkspaceWorkflowKind.EditorAlert or WorkspaceWorkflowKind.ResetWorkspace or WorkspaceWorkflowKind.EditorClose))
                         return WorkspaceWorkflowResponseResult.Stale;
-                    // Soltanto la chiusura editor porta una scelta tipizzata: save oppure discard
+                    // Only the editor close carries a typed choice: save or discard
                     if (workflow.Kind == WorkspaceWorkflowKind.EditorClose ? !response.Cancelled && response.Value is not (EDITOR_CLOSE_SAVE or EDITOR_CLOSE_DISCARD) : !string.IsNullOrEmpty(response.Value))
                         return WorkspaceWorkflowResponseResult.Stale;
                     if (workflow.Kind is WorkspaceWorkflowKind.EditorAlert or WorkspaceWorkflowKind.EditorClose)
                     {
-                        // Consume-once: save o discard vengono eseguiti dall'adapter che ha risposto, mai dal browser successivo
+                        // Consume-once: save or discard are executed by the adapter that responded, never by the next browser
                         this._workflowRuntime.Current = workflow with { Revision = workflow.Revision + 1, Phase = WorkspaceWorkflowPhase.Dismissed };
                     }
                     else if (response.Cancelled)
@@ -255,8 +255,8 @@ namespace Bivium.Services
                     {
                         if (this._operationRuntime?.Snapshot.IsRunning == true || resetTerminal == null)
                             return WorkspaceWorkflowResponseResult.Stale;
-                        // Consume-once, registro PTY e desktop si linearizzano con il lease corrente.
-                        // Nessuna attesa, disposal o callback viene eseguita sotto il lock workspace.
+                        // Consume-once, PTY registry and desktop are linearized with the current lease.
+                        // No wait, disposal or callback is executed under the workspace lock.
                         completeReset = resetTerminal.DetachAllSessionsForWorkspaceReset();
                         this.ResetWorkspaceLocked(out resetUpload);
                     }
@@ -278,12 +278,12 @@ namespace Bivium.Services
                     }
                     else if (workflow.Kind == WorkspaceWorkflowKind.Authentication)
                     {
-                        // Le mutazioni auth restano sugli endpoint con l'autorità preesistente
+                        // Auth mutations stay on the endpoints with the existing authority
                         return WorkspaceWorkflowResponseResult.Stale;
                     }
                     else if (workflow.Kind == WorkspaceWorkflowKind.TerminalClipboard)
                     {
-                        // Consume-once prima del gesto OS; nessuna esecuzione al browser successivo
+                        // Consume-once before the OS gesture; no execution on the next browser
                         this._workflowRuntime.Current = workflow with { Revision = workflow.Revision + 1, Phase = WorkspaceWorkflowPhase.Succeeded };
                     }
                     else
@@ -301,11 +301,11 @@ namespace Bivium.Services
                 }
                 else if (!response.Cancelled && !string.IsNullOrEmpty(response.Value))
                 {
-                    // Stesse verifiche dei servizi preesistenti; i permessi OS restano verificati dall'I/O reale
+                    // Same checks as the existing services; OS permissions remain verified by the real I/O
                     FileOperationResult validation = this._workflowFiles.ValidateNameOperation(workflow.Kind, workflow.InvocationParameters.SourcePath, workflow.InvocationParameters.ParentPath, response.Value);
                     if (!validation.Success)
                     {
-                        // Il nome non valido resta sulla stessa domanda: il campo conserva testo e focus e mostra l'errore inline
+                        // The invalid name stays on the same question: the field keeps its text and focus and shows the inline error
                         this._workflowRuntime.Current = workflow with { Revision = workflow.Revision + 1, Draft = response.Value, ErrorMessage = validation.ErrorMessage };
                     }
                     else
@@ -317,14 +317,14 @@ namespace Bivium.Services
                 }
                 else
                 {
-                    // L'errore inline apparteneva alla domanda annullata: non deve sopravvivere nella status bar
+                    // The inline error belonged to the cancelled question: it must not survive in the status bar
                     this._workflowRuntime.Current = workflow with { Revision = workflow.Revision + 1, Phase = WorkspaceWorkflowPhase.Cancelled, ErrorMessage = "" };
                 }
                 this._workflowRuntime.Responses.Add(response.ResponseId, response);
                 this.ActivateNextTerminalClipboardLocked();
                 snapshot = this.CommitWorkflowStateLocked();
                 subscribers = this.GetSubscribers();
-                // Il task può iniziare, ma non può pubblicare prima che questo commit rilasci il lock
+                // The task may start, but cannot publish before this commit releases the lock
                 if (admitted != null)
                     admitted.Work = Task.Run(() => this.RunWorkspaceOperation(admitted));
             }
@@ -342,11 +342,11 @@ namespace Bivium.Services
 
         #region Metodi privati
 
-        /// <summary>Cattura la clipboard autorevole e invoca il percorso transfer esistente</summary>
-        /// <param name="token">Lease dell'invocazione</param>
-        /// <param name="destinationDir">Directory catturata</param>
-        /// <param name="panelIndex">Pannello destinatario</param>
-        /// <returns>Workflow oppure operazione già ammessa senza conflitti</returns>
+        /// <summary>Captures the authoritative clipboard and invokes the existing transfer path</summary>
+        /// <param name="token">Invocation lease</param>
+        /// <param name="destinationDir">Captured directory</param>
+        /// <param name="panelIndex">Destination panel</param>
+        /// <returns>Workflow or already admitted operation with no conflicts</returns>
         internal WorkspaceWorkflowSnapshot BeginPasteWorkflow(WorkspaceClientToken token, string destinationDir, int panelIndex)
         {
             BiviumWorkspaceSnapshot snapshot = this.GetSnapshot();
@@ -356,13 +356,13 @@ namespace Bivium.Services
             return this.BeginTransferWorkflow(token, entries, destinationDir, panelIndex, true);
         }
 
-        /// <summary>Cattura sorgenti, modalità e conflitti una volta; hydration non invoca questo metodo</summary>
-        /// <param name="token">Lease dell'invocazione</param>
-        /// <param name="entries">Entry server-side, copiate in record immutabili</param>
-        /// <param name="destinationDir">Destinazione catturata</param>
-        /// <param name="panelIndex">Pannello destinatario</param>
-        /// <param name="fromClipboard">True solo per paste con clipboard ancora corrispondente</param>
-        /// <returns>Workflow con decisioni server-owned</returns>
+        /// <summary>Captures sources, mode and conflicts once; hydration does not invoke this method</summary>
+        /// <param name="token">Invocation lease</param>
+        /// <param name="entries">Server-side entries, copied into immutable records</param>
+        /// <param name="destinationDir">Captured destination</param>
+        /// <param name="panelIndex">Destination panel</param>
+        /// <param name="fromClipboard">True only for a paste whose clipboard still matches</param>
+        /// <returns>Workflow with server-owned decisions</returns>
         internal WorkspaceWorkflowSnapshot BeginTransferWorkflow(WorkspaceClientToken token, IReadOnlyList<FileTransferEntry> entries, string destinationDir, int panelIndex, bool fromClipboard = false)
         {
             BiviumWorkspaceSnapshot snapshot;
@@ -420,11 +420,11 @@ namespace Bivium.Services
             return workflow;
         }
 
-        /// <summary>Ammette la preview acknowledged senza rigenerare Rand o i metodi</summary>
-        /// <param name="token">Lease dell'invocazione</param>
-        /// <param name="sessionId">Sessione renamer montata</param>
-        /// <param name="expectedRevision">Revisione della preview visualizzata</param>
-        /// <returns>Domanda pronta per la risposta esplicita del pulsante Rename</returns>
+        /// <summary>Admits the acknowledged preview without regenerating Rand or the methods</summary>
+        /// <param name="token">Invocation lease</param>
+        /// <param name="sessionId">Mounted renamer session</param>
+        /// <param name="expectedRevision">Revision of the displayed preview</param>
+        /// <returns>Question ready for the explicit response of the Rename button</returns>
         internal WorkspaceWorkflowSnapshot BeginBatchRenameWorkflow(WorkspaceClientToken token, Guid sessionId, long expectedRevision)
         {
             BiviumWorkspaceSnapshot snapshot;
@@ -465,9 +465,9 @@ namespace Bivium.Services
             return workflow;
         }
 
-        /// <summary>Deriva il piano soltanto dalle decisioni già consumate</summary>
-        /// <param name="workflow">Workflow autorevole</param>
-        /// <returns>Piano senza entry saltate e con sole sovrascritture approvate</returns>
+        /// <summary>Derives the plan only from the already consumed decisions</summary>
+        /// <param name="workflow">Authoritative workflow</param>
+        /// <returns>Plan with no skipped entries and only approved overwrites</returns>
         private WorkspaceOperationPlan CreateTransferPlan(WorkspaceWorkflowSnapshot workflow)
         {
             WorkspaceWorkflowInvocation invocation = workflow.InvocationParameters;
@@ -475,17 +475,17 @@ namespace Bivium.Services
             return new WorkspaceOperationPlan(workflow.Kind, "", invocation.ParentPath, "", invocation.SourcePaths, transfers, workflow.OverwritePaths, invocation.FromClipboard);
         }
 
-        /// <summary>Stesse regole di confronto filesystem usate dal Commander preesistente</summary>
-        /// <param name="left">Primo percorso</param>
-        /// <param name="right">Secondo percorso</param>
-        /// <returns>True se i percorsi risolvono alla stessa entry</returns>
+        /// <summary>Same filesystem comparison rules used by the existing Commander</summary>
+        /// <param name="left">First path</param>
+        /// <param name="right">Second path</param>
+        /// <returns>True if the paths resolve to the same entry</returns>
         private bool SameWorkflowPath(string left, string right)
         {
             return string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)), Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)), OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
         }
 
-        /// <summary>Pubblica soltanto riferimenti runtime e progresso leggero</summary>
-        /// <returns>Snapshot committato sotto il lock workspace</returns>
+        /// <summary>Publishes only runtime references and lightweight progress</summary>
+        /// <returns>Snapshot committed under the workspace lock</returns>
         private BiviumWorkspaceSnapshot CommitWorkflowStateLocked()
         {
             this._snapshot = new BiviumWorkspaceSnapshot(this._snapshot.Revision + 1, this._snapshot.Panels, this._snapshot.FloatingWindows, this._snapshot.ActiveClientLease, this._snapshot.Desktop, this._snapshot.Handoff, this._workflowRuntime.Reference, this._operationRuntime?.Snapshot, this._snapshot.Upload);

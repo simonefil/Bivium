@@ -6,30 +6,30 @@ using System.Threading.Tasks;
 
 namespace Bivium.Components.Shared
 {
-    /// <summary>Adapter locale dei checkpoint; non viene conservato dal runtime server</summary>
+    /// <summary>Local checkpoint adapter; it is not kept by the server runtime</summary>
     internal sealed class WorkspaceFormBinding
     {
-        #region Stato adapter
+        #region Adapter State
 
-        /// <summary>Ultimo checkpoint acknowledged</summary>
+        /// <summary>Last acknowledged checkpoint</summary>
         internal WorkspaceWorkflowSnapshot Current { get; private set; }
-        /// <summary>Un CAS rifiutato ferma il publisher senza retry implicito</summary>
+        /// <summary>A rejected CAS stops the publisher without implicit retry</summary>
         internal bool Rejected { get; private set; }
-        /// <summary>La nuova lease ricrea l'adapter logico, senza ripetere la continuation</summary>
+        /// <summary>The new lease recreates the logical adapter, without repeating the continuation</summary>
         internal long Generation { get; private set; }
-        /// <summary>Rifiuto esplicito, senza modificare lo stato autorevole o riprovare alla cieca</summary>
+        /// <summary>Explicit rejection, without changing the authoritative state or blindly retrying</summary>
         internal string Error { get; private set; } = "";
-        /// <summary>Risposta catturata, stabile per doppio evento o ritrasmissione</summary>
+        /// <summary>Captured response, stable across duplicate events or retransmission</summary>
         private WorkspaceWorkflowResponse _response;
 
         #endregion
 
-        #region Metodi pubblici
+        #region Public Methods
 
-        /// <summary>Adotta soltanto revisioni non anteriori al checkpoint locale</summary>
-        /// <param name="workflow">Proiezione autorizzata</param>
-        /// <param name="generation">Generazione della lease dell'adapter</param>
-        /// <returns>True se il componente deve applicare la proiezione</returns>
+        /// <summary>Adopts only revisions not older than the local checkpoint</summary>
+        /// <param name="workflow">Authorized projection</param>
+        /// <param name="generation">Generation of the adapter lease</param>
+        /// <returns>True if the component must apply the projection</returns>
         internal bool Adopt(WorkspaceWorkflowSnapshot workflow, long generation = 0)
         {
             if (this.Generation != generation)
@@ -52,11 +52,11 @@ namespace Bivium.Components.Shared
             return true;
         }
 
-        /// <summary>Pubblica il draft senza avanzare la continuation</summary>
-        /// <param name="service">Autorità workspace</param>
-        /// <param name="token">Lease del publisher</param>
-        /// <param name="draft">Valore corrente</param>
-        /// <returns>True solo per il checkpoint acknowledged</returns>
+        /// <summary>Publishes the draft without advancing the continuation</summary>
+        /// <param name="service">Workspace authority</param>
+        /// <param name="token">Publisher lease</param>
+        /// <param name="draft">Current value</param>
+        /// <returns>True only for the acknowledged checkpoint</returns>
         internal bool Publish(BiviumWorkspaceService service, WorkspaceClientToken token, string draft)
         {
             if (this.Rejected || this.Current == null || (this.Current.Phase != WorkspaceWorkflowPhase.AwaitingInput && !(this.Current.Phase == WorkspaceWorkflowPhase.Failed && BiviumWorkspaceService.IsEditableFormKind(this.Current.Kind))))
@@ -72,11 +72,11 @@ namespace Bivium.Components.Shared
             return true;
         }
 
-        /// <summary>Consume-once sul checkpoint osservato, mai da dispose o hydration</summary>
-        /// <param name="service">Autorità workspace</param>
-        /// <param name="token">Lease che risponde</param>
-        /// <param name="cancelled">Gesto esplicito di chiusura o annullamento</param>
-        /// <returns>Esito senza retry implicito</returns>
+        /// <summary>Consume-once on the observed checkpoint, never from dispose or hydration</summary>
+        /// <param name="service">Workspace authority</param>
+        /// <param name="token">Responding lease</param>
+        /// <param name="cancelled">Explicit close or cancel gesture</param>
+        /// <returns>Result without implicit retry</returns>
         internal WorkspaceWorkflowResponseResult Respond(BiviumWorkspaceService service, WorkspaceClientToken token, bool cancelled)
         {
             if (this.Current == null || this.Rejected)
@@ -90,12 +90,12 @@ namespace Bivium.Components.Shared
             return result;
         }
 
-        /// <summary>La barriera confronta lo stato, non attende operazioni lunghe</summary>
-        /// <param name="service">Autorità workspace</param>
-        /// <param name="token">Lease del drain</param>
-        /// <param name="draft">Valore visualizzato</param>
-        /// <param name="cancellationToken">Deadline del drain</param>
-        /// <returns>True solo per lo stesso checkpoint autorevole</returns>
+        /// <summary>The barrier compares the state, it does not wait for long operations</summary>
+        /// <param name="service">Workspace authority</param>
+        /// <param name="token">Drain lease</param>
+        /// <param name="draft">Displayed value</param>
+        /// <param name="cancellationToken">Drain deadline</param>
+        /// <returns>True only for the same authoritative checkpoint</returns>
         internal Task<bool> FlushAsync(BiviumWorkspaceService service, WorkspaceClientToken token, string draft, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();

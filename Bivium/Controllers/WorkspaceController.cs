@@ -5,30 +5,30 @@ using Microsoft.AspNetCore.Mvc;
 namespace Bivium.Controllers
 {
     /// <summary>
-    /// Riceve le notifiche del ciclo di vita del browser per il workspace condiviso
+    /// Receives browser lifecycle notifications for the shared workspace
     /// </summary>
     [ApiController]
     [Route("api/workspace")]
     public sealed class WorkspaceController : ControllerBase
     {
         /// <summary>
-        /// Servizio autoritativo del workspace condiviso
+        /// Authoritative service of the shared workspace
         /// </summary>
         private readonly BiviumWorkspaceService _workspaceService;
 
         /// <summary>
-        /// Crea il controller protetto dal filtro di autorizzazione applicativo
+        /// Creates the controller protected by the application authorization filter
         /// </summary>
-        /// <param name="workspaceService">Servizio autoritativo del workspace</param>
+        /// <param name="workspaceService">Authoritative workspace service</param>
         public WorkspaceController(BiviumWorkspaceService workspaceService)
         {
             this._workspaceService = workspaceService;
         }
 
         /// <summary>
-        /// Marca il proprietario corrente come disconnesso senza scollegarne le risorse persistenti
+        /// Marks the current owner as disconnected without detaching its persistent resources
         /// </summary>
-        /// <returns>Nessun contenuto per ogni token ben formato</returns>
+        /// <returns>No content for every well-formed token</returns>
         [HttpPost("disconnect")]
         public IActionResult Disconnect()
         {

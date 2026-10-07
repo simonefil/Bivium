@@ -3,30 +3,30 @@
 <div @ref="this.Element" data-workspace-surface="@this.Surface" style="display:contents">@this.ChildContent</div>
 
 @code {
-    #region Proprietà
-    /// <summary>Frammento posseduto dalla form originale</summary>
+    #region Properties
+    /// <summary>Fragment owned by the original form</summary>
     [Parameter] public RenderFragment ChildContent { get; set; }
-    /// <summary>Notifica il mount reale e i render successivi</summary>
+    /// <summary>Notifies the real mount and subsequent renders</summary>
     [Parameter] public EventCallback<bool> OnContentRendered { get; set; }
-    /// <summary>Identità app della superficie del bridge</summary>
+    /// <summary>App identity of the bridge surface</summary>
     [Parameter] public string Surface { get; set; } = "";
-    /// <summary>Root reale, senza ricerca tramite indici DOM</summary>
+    /// <summary>Real root, without lookup through DOM indexes</summary>
     public ElementReference Element { get; private set; }
     #endregion
 
-    #region Variabili di classe
-    /// <summary>Guardia dopo il rilascio dell'owner</summary>
+    #region Class Variables
+    /// <summary>Guard after the owner is released</summary>
     private bool _detached;
 
-    /// <summary>Notifica solo render richiesti dall'owner, non il render causato dal callback stesso</summary>
+    /// <summary>Notifies only renders requested by the owner, not the render caused by the callback itself</summary>
     private bool _notifyAfterRender = true;
     #endregion
 
-    #region Metodi pubblici
+    #region Public Methods
 
-    /// <summary>Aggiorna il contenuto senza sostituire l'istanza della form</summary>
-    /// <param name="content">Frammento dell'owner aggiornato</param>
-    /// <param name="notify">Notifica il render salvo il refresh automatico del callback</param>
+    /// <summary>Updates the content without replacing the form instance</summary>
+    /// <param name="content">Updated owner fragment</param>
+    /// <param name="notify">Notifies the render except for the callback's automatic refresh</param>
     public void Refresh(RenderFragment content, bool notify)
     {
         if (this._detached)
@@ -36,7 +36,7 @@
         this.StateHasChanged();
     }
 
-    /// <summary>Rimuove i callback e il contenuto di un owner rilasciato</summary>
+    /// <summary>Removes the callbacks and content of a released owner</summary>
     public void Detach()
     {
         this._detached = true;
@@ -47,8 +47,8 @@
 
     #region Overrides
 
-    /// <summary>Notifica il DOM realmente montato, senza polling</summary>
-    /// <param name="firstRender">True solo al primo render del bridge</param>
+    /// <summary>Notifies the actually mounted DOM, without polling</summary>
+    /// <param name="firstRender">True only on the first render of the bridge</param>
     protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender)
     {
         if (this._detached || !this._notifyAfterRender)

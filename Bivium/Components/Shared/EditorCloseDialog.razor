@@ -23,24 +23,24 @@
 }
 
 @code {
-    /// <summary>Domanda server-owned sulla chiusura dell'editor con modifiche non salvate</summary>
+    /// <summary>Server-owned question about closing the editor with unsaved changes</summary>
     [Parameter] public Bivium.Models.WorkspaceWorkflowSnapshot Workflow { get; set; }
-    /// <summary>Attachment dell'adapter corrente</summary>
+    /// <summary>Attachment of the current adapter</summary>
     [Parameter] public string AttachmentId { get; set; } = "";
-    /// <summary>Generazione autorevole osservata</summary>
+    /// <summary>Observed authoritative generation</summary>
     [Parameter] public long LeaseGeneration { get; set; }
-    /// <summary>Scelta consumata (save o discard) da eseguire sull'editor dell'adapter che ha risposto</summary>
+    /// <summary>Consumed choice (save or discard) to run on the editor of the adapter that responded</summary>
     [Parameter] public EventCallback<string> OnResolved { get; set; }
-    /// <summary>Risposta catturata per la sola domanda corrente</summary>
+    /// <summary>Response captured for the current question only</summary>
     private Bivium.Models.WorkspaceWorkflowResponse _response;
-    /// <summary>Identità della domanda montata</summary>
+    /// <summary>Identity of the mounted question</summary>
     private Guid _questionId;
-    /// <summary>Errore di risposta, senza retry automatico</summary>
+    /// <summary>Response error, without automatic retry</summary>
     private string _error = "";
-    /// <summary>Dispose rilascia soltanto l'adapter</summary>
+    /// <summary>Dispose releases only the adapter</summary>
     private bool _disposed;
 
-    /// <summary>Hydration della domanda; nessuna risposta o effetto sull'editor</summary>
+    /// <summary>Question hydration; no response or effect on the editor</summary>
     protected override void OnParametersSet()
     {
         if (this.Workflow == null || this._disposed || this._questionId == this.Workflow.QuestionId)
@@ -50,10 +50,10 @@
         this._error = "";
     }
 
-    /// <summary>Consuma la risposta con identità stabile e inoltra la scelta accettata</summary>
-    /// <param name="cancelled">Annulla: l'editor resta aperto</param>
-    /// <param name="choice">Scelta tipizzata save o discard</param>
-    /// <returns>Completamento del callback adapter</returns>
+    /// <summary>Consumes the response with a stable identity and forwards the accepted choice</summary>
+    /// <param name="cancelled">Cancels: the editor stays open</param>
+    /// <param name="choice">Typed choice, save or discard</param>
+    /// <returns>Completion of the adapter callback</returns>
     private async System.Threading.Tasks.Task RespondAsync(bool cancelled, string choice)
     {
         if (this._disposed || this.Workflow?.Kind != Bivium.Models.WorkspaceWorkflowKind.EditorClose || this.Workflow.Phase != Bivium.Models.WorkspaceWorkflowPhase.AwaitingConfirmation)
@@ -71,9 +71,9 @@
             await this.OnResolved.InvokeAsync(choice);
     }
 
-    /// <summary>Conferma la domanda immutabile durante il drain dell'handoff</summary>
-    /// <param name="cancellationToken">Lifecycle del drain</param>
-    /// <returns>True per la stessa domanda acknowledged</returns>
+    /// <summary>Confirms the immutable question during the handoff drain</summary>
+    /// <param name="cancellationToken">Drain lifecycle</param>
+    /// <returns>True for the same acknowledged question</returns>
     internal System.Threading.Tasks.Task<bool> FlushForHandoffAsync(System.Threading.CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -82,7 +82,7 @@
         return System.Threading.Tasks.Task.FromResult(accepted);
     }
 
-    /// <summary>Detach del solo adapter; non risponde né chiude l'editor</summary>
+    /// <summary>Detaches the adapter only; neither responds nor closes the editor</summary>
     public void Dispose()
     {
         this._disposed = true;

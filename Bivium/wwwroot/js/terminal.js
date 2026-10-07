@@ -7,7 +7,7 @@ import { createSurfacePublisher, disposeSurface } from './surface-adapters.js';
 const terminals = new Map();
 const publications = () => globalThis[Symbol.for('bivium.desktopPublications')];
 
-// Gli anchor usano la timeline già posseduta dal runtime, non testo o indici del DOM virtualizzato.
+// Anchors use the timeline already owned by the runtime, not text or indices of the virtualized DOM.
 function readTerminalView(state) {
     if (state.pendingView) return state.pendingView;
     const position = value => value ? { row: state.snapshot.screen?.alternateBuffer ? value.row : visualToTimelineRow(state, value.row), column: value.column } : null;
@@ -54,7 +54,7 @@ export function flushTerminalViews() {
     return Array.from(terminals.values()).every(state => state.viewAdapter?.registration.ready());
 }
 
-/** Scarica la history tramite anchor same-origin: nessun popup e nessuna user activation richiesta. */
+/** Downloads the history through a same-origin anchor: no popup and no user activation required. */
 export function downloadTerminalHistory(url) {
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -520,7 +520,7 @@ function createCellNode(cell, cursor, selected, screen) {
     if (selected) span.classList.add('selected');
     const attributes = cell.attributes || 0;
     const colors = resolveTerminalCellColors(cell, screen);
-    // La selezione usa i colori --terminal-selection-* del CSS: nessun inline da sovrascrivere con !important
+    // The selection uses the CSS --terminal-selection-* colors: no inline style to override with !important
     if (!selected) {
         span.style.color = colors.foreground;
         span.style.backgroundColor = colors.background;
@@ -715,7 +715,7 @@ function renderVisibleRows(state, followTail) {
     reconcileVisibleRows(state, entries);
     if (restoredView) {
         state.viewport.scrollLeft = Math.max(0, Math.min(Math.max(0, state.viewport.scrollWidth - state.viewport.clientWidth), restoredView.horizontalCells * state.charWidth));
-        // Lo scroll del layout non riattiva follow-tail né cancella l'anchor del prompt.
+        // Layout scrolling neither re-enables follow-tail nor clears the prompt anchor.
         state.programmaticScrollTop = state.viewport.scrollTop;
     }
     state.renderedRows = nextRowCache;
@@ -947,7 +947,7 @@ function attachInputHandlers(state) {
     state.viewport.addEventListener('mousedown', function (event) {
         const bounds = state.viewport.getBoundingClientRect();
         if (event.clientX >= bounds.left + state.viewport.clientWidth || event.clientY >= bounds.top + state.viewport.clientHeight) state.userScroll = true;
-        if (state.userScroll) return; // La scrollbar nativa non inizia una selezione di testo
+        if (state.userScroll) return; // The native scrollbar does not start a text selection
         const hyperlink = event.target.closest?.('.terminal-hyperlink');
         if (hyperlink && (!state.snapshot?.screen?.mouseTracking || event.ctrlKey || event.metaKey)) return;
         if (state.input) {
@@ -1022,7 +1022,7 @@ function attachInputHandlers(state) {
         if (!state.selecting) return;
         state.selecting = false;
         stopSelectionAutoscroll(state);
-        if (publications().freeze) return; // Il checkpoint precede il mouseup sintetico del freeze
+        if (publications().freeze) return; // The checkpoint precedes the synthetic mouseup of the freeze
         state.selectionFocus = getPositionFromPointer(state, event);
         scheduleRender(state);
     };

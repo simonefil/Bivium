@@ -72,7 +72,7 @@ namespace Bivium.Services
         /// <returns>Total size in bytes</returns>
         long CalculateDirectorySize(string path, out int fileCount, out int dirCount);
 
-        /// <summary>Stesso calcolo con cancellazione del task workspace e progresso dei file visitati</summary>
+        /// <summary>Same calculation with workspace task cancellation and progress of the visited files</summary>
         long CalculateDirectorySize(string path, out int fileCount, out int dirCount, CancellationToken cancellationToken, Action<int, int> onProgress = null);
     }
 }

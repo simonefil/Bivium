@@ -62,165 +62,165 @@
 
 @code {
     /// <summary>
-    /// Stato autoritativo del pannello
+    /// Authoritative panel state
     /// </summary>
     [Parameter]
     public PanelState State { get; set; }
 
     /// <summary>
-    /// Indica se il pannello riceve i comandi globali
+    /// Indicates whether the panel receives global commands
     /// </summary>
     [Parameter]
     public bool IsActive { get; set; }
 
     /// <summary>
-    /// Identificatore stabile del pannello
+    /// Stable panel identifier
     /// </summary>
     [Parameter]
     public string PanelId { get; set; } = "";
-    /// <summary>Identità del mount autorizzato, mai dedotta dal callback tardivo</summary>
+    /// <summary>Identity of the authorized mount, never inferred from the late callback</summary>
     [Parameter] public string AttachmentId { get; set; } = "";
-    /// <summary>Generazione del publisher path</summary>
+    /// <summary>Generation of the path publisher</summary>
     [Parameter] public long LeaseGeneration { get; set; }
-    /// <summary>Ultimo draft visuale acknowledged</summary>
+    /// <summary>Last acknowledged visual draft</summary>
     private WorkspacePanelPathDraft _pathDraft;
-    /// <summary>Rifiuto ferma il publisher senza retry cieco</summary>
+    /// <summary>Rejection stops the publisher without blind retry</summary>
     private bool _pathDraftRejected;
-    /// <summary>Ultima lease hydrated</summary>
+    /// <summary>Last hydrated lease</summary>
     private long _pathLease;
 
     /// <summary>
-    /// Inoltra una richiesta di navigazione a Commander
+    /// Forwards a navigation request to Commander
     /// </summary>
     [Parameter]
     public EventCallback<string> OnNavigate { get; set; }
 
     /// <summary>
-    /// Inoltra una richiesta di ordinamento a Commander
+    /// Forwards a sort request to Commander
     /// </summary>
     [Parameter]
     public EventCallback<SortColumn> OnSortChanged { get; set; }
 
     /// <summary>
-    /// Inoltra l'attivazione del pannello a Commander
+    /// Forwards the panel activation to Commander
     /// </summary>
     [Parameter]
     public EventCallback OnActivated { get; set; }
 
     /// <summary>
-    /// Inoltra una richiesta di menu contestuale
+    /// Forwards a context menu request
     /// </summary>
     [Parameter]
     public EventCallback<ContextMenuEventArgs> OnContextMenu { get; set; }
 
     /// <summary>
-    /// Inoltra una modifica semantica dell'albero
+    /// Forwards a semantic tree change
     /// </summary>
     [Parameter]
     public EventCallback<DirectoryTreeExpansionChange> OnTreeExpansionChanged { get; set; }
 
     /// <summary>
-    /// Inoltra una modifica del layout verticale
+    /// Forwards a vertical layout change
     /// </summary>
     [Parameter]
     public EventCallback<PanelTreeLayoutChange> OnTreeLayoutChanged { get; set; }
 
     /// <summary>
-    /// Richiede un render del proprietario dopo un'interazione del reducer
+    /// Requests a render of the owner after a reducer interaction
     /// </summary>
     [Parameter]
     public EventCallback OnStateChanged { get; set; }
 
     /// <summary>
-    /// Inoltra la prima riga visibile per la persistenza semantica
+    /// Forwards the first visible row for semantic persistence
     /// </summary>
     [Parameter]
     public EventCallback<string> OnScrollAnchorChanged { get; set; }
 
     /// <summary>
-    /// Inoltra il numero di righe interamente visibili
+    /// Forwards the number of fully visible rows
     /// </summary>
     [Parameter]
     public EventCallback<int> OnPageSizeChanged { get; set; }
 
     /// <summary>
-    /// Indica se l'editor del percorso è aperto
+    /// Indicates whether the path editor is open
     /// </summary>
     private bool _isEditingPath;
 
     /// <summary>
-    /// Valore corrente dell'editor del percorso
+    /// Current value of the path editor
     /// </summary>
     private string _editPath = "";
 
     /// <summary>
-    /// Valore passato all'AutoComplete: cambia solo quando il server imposta il testo di proposito.
-    /// Seguire _editPath a ogni tasto farebbe riscrivere a ogni render un valore in ritardo sull'input
+    /// Value passed to the AutoComplete: changes only when the server sets the text on purpose.
+    /// Following _editPath on every key would rewrite on every render a value lagging behind the input
     /// </summary>
     private string _editPathValue = "";
 
     /// <summary>
-    /// Candidati completi mostrati da RadzenAutoComplete
+    /// Full candidates shown by RadzenAutoComplete
     /// </summary>
     private List<string> _autocompleteCandidates = new List<string>();
 
     /// <summary>
-    /// Nomi candidati usati dal ciclo Tab
+    /// Candidate names used by the Tab cycle
     /// </summary>
     private List<string> _autocompleteMatches = new List<string>();
 
     /// <summary>
-    /// Indice del candidato corrente nella sessione Tab
+    /// Index of the current candidate in the Tab session
     /// </summary>
     private int _autocompleteIndex;
 
     /// <summary>
-    /// Directory padre della sessione Tab
+    /// Parent directory of the Tab session
     /// </summary>
     private string _autocompleteParentDirectory = "";
 
     /// <summary>
-    /// Valore DOM atteso per continuare la sessione Tab corrente
+    /// Expected DOM value to continue the current Tab session
     /// </summary>
     private string _autocompleteCycleValue = "";
 
     /// <summary>
-    /// Versione della richiesta di editing già osservata
+    /// Version of the editing request already observed
     /// </summary>
     private long _pathEditRequestVersion;
 
     /// <summary>
-    /// Modulo JavaScript per autocomplete e scroll Radzen
+    /// JavaScript module for Radzen autocomplete and scroll
     /// </summary>
     private IJSObjectReference _jsModule;
 
     /// <summary>
-    /// Riferimento .NET usato dagli adapter JavaScript
+    /// .NET reference used by the JavaScript adapters
     /// </summary>
     private DotNetObjectReference<FilePanel> _dotNetReference;
 
     /// <summary>
-    /// Percorso di scroll già ripristinato
+    /// Scroll path already restored
     /// </summary>
     private string _restoredScrollAnchorPath = "";
 
     /// <summary>
-    /// Cancellazione del blur ritardato e degli adapter pendenti
+    /// Cancellation of the delayed blur and of the pending adapters
     /// </summary>
     private CancellationTokenSource _pathCancellation = new CancellationTokenSource();
 
     /// <summary>
-    /// Indica che le risorse del componente sono già state rilasciate
+    /// Indicates that the component resources have already been released
     /// </summary>
     private bool _isDisposed;
 
     /// <summary>
-    /// Chiave (lease, base path) dell'adapter path installato, oppure null se assente
+    /// Key (lease, base path) of the installed path adapter, or null if absent
     /// </summary>
     private (long Generation, string BasePath)? _installedPathAdapter;
 
     /// <summary>
-    /// Avvia l'editing richiesto semanticamente da Commander
+    /// Starts the editing semantically requested by Commander
     /// </summary>
     protected override void OnParametersSet()
     {
@@ -257,9 +257,9 @@
     }
 
     /// <summary>
-    /// Installa gli adapter sul wrapper stabile e ripristina lo scroll semantico
+    /// Installs the adapters on the stable wrapper and restores the semantic scroll
     /// </summary>
-    /// <param name="firstRender">True al primo render</param>
+    /// <param name="firstRender">True on the first render</param>
     protected override async System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
@@ -278,7 +278,7 @@
         if (this._jsModule == null || this._isDisposed)
             return;
 
-        // L'adapter si installa o rimuove solo al cambio di editing, lease o base path, non a ogni render
+        // The adapter is installed or removed only when editing, lease or base path change, not on every render
         (long Generation, string BasePath)? pathAdapter = this._isEditingPath && this._pathDraft != null ? (this.LeaseGeneration, this._pathDraft.BasePath) : null;
         if (pathAdapter != this._installedPathAdapter)
         {
@@ -303,7 +303,7 @@
     }
 
     /// <summary>
-    /// Attiva il pannello senza duplicarne il renderer
+    /// Activates the panel without duplicating its renderer
     /// </summary>
     private async System.Threading.Tasks.Task ActivateAsync()
     {
@@ -312,16 +312,16 @@
     }
 
     /// <summary>
-    /// Inoltra una navigazione validata al proprietario
+    /// Forwards a validated navigation to the owner
     /// </summary>
-    /// <param name="path">Percorso richiesto</param>
+    /// <param name="path">Requested path</param>
     private async System.Threading.Tasks.Task NavigateAsync(string path)
     {
         await this.OnNavigate.InvokeAsync(path);
     }
 
     /// <summary>
-    /// Risale alla directory padre tramite il servizio esistente
+    /// Goes up to the parent directory through the existing service
     /// </summary>
     private async System.Threading.Tasks.Task NavigateUpAsync()
     {
@@ -331,18 +331,18 @@
     }
 
     /// <summary>
-    /// Indica se esiste una directory padre
+    /// Indicates whether a parent directory exists
     /// </summary>
-    /// <returns>True quando il servizio espone un percorso padre</returns>
+    /// <returns>True when the service exposes a parent path</returns>
     private bool CanNavigateUp()
     {
         return !string.IsNullOrEmpty(this.FileSystemService.GetParentPath(this.State.CurrentPath));
     }
 
     /// <summary>
-    /// Naviga a un segmento del breadcrumb
+    /// Navigates to a breadcrumb segment
     /// </summary>
-    /// <param name="path">Percorso completo del segmento</param>
+    /// <param name="path">Full path of the segment</param>
     private async System.Threading.Tasks.Task NavigateCrumbAsync(string path)
     {
         if (!string.Equals(path, this.State.CurrentPath, this.GetPathComparison()))
@@ -350,13 +350,13 @@
     }
 
     /// <summary>
-    /// Costruisce i segmenti del percorso senza mutarne la normalizzazione
+    /// Builds the path segments without altering their normalization
     /// </summary>
-    /// <returns>Segmenti dalla radice alla directory corrente</returns>
+    /// <returns>Segments from the root to the current directory</returns>
     private List<PathCrumb> GetPathCrumbs()
     {
         List<PathCrumb> result = new List<PathCrumb>();
-        // Il pannello può renderizzare prima che lo stato riceva il percorso iniziale
+        // The panel may render before the state receives the initial path
         if (string.IsNullOrEmpty(this.State.CurrentPath))
             return result;
         DirectoryInfo current = new DirectoryInfo(this.State.CurrentPath);
@@ -371,7 +371,7 @@
     }
 
     /// <summary>
-    /// Apre l'editor Radzen del percorso
+    /// Opens the Radzen path editor
     /// </summary>
     private void StartPathEdit()
     {
@@ -388,9 +388,9 @@
     }
 
     /// <summary>
-    /// Aggiorna il valore digitato e azzera il ciclo precedente
+    /// Updates the typed value and resets the previous cycle
     /// </summary>
-    /// <param name="value">Valore prodotto da RadzenAutoComplete</param>
+    /// <param name="value">Value produced by RadzenAutoComplete</param>
     private void HandlePathValueChanged(string value)
     {
         this._editPath = value ?? "";
@@ -401,11 +401,11 @@
     }
 
     /// <summary>
-    /// Riceve Escape dall'adapter: un @onkeydown Blazor sul wrapper renderizzerebbe a ogni tasto
-    /// e riscriverebbe nell'input il valore precedente, cancellando il carattere appena digitato
+    /// Receives Escape from the adapter: a Blazor @onkeydown on the wrapper would render on every key
+    /// and would rewrite the previous value into the input, erasing the character just typed
     /// </summary>
-    /// <param name="generation">Lease catturata dall'adapter</param>
-    /// <param name="basePath">Directory di base del mount</param>
+    /// <param name="generation">Lease captured by the adapter</param>
+    /// <param name="basePath">Base directory of the mount</param>
     [JSInvokable]
     public void OnRadzenPathCancel(long generation, string basePath)
     {
@@ -416,12 +416,12 @@
     }
 
     /// <summary>
-    /// Riceve Enter dall'adapter con il valore reale dell'input, senza suggerimento evidenziato
+    /// Receives Enter from the adapter with the real input value, without highlighted suggestion
     /// </summary>
-    /// <param name="generation">Lease catturata dall'adapter</param>
-    /// <param name="basePath">Directory di base del mount</param>
-    /// <param name="inputValue">Valore reale dell'input al momento della pressione</param>
-    /// <returns>Completamento della conferma</returns>
+    /// <param name="generation">Lease captured by the adapter</param>
+    /// <param name="basePath">Base directory of the mount</param>
+    /// <param name="inputValue">Real input value at the time of the keypress</param>
+    /// <returns>Confirmation completion</returns>
     [JSInvokable]
     public async System.Threading.Tasks.Task OnRadzenPathCommit(long generation, string basePath, string inputValue)
     {
@@ -433,12 +433,12 @@
     }
 
     /// <summary>
-    /// Riceve Tab dall'adapter e applica prefisso comune o ciclo legacy
+    /// Receives Tab from the adapter and applies common prefix or legacy cycle
     /// </summary>
-    /// <param name="generation">Lease catturata dall'adapter Tab</param>
-    /// <param name="basePath">Directory di base del mount</param>
-    /// <param name="inputValue">Valore reale dell'input al momento della pressione</param>
-    /// <returns>Percorso completato da riflettere nell'input Radzen</returns>
+    /// <param name="generation">Lease captured by the Tab adapter</param>
+    /// <param name="basePath">Base directory of the mount</param>
+    /// <param name="inputValue">Real input value at the time of the keypress</param>
+    /// <returns>Completed path to reflect in the Radzen input</returns>
     [JSInvokable]
     public string OnRadzenPathTab(long generation, string basePath, string inputValue)
     {
@@ -495,7 +495,7 @@
     }
 
     /// <summary>
-    /// Avvia la chiusura differita su blur per consentire la selezione Radzen
+    /// Starts the deferred close on blur to allow the Radzen selection
     /// </summary>
     private async System.Threading.Tasks.Task HandlePathBlur()
     {
@@ -504,9 +504,9 @@
     }
 
     /// <summary>
-    /// Chiude l'editor dopo il completamento dell'evento di selezione
+    /// Closes the editor after the selection event completes
     /// </summary>
-    /// <param name="token">Token della sessione editor corrente</param>
+    /// <param name="token">Token of the current editor session</param>
     private async System.Threading.Tasks.Task ClosePathAfterBlurAsync(CancellationToken token)
     {
         try
@@ -525,7 +525,7 @@
     }
 
     /// <summary>
-    /// Conferma il percorso digitato tramite il callback Commander
+    /// Confirms the typed path through the Commander callback
     /// </summary>
     private async System.Threading.Tasks.Task CommitPathEditAsync()
     {
@@ -545,7 +545,7 @@
     }
 
     /// <summary>
-    /// Annulla l'editing e ripristina il percorso autoritativo
+    /// Cancels the editing and restores the authoritative path
     /// </summary>
     private void CancelPathEdit()
     {
@@ -556,7 +556,7 @@
         this.PublishPathDraft();
     }
 
-    /// <summary>Pubblica solo il draft visuale; non conferma né naviga il percorso</summary>
+    /// <summary>Publishes only the visual draft; does not confirm nor navigate the path</summary>
     private void PublishPathDraft()
     {
         if (this._isDisposed || this._pathDraftRejected || this._pathDraft == null)
@@ -567,14 +567,14 @@
         else this._pathDraft = accepted;
     }
 
-    /// <summary>Checkpoint del valore reale, selezione e focus dell'input semantico path</summary>
-    /// <param name="generation">Lease catturata dall'adapter</param>
-    /// <param name="basePath">Directory di base catturata dal mount</param>
-    /// <param name="value">Testo non confermato</param>
-    /// <param name="start">Inizio selezione UTF-16</param>
-    /// <param name="end">Fine selezione UTF-16</param>
-    /// <param name="focused">Focus sul controllo path</param>
-    /// <returns>True soltanto per un checkpoint acknowledged</returns>
+    /// <summary>Checkpoint of the real value, selection and focus of the semantic path input</summary>
+    /// <param name="generation">Lease captured by the adapter</param>
+    /// <param name="basePath">Base directory captured by the mount</param>
+    /// <param name="value">Unconfirmed text</param>
+    /// <param name="start">UTF-16 selection start</param>
+    /// <param name="end">UTF-16 selection end</param>
+    /// <param name="focused">Focus on the path control</param>
+    /// <returns>True only for an acknowledged checkpoint</returns>
     [JSInvokable]
     public bool OnRadzenPathDraftChanged(long generation, string basePath, string value, int start, int end, bool focused)
     {
@@ -587,7 +587,7 @@
     }
 
     /// <summary>
-    /// Azzera lo stato transitorio dell'autocomplete
+    /// Resets the transient autocomplete state
     /// </summary>
     private void ResetAutocomplete()
     {
@@ -599,10 +599,10 @@
     }
 
     /// <summary>
-    /// Calcola il prefisso comune senza distinzione di maiuscole
+    /// Computes the common prefix ignoring case
     /// </summary>
-    /// <param name="values">Nomi candidati</param>
-    /// <returns>Prefisso comune</returns>
+    /// <param name="values">Candidate names</param>
+    /// <returns>Common prefix</returns>
     private string GetCommonPrefix(List<string> values)
     {
         string result = values[0];
@@ -617,7 +617,7 @@
     }
 
     /// <summary>
-    /// Cancella timeout e richieste path precedenti
+    /// Cancels previous path timeouts and requests
     /// </summary>
     private void CancelPendingPathWork()
     {
@@ -627,9 +627,9 @@
     }
 
     /// <summary>
-    /// Inoltra la nuova dimensione dell'albero
+    /// Forwards the new tree size
     /// </summary>
-    /// <param name="args">Dimensione conclusiva prodotta da Radzen</param>
+    /// <param name="args">Final size produced by Radzen</param>
     private async System.Threading.Tasks.Task HandleTreeResizeAsync(RadzenSplitterResizeEventArgs args)
     {
         if (args.PaneIndex == 0)
@@ -637,9 +637,9 @@
     }
 
     /// <summary>
-    /// Inoltra la compressione dell'albero
+    /// Forwards the tree collapse
     /// </summary>
-    /// <param name="args">Pannello compresso da Radzen</param>
+    /// <param name="args">Panel collapsed by Radzen</param>
     private async System.Threading.Tasks.Task HandleTreeCollapseAsync(RadzenSplitterEventArgs args)
     {
         if (args.PaneIndex == 0)
@@ -647,9 +647,9 @@
     }
 
     /// <summary>
-    /// Inoltra l'espansione dell'albero
+    /// Forwards the tree expansion
     /// </summary>
-    /// <param name="args">Pannello espanso da Radzen</param>
+    /// <param name="args">Panel expanded by Radzen</param>
     private async System.Threading.Tasks.Task HandleTreeExpandAsync(RadzenSplitterEventArgs args)
     {
         if (args.PaneIndex == 0)
@@ -657,27 +657,27 @@
     }
 
     /// <summary>
-    /// Inoltra una modifica di espansione semantica
+    /// Forwards a semantic expansion change
     /// </summary>
-    /// <param name="change">Modifica prodotta dal tree</param>
+    /// <param name="change">Change produced by the tree</param>
     private async System.Threading.Tasks.Task HandleTreeExpansionAsync(DirectoryTreeExpansionChange change)
     {
         await this.OnTreeExpansionChanged.InvokeAsync(change);
     }
 
     /// <summary>
-    /// Apre il menu contestuale dello sfondo senza entry associata
+    /// Opens the background context menu without an associated entry
     /// </summary>
-    /// <param name="args">Coordinate del puntatore</param>
+    /// <param name="args">Pointer coordinates</param>
     private async System.Threading.Tasks.Task HandlePanelContextMenuAsync(MouseEventArgs args)
     {
         await this.OnContextMenu.InvokeAsync(new ContextMenuEventArgs { X = args.ClientX, Y = args.ClientY });
     }
 
     /// <summary>
-    /// Riceve dal browser il primo percorso visibile
+    /// Receives the first visible path from the browser
     /// </summary>
-    /// <param name="path">Percorso semantico della prima riga visibile</param>
+    /// <param name="path">Semantic path of the first visible row</param>
     [JSInvokable]
     public async System.Threading.Tasks.Task OnRadzenFileListScrollAnchorChanged(string path)
     {
@@ -689,9 +689,9 @@
     }
 
     /// <summary>
-    /// Riceve dal browser il numero di righe visibili
+    /// Receives the number of visible rows from the browser
     /// </summary>
-    /// <param name="pageSize">Numero di righe interamente visibili</param>
+    /// <param name="pageSize">Number of fully visible rows</param>
     [JSInvokable]
     public async System.Threading.Tasks.Task OnRadzenFileListPageSizeChanged(int pageSize)
     {
@@ -700,16 +700,16 @@
     }
 
     /// <summary>
-    /// Restituisce il confronto percorso della piattaforma
+    /// Returns the platform path comparison
     /// </summary>
-    /// <returns>Confronto coerente con il filesystem corrente</returns>
+    /// <returns>Comparison consistent with the current filesystem</returns>
     private StringComparison GetPathComparison()
     {
         return OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
     }
 
     /// <summary>
-    /// Rilascia adapter, richieste e riferimenti interop
+    /// Releases adapters, requests and interop references
     /// </summary>
     public async ValueTask DisposeAsync()
     {
@@ -751,7 +751,7 @@
     }
 
     /// <summary>
-    /// Segmento visuale del breadcrumb con destinazione semantica
+    /// Visual breadcrumb segment with semantic destination
     /// </summary>
     private sealed record PathCrumb(string Text, string Path);
 }

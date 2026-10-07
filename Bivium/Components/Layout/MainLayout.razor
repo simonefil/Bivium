@@ -1,7 +1,7 @@
 @namespace Bivium.Components.Layout
 @inherits LayoutComponentBase
 
-@* RadzenTheme legge Theme solo in OnInitialized: i cambi successivi passano da ThemeService (Commander) e un re-render del layout non li annulla *@
+@* RadzenTheme reads Theme only in OnInitialized: later changes go through ThemeService (Commander) and a layout re-render does not undo them *@
 <RadzenTheme Theme="@RadzenThemeCatalog.DEFAULT_THEME" />
 <RadzenDialog />
 <RadzenContextMenu />

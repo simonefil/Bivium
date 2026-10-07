@@ -1,6 +1,6 @@
 /* Terminal window styles - floating draggable window */
 .terminal-window {
-    /* Il viewport resta scuro per progetto; selezione e marker seguono il tema Radzen */
+    /* The viewport stays dark by design; selection and markers follow the Radzen theme */
     --terminal-background: #000;
     --terminal-foreground: #fff;
     --terminal-muted-color: color-mix(in srgb, var(--terminal-foreground) 45%, var(--terminal-background));

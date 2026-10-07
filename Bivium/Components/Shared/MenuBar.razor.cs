@@ -15,20 +15,20 @@ namespace Bivium.Components.Shared
         #region Injected Services
 
         /// <summary>
-        /// JS runtime per gli adapter del menu
+        /// JS runtime for the menu adapters
         /// </summary>
         [Inject]
         private IJSRuntime _jsRuntime { get; set; }
-        /// <summary>Runtime workspace del solo draft visuale</summary>
+        /// <summary>Workspace runtime of the visual draft only</summary>
         [Inject] private BiviumWorkspaceService WorkspaceService { get; set; }
-        /// <summary>Lease catturata dal render Commander</summary>
+        /// <summary>Lease captured by the Commander render</summary>
         [CascadingParameter] public WorkspaceSurfaceOwner SurfaceOwner { get; set; }
 
         #endregion
 
         #region Parameters
 
-        /// <summary>Disponibilità e shortcut calcolati esclusivamente dal Commander</summary>
+        /// <summary>Availability and shortcuts computed exclusively by the Commander</summary>
         [Parameter]
         public IReadOnlyList<CommanderCommandState> Commands { get; set; } = Array.Empty<CommanderCommandState>();
 
@@ -116,11 +116,11 @@ namespace Bivium.Components.Shared
         [Parameter]
         public EventCallback OnTerminal { get; set; }
 
-        /// <summary>Visibilità controllata dal Commander, senza duplicare lo stato terminale</summary>
+        /// <summary>Visibility controlled by the Commander, without duplicating the terminal state</summary>
         [Parameter] public bool TerminalVisible { get; set; }
-        /// <summary>Minimizzazione controllata dal Commander</summary>
+        /// <summary>Minimization controlled by the Commander</summary>
         [Parameter] public bool TerminalMinimized { get; set; }
-        /// <summary>Richiesta di attenzione controllata dal terminale</summary>
+        /// <summary>Attention request controlled by the terminal</summary>
         [Parameter] public bool TerminalNeedsAttention { get; set; }
 
         /// <summary>
@@ -172,25 +172,25 @@ namespace Bivium.Components.Shared
         public EventCallback OnToggleSinglePanel { get; set; }
 
         /// <summary>
-        /// Temi controllati dal Commander nella variante Radzen
+        /// Themes controlled by the Commander in the Radzen variant
         /// </summary>
         [Parameter]
         public IReadOnlyList<string> ThemeOptions { get; set; } = Array.Empty<string>();
 
         /// <summary>
-        /// Tema controllato dal Commander nella variante Radzen
+        /// Theme controlled by the Commander in the Radzen variant
         /// </summary>
         [Parameter]
         public string CurrentTheme { get; set; } = "software-dark";
 
         /// <summary>
-        /// Callback controllato dal Commander per il cambio tema Radzen
+        /// Callback controlled by the Commander for the Radzen theme change
         /// </summary>
         [Parameter]
         public EventCallback<string> OnThemeChanged { get; set; }
 
         /// <summary>
-        /// Rivalida l'autorità prima di eseguire un comando Radzen
+        /// Revalidates the authority before executing a Radzen command
         /// </summary>
         [Parameter]
         public Func<bool> CanInvoke { get; set; }
@@ -224,26 +224,26 @@ namespace Bivium.Components.Shared
         #region Class Variables
 
         /// <summary>
-        /// Host del menu Radzen usato dall'adapter hover
+        /// Radzen menu host used by the hover adapter
         /// </summary>
         private ElementReference _radzenMenuHost;
 
         /// <summary>
-        /// Modulo dell'adapter menu Radzen
+        /// Radzen menu adapter module
         /// </summary>
         private IJSObjectReference _jsRadzenModule;
 
-        /// <summary>Impedisce registrazioni dopo il rilascio del menu</summary>
+        /// <summary>Prevents registrations after the menu is released</summary>
         private bool _isDisposed;
-        /// <summary>Draft menu acknowledged, senza comandi o delegate</summary>
+        /// <summary>Acknowledged menu draft, without commands or delegates</summary>
         private WorkspaceMenuDraft _menuDraft;
-        /// <summary>Modulo delle superfici app-owned</summary>
+        /// <summary>App-owned surfaces module</summary>
         private IJSObjectReference _surfaceModule;
-        /// <summary>Callback del mount posseduto</summary>
+        /// <summary>Callback of the owned mount</summary>
         private DotNetObjectReference<MenuBar> _surfaceReference;
-        /// <summary>Lease installata, distinta dai render ordinari</summary>
+        /// <summary>Installed lease, distinct from ordinary renders</summary>
         private long _surfaceGeneration = -1;
-        /// <summary>Lease in installazione: OnAfterRenderAsync rientra durante gli await e una seconda installazione ripartirebbe da una revisione già superata</summary>
+        /// <summary>Lease being installed: OnAfterRenderAsync re-enters during the awaits and a second installation would restart from an already superseded revision</summary>
         private long _surfaceInstallingGeneration = -1;
 
         #endregion
@@ -251,9 +251,9 @@ namespace Bivium.Components.Shared
         #region Overrides
 
         /// <summary>
-        /// Collega hover e adapter della superficie menu dopo il render
+        /// Attaches hover and the menu surface adapter after the render
         /// </summary>
-        /// <param name="firstRender">True al primo render</param>
+        /// <param name="firstRender">True on the first render</param>
         protected override async System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender)
         {
             if (firstRender && !this._isDisposed)
@@ -287,10 +287,10 @@ namespace Bivium.Components.Shared
             }
         }
 
-        /// <summary>CAS del solo menu visuale; il comando resta nell'owner esistente</summary>
-        /// <param name="generation">Lease catturata dall'adapter</param>
-        /// <param name="draft">Identità visuali catturate</param>
-        /// <returns>Revisione acknowledged oppure -1</returns>
+        /// <summary>CAS of the visual menu only; the command remains in the existing owner</summary>
+        /// <param name="generation">Lease captured by the adapter</param>
+        /// <param name="draft">Captured visual identities</param>
+        /// <returns>Acknowledged revision, or -1</returns>
         [JSInvokable]
         public long OnMenuSurfaceChanged(long generation, WorkspaceMenuDraft draft)
         {
@@ -306,9 +306,9 @@ namespace Bivium.Components.Shared
 
         #region Private Methods
 
-        /// <summary>Consulta la proiezione senza introdurre regole nel renderer</summary>
-        /// <param name="id">Identificatore del comando</param>
-        /// <returns>Descriptor oppure null</returns>
+        /// <summary>Consults the projection without introducing rules into the renderer</summary>
+        /// <param name="id">Command identifier</param>
+        /// <returns>Descriptor, or null</returns>
         private CommanderCommandState GetCommand(string id)
         {
             foreach (CommanderCommandState command in this.Commands)
@@ -319,13 +319,13 @@ namespace Bivium.Components.Shared
             return null;
         }
 
-        /// <summary>Legge la disponibilità già calcolata dal proprietario</summary>
-        /// <param name="id">Identificatore del comando</param>
-        /// <returns>True se abilitato</returns>
+        /// <summary>Reads the availability already computed by the owner</summary>
+        /// <param name="id">Command identifier</param>
+        /// <returns>True if enabled</returns>
         private bool IsEnabled(string id) => this.GetCommand(id)?.Enabled == true;
 
         /// <summary>
-        /// Collega il passaggio hover tra menu dopo la prima apertura a click
+        /// Attaches the hover transition between menus after the first click-open
         /// </summary>
         private async System.Threading.Tasks.Task InitializeRadzenMenuAsync()
         {
@@ -339,8 +339,8 @@ namespace Bivium.Components.Shared
             await this._jsRadzenModule.InvokeVoidAsync("initializeRadzenMenuHover", this._radzenMenuHost);
         }
 
-        /// <summary>Rilascia listener hover e modulo posseduti dall'istanza</summary>
-        /// <returns>Operazione asincrona di rilascio</returns>
+        /// <summary>Releases the hover listeners and module owned by the instance</summary>
+        /// <returns>Asynchronous release operation</returns>
         public async System.Threading.Tasks.ValueTask DisposeAsync()
         {
             if (this._isDisposed)
@@ -390,28 +390,28 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Restituisce il tema selezionato per la variante compilata
+        /// Returns the selected theme for the compiled variant
         /// </summary>
-        /// <returns>Nome tema corrente</returns>
+        /// <returns>Current theme name</returns>
         private string GetCurrentTheme()
         {
             return this.CurrentTheme;
         }
 
         /// <summary>
-        /// Restituisce i temi disponibili per la variante compilata
+        /// Returns the themes available for the compiled variant
         /// </summary>
-        /// <returns>Elenco temi</returns>
+        /// <returns>Theme list</returns>
         private IReadOnlyList<string> GetThemeOptions()
         {
             return this.ThemeOptions;
         }
 
         /// <summary>
-        /// Formatta un nome tema kebab-case per il menu
+        /// Formats a kebab-case theme name for the menu
         /// </summary>
-        /// <param name="theme">Nome tecnico del tema</param>
-        /// <returns>Etichetta leggibile</returns>
+        /// <param name="theme">Technical theme name</param>
+        /// <returns>Readable label</returns>
         private string FormatThemeName(string theme)
         {
             if (string.IsNullOrEmpty(theme))
@@ -606,7 +606,7 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Rivalida l'autorità e invoca l'azione selezionata
+        /// Revalidates the authority and invokes the selected action
         /// </summary>
         /// <param name="callback">Action callback</param>
         private async System.Threading.Tasks.Task HandleAction(EventCallback callback)
