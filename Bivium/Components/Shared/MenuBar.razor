@@ -1,7 +1,7 @@
 @namespace Bivium.Components.Shared
 
-<div class="bivium-radzen-menu-bar" @ref="this._radzenMenuHost">
-    <RadzenMenu Responsive="true" ClickToOpen="true" Flyout="true" AriaLabel="Application menu">
+<div class="bivium-radzen-menu-bar" data-workspace-menu-surface="true" @ref="this._radzenMenuHost">
+    <RadzenMenu id="workspace-application-menu" Responsive="true" ToggleAriaLabel="Toggle menu" ClickToOpen="true" Flyout="true" AriaLabel="Application menu">
         <RadzenMenuItem id="menu-file" Text="File">
             <RadzenMenuItem id="menu-file-new-file" Text="New File" Icon="note_add" Disabled="@(!this.IsEnabled("new-file"))" Template="@this.CommandTemplate("new-file")" Click="async _ => await this.HandleNewFile()" />
             <RadzenMenuItem id="menu-file-new-folder" Text="New Folder" Icon="create_new_folder" Disabled="@(!this.IsEnabled("new-folder"))" Template="@this.CommandTemplate("new-folder")" Click="async _ => await this.HandleNewFolder()" />
@@ -14,7 +14,6 @@
             <RadzenMenuItem id="menu-file-extract" Text="Extract Here" Icon="unarchive" Disabled="@(!this.IsEnabled("extract"))" Click="async _ => await this.HandleExtract()" />
             <RadzenMenuItem id="menu-file-compress" Text="Compress to..." Icon="archive" Disabled="@(!this.IsEnabled("compress"))" Click="async _ => await this.HandleCompress()" />
             <RadzenMenuItem id="menu-file-reset" Text="Reset Workspace..." Icon="restart_alt" Disabled="@(!this.IsEnabled("reset"))" Click="async _ => await this.HandleResetWorkspace()" />
-            <RadzenMenuItem id="menu-file-exit" Text="Exit" Icon="close" Disabled="@(!this.IsEnabled("exit"))" Click="async _ => await this.HandleExit()" />
         </RadzenMenuItem>
         <RadzenMenuItem id="menu-edit" Text="Edit">
             <RadzenMenuItem id="menu-edit-copy" Text="Copy" Icon="content_copy" Disabled="@(!this.IsEnabled("copy"))" Template="@this.CommandTemplate("copy")" Click="async _ => await this.HandleCopy()" />
@@ -57,11 +56,5 @@
     /// <param name="id">Identificatore nella proiezione ricevuta</param>
     /// <param name="label">Etichetta dinamica opzionale</param>
     /// <returns>Etichetta semantica senza controlli annidati</returns>
-    private RenderFragment CommandTemplate(string id, string label = null) => @<span class="rz-navigation-item-text bivium-menu-command-label">
-        @(label ?? this.GetCommand(id)?.Label)
-        @if (!string.IsNullOrEmpty(this.GetCommand(id)?.Shortcut))
-        {
-            <RadzenBadge BadgeStyle="BadgeStyle.Secondary" Variant="Variant.Outlined" Text="@this.GetCommand(id).Shortcut" />
-        }
-    </span>;
+    private RenderFragment CommandTemplate(string id, string label = null) => @<CommandMenuLabel Label="@(label ?? this.GetCommand(id)?.Label)" Shortcut="@this.GetCommand(id)?.Shortcut" />;
 }

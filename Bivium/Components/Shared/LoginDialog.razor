@@ -1,4 +1,5 @@
 @namespace Bivium.Components.Shared
+@implements IAsyncDisposable
 @inject IJSRuntime JSRuntime
 
 <div style="display:grid;place-items:center;height:100dvh;padding:1rem;box-sizing:border-box;overflow:auto;">
@@ -7,8 +8,8 @@
         <RadzenStack Gap="1rem">
             <RadzenText TextStyle="TextStyle.H4" TagName="TagName.H1" Text="Login" />
             <RadzenText TextStyle="TextStyle.Body1" Text="Sign in with the configured administrator credentials." />
-            <RadzenFormField Text="Username" Component="login-username" Style="width:100%;"><RadzenTextBox id="login-username" Name="login-username" @ref="this._usernameInput" @bind-Value="this._username" Immediate="true" Disabled="@this._isSubmitting" Style="width:100%;" autocomplete="username" /></RadzenFormField>
-            <RadzenFormField Text="Password" Component="login-password" Style="width:100%;"><RadzenPassword id="login-password" Name="login-password" @bind-Value="this._password" Immediate="true" Disabled="@this._isSubmitting" Style="width:100%;" autocomplete="current-password" /></RadzenFormField>
+            <RadzenFormField Text="Username" Component="login-username" Style="width:100%;"><ChildContent><RadzenTextBox id="login-username" Name="login-username" @ref="this._usernameInput" @bind-Value="this._username" Immediate="true" Disabled="@this._isSubmitting" Style="width:100%;" autocomplete="username" /></ChildContent><Helper><RadzenRequiredValidator Component="login-username" Text="Enter the username" /></Helper></RadzenFormField>
+            <RadzenFormField Text="Password" Component="login-password" Style="width:100%;"><ChildContent><RadzenPassword id="login-password" Name="login-password" @bind-Value="this._password" Immediate="true" Disabled="@this._isSubmitting" Style="width:100%;" autocomplete="current-password" /></ChildContent><Helper><RadzenRequiredValidator Component="login-password" Text="Enter the password" /></Helper></RadzenFormField>
             @if (this.RequiresTwoFactor)
             {
                 <RadzenFormField Text="2FA code" Component="login-token" Style="width:100%;"><ChildContent><RadzenTextBox id="login-token" Name="login-token" @bind-Value="this._twoFactorCode" Immediate="true" Disabled="@this._isSubmitting" Style="width:100%;" autocomplete="one-time-code" inputmode="numeric" /></ChildContent><Helper>Enter the current code from your authenticator.</Helper></RadzenFormField>
@@ -17,7 +18,7 @@
             {
                 <RadzenAlert AlertStyle="AlertStyle.Danger" Shade="Shade.Lighter">@this._statusText</RadzenAlert>
             }
-            <div class="bivium-radzen-dialog-actions"><RadzenButton Text="Login" Icon="login" IsBusy="@this._isSubmitting" ButtonType="ButtonType.Submit" ButtonStyle="ButtonStyle.Primary" /></div>
+            <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" AlignItems="AlignItems.Center" Gap="0.75rem"><RadzenButton Text="Login" Icon="login" IsBusy="@this._isSubmitting" ButtonType="ButtonType.Submit" ButtonStyle="ButtonStyle.Primary" /></RadzenStack>
         </RadzenStack>
         </RadzenTemplateForm>
     </RadzenCard>

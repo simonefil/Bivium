@@ -1,59 +1,94 @@
 @namespace Bivium.Components.Shared
+@implements IAsyncDisposable
 @inject IJSRuntime JSRuntime
+@inject NotificationService NotificationService
 
 @if (this._isVisible)
 {
-    <PersistentModalShell Label="Authentication" OnCancel="this.HandleCancel" CanClose="@(!this._isSaving)">
+    <PersistentModalShell Surface="auth" Label="Authentication" OnCancel="this.HandleCancel" CanClose="@(!this._isSaving && !this._binding.Rejected)">
+        <div data-workspace-workflow-id="@this._binding.Current?.Id">
         <RadzenStack class="bivium-radzen-modal" Gap="1rem" Style="width:100%;max-height:calc(100dvh - 9rem);box-sizing:border-box;">
-            <fieldset disabled="@this._isSaving" inert="@this._isSaving" style="border:0;margin:0;padding:0;min-width:0;">
-            <RadzenStack Gap="1rem">
-                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem"><RadzenCheckBox Name="auth-enabled" AriaLabel="Enabled" @bind-Value="this._enabled" Disabled="@(this._disabled || this._isSaving)" /><RadzenLabel Component="auth-enabled" Text="Enabled" /></RadzenStack>
-                <RadzenFormField Text="Username" Component="auth-username" Style="width:100%;"><RadzenTextBox id="auth-username" Name="auth-username" @bind-Value="this._username" Immediate="true" Disabled="@(this._hasUser || !this._enabled || this._disabled)" Style="width:100%;" /></RadzenFormField>
-                @if (this._hasUser)
-                {
-                    <RadzenText TextStyle="TextStyle.Body1" Text="@("Disabled: " + this._disabledLabel)" /><RadzenText TextStyle="TextStyle.Body1" Text="@("2FA: " + this._twoFactorLabel)" />
-                }
-                @if (!this._hasUser && this._enabled && !this._disabled)
-                {
-                    <RadzenFieldset Text="Create administrator">
-                        <RadzenStack Gap="0.75rem"><RadzenFormField Text="Password" Component="auth-new-password"><RadzenPassword id="auth-new-password" Name="auth-new-password" @bind-Value="this._newPassword" Immediate="true" Style="width:100%;" /></RadzenFormField><RadzenFormField Text="Retype password" Component="auth-confirm-password"><RadzenPassword id="auth-confirm-password" Name="auth-confirm-password" @bind-Value="this._confirmPassword" Immediate="true" Style="width:100%;" /></RadzenFormField></RadzenStack>
-                    </RadzenFieldset>
-                }
-                @if (this._hasUser && this._enabled && !this._disabled)
-                {
-                    <RadzenStack Orientation="Orientation.Horizontal" Wrap="FlexWrap.Wrap" Gap="0.5rem"><RadzenButton Text="MFA" Icon="password" ButtonStyle="ButtonStyle.Secondary" Click="this.HandleToggleMfaPanel" /><RadzenButton Text="Change password" Icon="key" ButtonStyle="ButtonStyle.Secondary" Click="this.HandleTogglePasswordPanel" /></RadzenStack>
-                }
-                @if (this._mfaPanelVisible)
-                {
-                    <RadzenFieldset Text="Multi-factor authentication">
+            <RadzenTemplateForm TItem="AuthSettingsDialog" Data="this" id="auth-settings-form" Submit="@(_ => this.ExecuteMutationAsync(this.HandleSave))">
+                <RadzenStack Gap="1rem">
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem"><RadzenCheckBox Name="auth-enabled" AriaLabel="Enabled" @bind-Value="this._enabled" @bind-Value:after="this.PublishDraft" Disabled="@(this._disabled || this._isSaving)" /><RadzenLabel Component="auth-enabled" Text="Enabled" /></RadzenStack>
+                    <RadzenFormField Text="Username" Component="auth-username" Style="width:100%;"><RadzenTextBox id="auth-username" Name="auth-username" @bind-Value="this._username" @bind-Value:after="this.PublishDraft" Immediate="true" Disabled="@(this._hasUser || !this._enabled || this._disabled || this._isSaving)" Style="width:100%;" autocomplete="username" /></RadzenFormField>
+                    @if (this._hasUser)
+                    {
+                        <RadzenText TextStyle="TextStyle.Body1" Text="@("Disabled: " + this._disabledLabel)" /><RadzenText TextStyle="TextStyle.Body1" Text="@("2FA: " + this._twoFactorLabel)" />
+                    }
+                    @if (!this._hasUser && this._enabled && !this._disabled)
+                    {
+                        <RadzenFieldset Text="Create administrator">
+                            <RadzenStack Gap="0.75rem">
+                                <RadzenFormField Text="Password" Component="auth-new-password"><RadzenPassword id="auth-new-password" Name="auth-new-password" @bind-Value="this._newPassword" Immediate="true" Disabled="@this._isSaving" Style="width:100%;" autocomplete="new-password" /></RadzenFormField>
+                                <RadzenFormField Text="Retype password" Component="auth-confirm-password"><ChildContent><RadzenPassword id="auth-confirm-password" Name="auth-confirm-password" @bind-Value="this._confirmPassword" Immediate="true" Disabled="@this._isSaving" Style="width:100%;" autocomplete="new-password" /></ChildContent><Helper><RadzenCompareValidator Component="auth-confirm-password" Value="@this._newPassword" Text="Passwords do not match" /></Helper></RadzenFormField>
+                            </RadzenStack>
+                        </RadzenFieldset>
+                    }
+                </RadzenStack>
+            </RadzenTemplateForm>
+            @if (this._hasUser && this._enabled && !this._disabled)
+            {
+                <RadzenStack Orientation="Orientation.Horizontal" Wrap="FlexWrap.Wrap" Gap="0.5rem"><RadzenButton data-ui-key="auth-mfa-panel" Text="MFA" Icon="password" ButtonStyle="ButtonStyle.Secondary" Disabled="@this._isSaving" aria-expanded="@(this._mfaPanelVisible ? "true" : "false")" aria-controls="auth-mfa-section" Click="this.HandleToggleMfaPanel" /><RadzenButton data-ui-key="auth-password-panel" Text="Change password" Icon="key" ButtonStyle="ButtonStyle.Secondary" Disabled="@this._isSaving" aria-expanded="@(this._passwordPanelVisible ? "true" : "false")" aria-controls="auth-password-section" Click="this.HandleTogglePasswordPanel" /></RadzenStack>
+            }
+            @if (this._mfaPanelVisible)
+            {
+                <RadzenFieldset id="auth-mfa-section" Text="Multi-factor authentication">
+                    <RadzenStack Gap="0.75rem">
+                        <RadzenFormField Text="Password" Component="auth-mfa-password"><RadzenPassword id="auth-mfa-password" Name="auth-mfa-password" @bind-Value="this._mfaPassword" Immediate="true" Disabled="@this._isSaving" Style="width:100%;" autocomplete="current-password" /></RadzenFormField>
+                        @if (!this._twoFactorEnabled && string.IsNullOrEmpty(this._qrCodeDataUrl))
+                        {
+                            <RadzenButton Text="Generate QR" Icon="qr_code" ButtonStyle="ButtonStyle.Secondary" Disabled="@this._isSaving" Click="@(() => this.ExecuteMutationAsync(this.HandleStartTwoFactorSetup))" />
+                        }
+                        @if (this._twoFactorEnabled)
+                        {
+                            <RadzenButton Text="Disable 2FA" ButtonStyle="ButtonStyle.Danger" Disabled="@this._isSaving" Click="@(() => this.ExecuteMutationAsync(this.HandleDisableTwoFactor))" />
+                        }
+                    </RadzenStack>
+                </RadzenFieldset>
+            }
+            @if (this._pendingMfaSetup)
+            {
+                <RadzenAlert AlertStyle="AlertStyle.Warning">Switching browsers cancels this pending MFA setup. Generate a new QR code in the browser that takes control.</RadzenAlert>
+            }
+            @if (!string.IsNullOrEmpty(this._qrCodeDataUrl))
+            {
+                <RadzenTemplateForm TItem="AuthSettingsDialog" Data="this" Submit="@(_ => this.ExecuteMutationAsync(this.HandleEnableTwoFactor))">
+                    <RadzenFieldset Text="Enable 2FA">
                         <RadzenStack Gap="0.75rem">
-                            <RadzenFormField Text="Password" Component="auth-mfa-password"><RadzenPassword id="auth-mfa-password" Name="auth-mfa-password" @bind-Value="this._mfaPassword" Immediate="true" Style="width:100%;" /></RadzenFormField>
-                            @if (!this._twoFactorEnabled && string.IsNullOrEmpty(this._qrCodeDataUrl))
-                            {
-                                <RadzenButton Text="Generate QR" Icon="qr_code" ButtonStyle="ButtonStyle.Secondary" Click="@(() => this.ExecuteMutationAsync(this.HandleStartTwoFactorSetup))" />
-                            }
-                            @if (this._twoFactorEnabled)
-                            {
-                                <RadzenButton Text="Disable 2FA" ButtonStyle="ButtonStyle.Danger" Click="@(() => this.ExecuteMutationAsync(this.HandleDisableTwoFactor))" />
-                            }
+                            <RadzenText TextStyle="TextStyle.Body1" Text="Scan the QR code, then enter the current authenticator code." />
+                            <RadzenImage Path="@this._qrCodeDataUrl" AlternateText="2FA QR code" Style="width:160px;height:160px;" />
+                            <RadzenFormField Text="Secret" Component="auth-secret"><RadzenTextBox id="auth-secret" Name="auth-secret" Value="@this._twoFactorSecret" ReadOnly="true" Style="width:100%;" /></RadzenFormField>
+                            <RadzenButton Text="Copy secret" Icon="content_copy" ButtonStyle="ButtonStyle.Light" Disabled="@this._isSaving" Click="@(() => this.ExecuteMutationAsync(this.HandleCopyTwoFactorSecret))" />
+                            <RadzenFormField Text="2FA code" Component="auth-token"><RadzenTextBox id="auth-token" Name="auth-token" @bind-Value="this._twoFactorCode" Immediate="true" Disabled="@this._isSaving" Style="width:100%;" autocomplete="one-time-code" inputmode="numeric" /></RadzenFormField>
+                            <RadzenButton Text="Enable 2FA" ButtonType="ButtonType.Submit" ButtonStyle="ButtonStyle.Primary" Disabled="@this._isSaving" />
                         </RadzenStack>
                     </RadzenFieldset>
-                }
-                @if (!string.IsNullOrEmpty(this._qrCodeDataUrl))
-                {
-                    <RadzenFieldset Text="Enable 2FA"><RadzenStack Gap="0.75rem"><RadzenText TextStyle="TextStyle.Body1" Text="Scan the QR code, then enter the current authenticator code." /><img src="@this._qrCodeDataUrl" alt="2FA QR code" width="160" height="160" /><RadzenFormField Text="Secret" Component="auth-secret"><RadzenTextBox id="auth-secret" Name="auth-secret" Value="@this._twoFactorSecret" ReadOnly="true" Style="width:100%;" /></RadzenFormField><RadzenButton Text="Copy secret" Icon="content_copy" ButtonStyle="ButtonStyle.Light" Click="this.HandleCopyTwoFactorSecret" /><RadzenFormField Text="2FA code" Component="auth-token"><RadzenTextBox id="auth-token" Name="auth-token" @bind-Value="this._twoFactorCode" Immediate="true" Style="width:100%;" autocomplete="one-time-code" inputmode="numeric" /></RadzenFormField><RadzenButton Text="Enable 2FA" ButtonStyle="ButtonStyle.Primary" Click="@(() => this.ExecuteMutationAsync(this.HandleEnableTwoFactor))" /></RadzenStack></RadzenFieldset>
-                }
-                @if (this._passwordPanelVisible)
-                {
-                    <RadzenFieldset Text="Change password"><RadzenStack Gap="0.75rem"><RadzenFormField Text="Old password" Component="auth-current-password"><RadzenPassword id="auth-current-password" Name="auth-current-password" @bind-Value="this._changeCurrentPassword" Immediate="true" Style="width:100%;" /></RadzenFormField><RadzenFormField Text="New password" Component="auth-change-password"><RadzenPassword id="auth-change-password" Name="auth-change-password" @bind-Value="this._changeNewPassword" Immediate="true" Style="width:100%;" /></RadzenFormField><RadzenFormField Text="Retype new password" Component="auth-change-confirm"><RadzenPassword id="auth-change-confirm" Name="auth-change-confirm" @bind-Value="this._changeConfirmPassword" Immediate="true" Style="width:100%;" /></RadzenFormField><RadzenButton Text="Change password" ButtonStyle="ButtonStyle.Primary" Click="@(() => this.ExecuteMutationAsync(this.HandleChangePassword))" /></RadzenStack></RadzenFieldset>
-                }
-                @if (!string.IsNullOrEmpty(this._statusText))
-                {
-                    <RadzenAlert AlertStyle="AlertStyle.Info">@this._statusText</RadzenAlert>
-                }
-                <div class="bivium-radzen-dialog-actions"><RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Disabled="@this._isSaving" Click="this.HandleCancel" /><RadzenButton Text="Save" Icon="save" Disabled="@this._disabled" IsBusy="@this._isSaving" ButtonStyle="ButtonStyle.Primary" Click="@(() => this.ExecuteMutationAsync(this.HandleSave))" /></div>
-            </RadzenStack>
-            </fieldset>
+                </RadzenTemplateForm>
+            }
+            @if (this._passwordPanelVisible)
+            {
+                <RadzenTemplateForm TItem="AuthSettingsDialog" Data="this" Submit="@(_ => this.ExecuteMutationAsync(this.HandleChangePassword))">
+                    <RadzenFieldset id="auth-password-section" Text="Change password">
+                        <RadzenStack Gap="0.75rem">
+                            <RadzenFormField Text="Old password" Component="auth-current-password"><RadzenPassword id="auth-current-password" Name="auth-current-password" @bind-Value="this._changeCurrentPassword" Immediate="true" Disabled="@this._isSaving" Style="width:100%;" autocomplete="current-password" /></RadzenFormField>
+                            <RadzenFormField Text="New password" Component="auth-change-password"><RadzenPassword id="auth-change-password" Name="auth-change-password" @bind-Value="this._changeNewPassword" Immediate="true" Disabled="@this._isSaving" Style="width:100%;" autocomplete="new-password" /></RadzenFormField>
+                            <RadzenFormField Text="Retype new password" Component="auth-change-confirm"><ChildContent><RadzenPassword id="auth-change-confirm" Name="auth-change-confirm" @bind-Value="this._changeConfirmPassword" Immediate="true" Disabled="@this._isSaving" Style="width:100%;" autocomplete="new-password" /></ChildContent><Helper><RadzenCompareValidator Component="auth-change-confirm" Value="@this._changeNewPassword" Text="Passwords do not match" /></Helper></RadzenFormField>
+                            <RadzenButton Text="Change password" ButtonType="ButtonType.Submit" ButtonStyle="ButtonStyle.Primary" Disabled="@this._isSaving" />
+                        </RadzenStack>
+                    </RadzenFieldset>
+                </RadzenTemplateForm>
+            }
+            @if (!string.IsNullOrEmpty(this._statusText))
+            {
+                <RadzenAlert AlertStyle="@this._statusStyle">@this._statusText</RadzenAlert>
+            }
+            @if (!string.IsNullOrEmpty(this._binding.Error))
+            {
+                <RadzenAlert AlertStyle="AlertStyle.Warning">@this._binding.Error</RadzenAlert>
+            }
+            <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" AlignItems="AlignItems.Center" Gap="0.75rem"><RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Disabled="@this._isSaving" Click="this.HandleCancel" /><RadzenButton Text="Save" Icon="save" ButtonType="ButtonType.Submit" form="auth-settings-form" Disabled="@this._disabled" IsBusy="@this._isSaving" ButtonStyle="ButtonStyle.Primary" /></RadzenStack>
         </RadzenStack>
+        </div>
     </PersistentModalShell>
 }

@@ -6,9 +6,8 @@
     top: 5vh;
     width: 90vw;
     height: 90vh;
-    z-index: 2000;
+    z-index: var(--bivium-floating-window-zindex);
     flex-direction: column;
-    min-width: 60ch;
     min-height: 20lh;
 }
 
@@ -23,9 +22,38 @@
 
 .renamer-file-list {
     flex: 6;
-    overflow: auto;
+    /* Il DataGrid virtualizzato scorre al proprio interno con altezza fissa */
+    overflow: hidden;
     min-width: 0;
     min-height: 0;
+}
+
+.renamer-config-locked {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Preview colorata: originale barrato se cambia, nuovo nome evidenziato, conflitto in rosso, errore barrato in grigio */
+/* Il testo vive in .rz-cell-data: la decorazione sul td non si propaga ai blocchi interni della griglia */
+.renamer-cell-original-changed .rz-cell-data {
+    text-decoration: line-through;
+    color: var(--rz-text-secondary-color);
+}
+
+/* Colore titolo del tema: leggibile su righe alternate e selezionate, chiaro o scuro */
+.renamer-cell-changed .renamer-new-name {
+    color: var(--rz-text-title-color);
+    font-weight: 600;
+}
+
+.renamer-cell-conflict .renamer-new-name {
+    color: var(--rz-danger);
+    font-weight: 600;
+}
+
+.renamer-cell-error .renamer-new-name {
+    color: var(--rz-text-disabled-color);
+    text-decoration: line-through;
 }
 
 .renamer-config {
@@ -80,6 +108,14 @@
     flex-shrink: 0;
 }
 
+.renamer-statusbar-status {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    flex: 1;
+    min-width: 0;
+}
+
 .renamer-statusbar {
     display: flex;
     justify-content: space-between;
@@ -105,7 +141,7 @@
 
 @media (max-width: 767px) {
     .renamer-body { flex-direction: column; overflow: auto; }
-    .renamer-file-list { flex: none; min-height: 12rem; max-height: 40%; }
+    .renamer-file-list { flex: none; height: 40%; min-height: 12rem; }
     .renamer-config { flex: none; overflow: visible; }
     .renamer-statusbar { flex-wrap: wrap; }
 }

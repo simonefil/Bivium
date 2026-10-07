@@ -12,9 +12,17 @@ namespace Bivium.Components.Shared
     {
         #region Parameters
 
-        /// <summary>Disponibilità e shortcut calcolati esclusivamente dal Commander</summary>
+        /// <summary>Finestre aperte proiettate dal Commander</summary>
         [Parameter]
-        public IReadOnlyList<CommanderCommandState> Commands { get; set; } = new List<CommanderCommandState>();
+        public IReadOnlyList<DesktopWindowState> Windows { get; set; } = new List<DesktopWindowState>();
+
+        /// <summary>Richiesta di ripristino e attivazione della finestra</summary>
+        [Parameter]
+        public EventCallback<string> OnWindowActivate { get; set; }
+
+        /// <summary>Disponibilità corrente dell'attivazione</summary>
+        [Parameter]
+        public bool CanActivateWindows { get; set; }
 
         /// <summary>
         /// List of selected file paths
@@ -57,23 +65,6 @@ namespace Bivium.Components.Shared
         #region Class Variables
 
         /// <summary>
-        /// Identificatori delle azioni mostrate nella legenda, nell'ordine storico
-        /// </summary>
-        private static readonly IReadOnlyList<string> s_shortcutIds = new List<string>
-        {
-            "copy",
-            "cut",
-            "paste",
-            "delete",
-            "rename",
-            "new-folder",
-            "refresh",
-            "properties",
-            "terminal",
-            "about"
-        };
-
-        /// <summary>
         /// Formatted selection info string
         /// </summary>
         private string _selectionInfo = "Ready";
@@ -93,6 +84,11 @@ namespace Bivium.Components.Shared
         /// </summary>
         private string _lastDiskInfoPath = "";
 
+        /// <summary>
+        /// Ultimo elenco usato per lo spazio libero: un nuovo elenco segue refresh e operazioni
+        /// </summary>
+        private List<FileSystemEntry> _lastDiskInfoEntries;
+
         #endregion
 
         #region Overrides
@@ -110,35 +106,6 @@ namespace Bivium.Components.Shared
         #endregion
 
         #region Private Methods
-
-        /// <summary>
-        /// Finds a command projection by its identifier
-        /// </summary>
-        /// <param name="commandId">Identifier of the command to find</param>
-        /// <returns>The matching command projection, or null when it is not received</returns>
-        private CommanderCommandState GetCommand(string commandId)
-        {
-            for (int i = 0; i < this.Commands.Count; i++)
-            {
-                if (this.Commands[i].Id == commandId)
-                    return this.Commands[i];
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// Returns the legacy visual shortcut text without changing the command mapping
-        /// </summary>
-        /// <param name="command">Command projection received from the Commander</param>
-        /// <returns>Shortcut text for the legend keycap</returns>
-        private string GetVisualShortcut(CommanderCommandState command)
-        {
-            if (command.Id == "delete")
-                return "Del";
-
-            return command.Shortcut;
-        }
 
         /// <summary>
         /// Updates the selection info text
@@ -163,7 +130,7 @@ namespace Bivium.Components.Shared
                     }
                 }
 
-                this._selectionInfo = this.SelectedPaths.Count + " selected, " + this.FormatSize(totalSize);
+                this._selectionInfo = this.SelectedPaths.Count + " selected, " + ByteSizeFormatter.Format(totalSize);
             }
         }
 
@@ -172,42 +139,14 @@ namespace Bivium.Components.Shared
         /// </summary>
         private void UpdateDiskInfo()
         {
-            if (!string.IsNullOrEmpty(this.CurrentPath) && this.CurrentPath != this._lastDiskInfoPath)
+            if (!string.IsNullOrEmpty(this.CurrentPath) && (this.CurrentPath != this._lastDiskInfoPath || !ReferenceEquals(this.Entries, this._lastDiskInfoEntries)))
             {
                 long free = this.FileSystemService.GetAvailableDiskSpace(this.CurrentPath);
                 long total = this.FileSystemService.GetTotalDiskSpace(this.CurrentPath);
-                this._diskInfo = "Free: " + this.FormatSize(free) + " / " + this.FormatSize(total);
+                this._diskInfo = "Free: " + ByteSizeFormatter.Format(free) + " / " + ByteSizeFormatter.Format(total);
                 this._lastDiskInfoPath = this.CurrentPath;
+                this._lastDiskInfoEntries = this.Entries;
             }
-        }
-
-        /// <summary>
-        /// Formats a byte count for display
-        /// </summary>
-        /// <param name="bytes">Size in bytes</param>
-        /// <returns>Formatted size string</returns>
-        private string FormatSize(long bytes)
-        {
-            string result = "";
-
-            if (bytes < 1024)
-            {
-                result = bytes + " B";
-            }
-            else if (bytes < 1024 * 1024)
-            {
-                result = (bytes / 1024.0).ToString("F1") + " KB";
-            }
-            else if (bytes < 1024L * 1024 * 1024)
-            {
-                result = (bytes / (1024.0 * 1024.0)).ToString("F1") + " MB";
-            }
-            else
-            {
-                result = (bytes / (1024.0 * 1024.0 * 1024.0)).ToString("F1") + " GB";
-            }
-
-            return result;
         }
 
         #endregion

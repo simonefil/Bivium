@@ -31,6 +31,55 @@ namespace Bivium.Components.Shared
         [Parameter]
         public Func<bool> CanInvoke { get; set; }
 
+        [Parameter] public WorkspaceWorkflowSnapshot Workflow { get; set; }
+        [Inject] private Bivium.Services.BiviumWorkspaceService WorkspaceService { get; set; }
+        private readonly WorkspaceFormBinding _binding = new WorkspaceFormBinding();
+        /// <summary>Indicatore allowlist del challenge; al takeover il server lo annulla</summary>
+        private bool _pendingMfaSetup;
+
+        /// <summary>Le richieste auth realmente in corso restano protette fino all'esito</summary>
+        internal bool HasNonTransferableWork => this._isSaving || this._isOpening;
+
+        /// <summary>Allowlist; i campi sensibili restano esclusivamente in questo adapter</summary>
+        private string GetDraft() => JsonSerializer.Serialize(new WorkspaceAuthenticationDraft(this._enabled, this._disabled, this._twoFactorEnabled, this._hasUser, this._mfaPanelVisible, this._passwordPanelVisible, this._username, this._configuredUsername, this._pendingMfaSetup));
+
+        private void PublishDraft() => this._binding.Publish(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this.GetDraft());
+
+        /// <summary>Ripristina dialog e sezione senza richiamare endpoint o trasferire segreti</summary>
+        protected override void OnParametersSet()
+        {
+            if (this.Workflow == null)
+            {
+                this._isVisible = false;
+                this.ClearSensitiveFields();
+                return;
+            }
+            bool changed = this._binding.Current?.Id != this.Workflow.Id || this._binding.Generation != this.LeaseGeneration;
+            if (!this._binding.Adopt(this.Workflow, this.LeaseGeneration))
+                return;
+            WorkspaceAuthenticationDraft draft = JsonSerializer.Deserialize<WorkspaceAuthenticationDraft>(this.Workflow.Draft);
+            this._enabled = draft.Enabled;
+            this._disabled = draft.Disabled;
+            this._twoFactorEnabled = draft.TwoFactorEnabled;
+            this._hasUser = draft.HasUser;
+            this._mfaPanelVisible = draft.MfaPanelVisible;
+            this._passwordPanelVisible = draft.PasswordPanelVisible;
+            this._username = draft.Username;
+            this._configuredUsername = draft.ConfiguredUsername;
+            this._pendingMfaSetup = draft.PendingMfaSetup;
+            this._disabledLabel = this._disabled ? "yes" : "no";
+            this._twoFactorLabel = this._twoFactorEnabled ? "enabled" : "disabled";
+            if (changed)
+            {
+                this.ClearSensitiveFields();
+                this._statusText = "";
+            }
+            this._isVisible = this.Workflow.Phase == WorkspaceWorkflowPhase.AwaitingInput;
+        }
+
+        /// <summary>La guardia MFA pendente non impedisce il checkpoint delle altre sezioni</summary>
+        internal System.Threading.Tasks.Task<bool> FlushForHandoffAsync(CancellationToken cancellationToken) => this._binding.FlushAsync(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this.GetDraft(), cancellationToken);
+
         #endregion
 
         #region Class Variables
@@ -77,10 +126,19 @@ namespace Bivium.Components.Shared
 
         private string _statusText = "";
 
+        /// <summary>Stile dell'esito mostrato: errore, avviso o conferma</summary>
+        private Radzen.AlertStyle _statusStyle = Radzen.AlertStyle.Danger;
+
         private IJSObjectReference _jsModule;
 
         /// <summary>Impedisce chiusura e doppi commit durante le richieste non cancellabili</summary>
         private bool _isSaving;
+
+        /// <summary>Le richieste in corso non possono usare una generazione nuova dopo un await</summary>
+        private WorkspaceClientToken _mutationToken;
+
+        /// <summary>Riserva l'apertura mentre viene caricato lo stato iniziale</summary>
+        private bool _isOpening;
 
         #endregion
 
@@ -90,6 +148,29 @@ namespace Bivium.Components.Shared
         /// Shows the authentication settings dialog
         /// </summary>
         public async System.Threading.Tasks.Task Show()
+        {
+            if (this._isOpening || this.Workflow?.IsActive == true || !this.CanInvokeMutation())
+                return;
+
+            WorkspaceClientToken token = new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration);
+            this._isOpening = true;
+            try
+            {
+                await this.LoadAndOpenAsync(token);
+            }
+            finally
+            {
+                this._isOpening = false;
+            }
+        }
+
+        #endregion
+
+        #region Private Methods
+
+        /// <summary>Carica lo stato e ammette soltanto l'apertura ancora appartenente alla lease catturata</summary>
+        /// <param name="token">Lease all'inizio dell'apertura</param>
+        private async System.Threading.Tasks.Task LoadAndOpenAsync(WorkspaceClientToken token)
         {
             this._statusText = "";
             this._enabled = false;
@@ -111,24 +192,37 @@ namespace Bivium.Components.Shared
             this._changeCurrentPassword = "";
             this._changeNewPassword = "";
             this._changeConfirmPassword = "";
-            this._isVisible = true;
-            this.StateHasChanged();
+            this._isVisible = false;
 
             try
             {
-                await this.LoadStatus();
+                await this.LoadStatus(token);
             }
             catch (Exception ex)
             {
-                this._statusText = "Failed to load authentication settings: " + ex.Message;
+                this.SetStatus("Failed to load authentication settings: " + ex.Message, Radzen.AlertStyle.Danger);
             }
-
+            if (this.AttachmentId != token.AttachmentId || this.LeaseGeneration != token.Generation || !this.CanInvokeMutation())
+                return;
+            WorkspaceWorkflowSnapshot opened;
+            try
+            {
+                opened = this.WorkspaceService.BeginFormWorkflow(token, WorkspaceWorkflowKind.Authentication, new WorkspaceWorkflowInvocation("", "", -1, "Authentication", "", -1), this.GetDraft());
+            }
+            catch (InvalidOperationException)
+            {
+                // Un'altra form può essere stata ammessa durante il caricamento; non la sostituisce
+                return;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Il cambio lease fra la verifica e l'admission è un rifiuto, non un fault del circuito
+                return;
+            }
+            this._binding.Adopt(opened, this.LeaseGeneration);
+            this._isVisible = true;
             this.StateHasChanged();
         }
-
-        #endregion
-
-        #region Private Methods
 
         /// <summary>Protegge le azioni di modifica senza alterarne payload e autorità</summary>
         /// <param name="mutation">Azione esistente da eseguire</param>
@@ -138,6 +232,8 @@ namespace Bivium.Components.Shared
                 return;
 
             this._isSaving = true;
+            WorkspaceClientToken captured = new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration);
+            this._mutationToken = captured;
             this.StateHasChanged();
             try
             {
@@ -146,7 +242,17 @@ namespace Bivium.Components.Shared
             finally
             {
                 this._isSaving = false;
+                if (this.AttachmentId != captured.AttachmentId || this.LeaseGeneration != captured.Generation || !this.WorkspaceService.ValidatePublication(captured))
+                    this.ClearSensitiveFields();
             }
+        }
+
+        /// <summary>Non conserva password, token o challenge quando l'adapter perde la lease</summary>
+        private void ClearSensitiveFields()
+        {
+            this._newPassword = this._confirmPassword = this._mfaPassword = this._twoFactorCode = this._twoFactorSecret = this._qrCodeDataUrl = "";
+            this._changeCurrentPassword = this._changeNewPassword = this._changeConfirmPassword = "";
+            this._pendingMfaSetup = false;
         }
 
         /// <summary>
@@ -163,10 +269,12 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Loads authentication status from the API
         /// </summary>
-        private async System.Threading.Tasks.Task LoadStatus()
+        private async System.Threading.Tasks.Task LoadStatus(WorkspaceClientToken token)
         {
             await this.EnsureJsModule();
             JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("getJsonResult", "/api/Settings/authentication");
+            if (this.AttachmentId != token.AttachmentId || this.LeaseGeneration != token.Generation || !this.WorkspaceService.ValidatePublication(token))
+                return;
 
             if (response.Ok && response.Data.ValueKind == JsonValueKind.Object)
             {
@@ -196,14 +304,7 @@ namespace Bivium.Components.Shared
             }
             else
             {
-                if (string.IsNullOrWhiteSpace(response.Text))
-                {
-                    this._statusText = "Failed to load authentication settings";
-                }
-                else
-                {
-                    this._statusText = response.Text;
-                }
+                this.SetStatus(string.IsNullOrWhiteSpace(response.Text) ? "Failed to load authentication settings" : response.Text, Radzen.AlertStyle.Danger);
             }
         }
 
@@ -233,29 +334,24 @@ namespace Bivium.Components.Shared
 
             string json = JsonSerializer.Serialize(request);
             await this.EnsureJsModule();
-            JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("putJsonResult", "/api/Settings/authentication", json, this.AttachmentId, this.LeaseGeneration);
+            JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("putJsonResult", "/api/Settings/authentication", json, this._mutationToken.AttachmentId, this._mutationToken.Generation);
 
             if (!this.CanInvokeMutation())
                 return;
 
             if (response.Ok)
             {
-                this._statusText = "Saved";
+                this._statusText = "";
                 this._newPassword = "";
                 this._confirmPassword = "";
                 this._isVisible = false;
+                this._binding.Respond(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), true);
+                this.NotificationService.Notify(Radzen.NotificationSeverity.Success, "Authentication settings saved", "", 4000);
                 await this.OnClose.InvokeAsync();
             }
             else
             {
-                if (string.IsNullOrWhiteSpace(response.Text))
-                {
-                    this._statusText = "Failed to save authentication settings";
-                }
-                else
-                {
-                    this._statusText = response.Text;
-                }
+                this.SetStatus(string.IsNullOrWhiteSpace(response.Text) ? "Failed to save authentication settings" : response.Text, Radzen.AlertStyle.Danger);
             }
         }
 
@@ -277,6 +373,7 @@ namespace Bivium.Components.Shared
                 this._twoFactorSecret = "";
                 this._qrCodeDataUrl = "";
             }
+            this.PublishDraft();
         }
 
         /// <summary>
@@ -297,6 +394,7 @@ namespace Bivium.Components.Shared
                 this._changeNewPassword = "";
                 this._changeConfirmPassword = "";
             }
+            this.PublishDraft();
         }
 
         /// <summary>
@@ -307,13 +405,14 @@ namespace Bivium.Components.Shared
             if (!this.CanInvokeMutation())
                 return;
 
+            WorkspaceClientToken captured = new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration);
             await this.EnsureJsModule();
             TwoFactorVerifyRequest request = new TwoFactorVerifyRequest();
             request.CurrentPassword = this._mfaPassword;
             string json = JsonSerializer.Serialize(request);
-            JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("postJsonResult", "/api/Settings/authentication/twofactor/setup", json, this.AttachmentId, this.LeaseGeneration);
+            JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("postJsonResult", "/api/Settings/authentication/twofactor/setup", json, captured.AttachmentId, captured.Generation);
 
-            if (!this.CanInvokeMutation())
+            if (this.AttachmentId != captured.AttachmentId || this.LeaseGeneration != captured.Generation || !this.WorkspaceService.ValidatePublication(captured) || !this.CanInvokeMutation())
                 return;
 
             if (response.Ok && response.Data.ValueKind == JsonValueKind.Object)
@@ -326,18 +425,13 @@ namespace Bivium.Components.Shared
                 {
                     this._twoFactorSecret = secret.GetString() ?? "";
                 }
+                this._pendingMfaSetup = true;
+                this.PublishDraft();
                 this._statusText = "";
             }
             else
             {
-                if (string.IsNullOrWhiteSpace(response.Text))
-                {
-                    this._statusText = "Failed to start 2FA setup";
-                }
-                else
-                {
-                    this._statusText = response.Text;
-                }
+                this.SetStatus(string.IsNullOrWhiteSpace(response.Text) ? "Failed to start 2FA setup" : response.Text, Radzen.AlertStyle.Danger);
             }
         }
 
@@ -346,9 +440,13 @@ namespace Bivium.Components.Shared
         /// </summary>
         private async System.Threading.Tasks.Task HandleCopyTwoFactorSecret()
         {
+            if (!this.CanInvokeMutation())
+                return;
             await this.EnsureJsModule();
+            if (!this.CanInvokeMutation())
+                return;
             bool copied = await this._jsModule.InvokeAsync<bool>("copyText", this._twoFactorSecret);
-            this._statusText = copied ? "Secret copied" : "Failed to copy secret";
+            this.SetStatus(copied ? "Secret copied" : "Failed to copy secret", copied ? Radzen.AlertStyle.Success : Radzen.AlertStyle.Danger);
         }
 
         /// <summary>
@@ -365,7 +463,7 @@ namespace Bivium.Components.Shared
 
             string json = JsonSerializer.Serialize(request);
             await this.EnsureJsModule();
-            JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("postJsonResult", "/api/Settings/authentication/twofactor/enable", json, this.AttachmentId, this.LeaseGeneration);
+            JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("postJsonResult", "/api/Settings/authentication/twofactor/enable", json, this._mutationToken.AttachmentId, this._mutationToken.Generation);
 
             if (!this.CanInvokeMutation())
                 return;
@@ -378,20 +476,16 @@ namespace Bivium.Components.Shared
                 this._twoFactorSecret = "";
                 this._mfaPassword = "";
                 this._twoFactorCode = "";
-                this._statusText = "2FA enabled";
+                this._statusText = "";
+                this._pendingMfaSetup = false;
                 this._isVisible = false;
+                this._binding.Respond(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), true);
+                this.NotificationService.Notify(Radzen.NotificationSeverity.Success, "2FA enabled", "", 4000);
                 await this.OnClose.InvokeAsync();
             }
             else
             {
-                if (string.IsNullOrWhiteSpace(response.Text))
-                {
-                    this._statusText = "Invalid 2FA code";
-                }
-                else
-                {
-                    this._statusText = response.Text;
-                }
+                this.SetStatus(string.IsNullOrWhiteSpace(response.Text) ? "Invalid 2FA code" : response.Text, Radzen.AlertStyle.Danger);
             }
         }
 
@@ -407,7 +501,7 @@ namespace Bivium.Components.Shared
             TwoFactorVerifyRequest request = new TwoFactorVerifyRequest();
             request.CurrentPassword = this._mfaPassword;
             string json = JsonSerializer.Serialize(request);
-            JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("postJsonResult", "/api/Settings/authentication/twofactor/disable", json, this.AttachmentId, this.LeaseGeneration);
+            JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("postJsonResult", "/api/Settings/authentication/twofactor/disable", json, this._mutationToken.AttachmentId, this._mutationToken.Generation);
 
             if (!this.CanInvokeMutation())
                 return;
@@ -420,20 +514,16 @@ namespace Bivium.Components.Shared
                 this._twoFactorSecret = "";
                 this._mfaPassword = "";
                 this._twoFactorCode = "";
-                this._statusText = "2FA disabled";
+                this._statusText = "";
+                this._pendingMfaSetup = false;
                 this._isVisible = false;
+                this._binding.Respond(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), true);
+                this.NotificationService.Notify(Radzen.NotificationSeverity.Success, "2FA disabled", "", 4000);
                 await this.OnClose.InvokeAsync();
             }
             else
             {
-                if (string.IsNullOrWhiteSpace(response.Text))
-                {
-                    this._statusText = "Failed to disable 2FA";
-                }
-                else
-                {
-                    this._statusText = response.Text;
-                }
+                this.SetStatus(string.IsNullOrWhiteSpace(response.Text) ? "Failed to disable 2FA" : response.Text, Radzen.AlertStyle.Danger);
             }
         }
 
@@ -452,7 +542,7 @@ namespace Bivium.Components.Shared
 
             string json = JsonSerializer.Serialize(request);
             await this.EnsureJsModule();
-            JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("postJsonResult", "/api/Settings/authentication/password", json, this.AttachmentId, this.LeaseGeneration);
+            JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("postJsonResult", "/api/Settings/authentication/password", json, this._mutationToken.AttachmentId, this._mutationToken.Generation);
 
             if (!this.CanInvokeMutation())
                 return;
@@ -462,20 +552,15 @@ namespace Bivium.Components.Shared
                 this._changeCurrentPassword = "";
                 this._changeNewPassword = "";
                 this._changeConfirmPassword = "";
-                this._statusText = "Password changed";
+                this._statusText = "";
                 this._isVisible = false;
+                this._binding.Respond(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), true);
+                this.NotificationService.Notify(Radzen.NotificationSeverity.Success, "Password changed", "", 4000);
                 await this.OnClose.InvokeAsync();
             }
             else
             {
-                if (string.IsNullOrWhiteSpace(response.Text))
-                {
-                    this._statusText = "Failed to change password";
-                }
-                else
-                {
-                    this._statusText = response.Text;
-                }
+                this.SetStatus(string.IsNullOrWhiteSpace(response.Text) ? "Failed to change password" : response.Text, Radzen.AlertStyle.Danger);
             }
         }
 
@@ -486,8 +571,18 @@ namespace Bivium.Components.Shared
         {
             if (this._isSaving)
                 return;
+            this._binding.Respond(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), true);
             this._isVisible = false;
             await this.OnClose.InvokeAsync();
+        }
+
+        /// <summary>Mostra un esito nel dialog con lo stile corrispondente</summary>
+        /// <param name="text">Messaggio</param>
+        /// <param name="style">Errore, avviso o conferma</param>
+        private void SetStatus(string text, Radzen.AlertStyle style)
+        {
+            this._statusText = text;
+            this._statusStyle = style;
         }
 
         /// <summary>
@@ -496,7 +591,27 @@ namespace Bivium.Components.Shared
         /// <returns><see langword="true"/> quando il comando può proseguire</returns>
         private bool CanInvokeMutation()
         {
-            return this.CanInvoke == null || this.CanInvoke();
+            return (!this._isSaving || (this._mutationToken?.AttachmentId == this.AttachmentId && this._mutationToken.Generation == this.LeaseGeneration)) && !this._binding.Rejected && (this.CanInvoke == null || this.CanInvoke()) && this.WorkspaceService.ValidateMutation(new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration));
+        }
+
+        #endregion
+
+        #region Dispose
+
+        /// <summary>Rilascia il modulo JS importato, tollerando il circuito già chiuso</summary>
+        public async System.Threading.Tasks.ValueTask DisposeAsync()
+        {
+            if (this._jsModule == null)
+                return;
+            try
+            {
+                await this._jsModule.DisposeAsync();
+            }
+            catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException)
+            {
+                // Circuito già rilasciato
+            }
+            this._jsModule = null;
         }
 
         #endregion

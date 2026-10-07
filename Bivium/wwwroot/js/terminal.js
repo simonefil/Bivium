@@ -1,12 +1,69 @@
 // Bivium terminal renderer - remote paged history with bounded DOM
 
 import { invokeCircuitMethod, isCircuitConnected, registerCircuitParticipant } from './connection.js';
-import { isBlockingModalOpen } from './interop.js';
+import { isTopVisibleFloatingWindow } from './interop.js';
+import { createSurfacePublisher, disposeSurface } from './surface-adapters.js';
 
 const terminals = new Map();
+const publications = () => globalThis[Symbol.for('bivium.desktopPublications')];
 
-export async function writeClipboardText(text) {
-    await navigator.clipboard.writeText(text ?? '');
+// Gli anchor usano la timeline già posseduta dal runtime, non testo o indici del DOM virtualizzato.
+function readTerminalView(state) {
+    if (state.pendingView) return state.pendingView;
+    const position = value => value ? { row: state.snapshot.screen?.alternateBuffer ? value.row : visualToTimelineRow(state, value.row), column: value.column } : null;
+    const row = Math.floor(state.viewport.scrollTop / state.lineHeight);
+    return { sessionId: state.sessionId, observedRevision: state.snapshot.revision,
+        alternateBuffer: !!state.snapshot.screen?.alternateBuffer,
+        topRow: state.snapshot.screen?.alternateBuffer ? row : visualToTimelineRow(state, row),
+        rowFraction: Math.max(0, Math.min(1 - Number.EPSILON, state.viewport.scrollTop / state.lineHeight - row)),
+        horizontalCells: state.viewport.scrollLeft / state.charWidth, following: state.following,
+        promptRow: state.promptNavigationRow ?? -1,
+        selectionAnchor: position(state.selectionAnchor), selectionFocus: position(state.selectionFocus) };
+}
+
+function applyTerminalView(state, view) {
+    const alternate = !!state.snapshot.screen?.alternateBuffer;
+    const sameBuffer = alternate === view.alternateBuffer;
+    const minimum = alternate ? 0 : state.snapshot.historyStart;
+    const maximum = alternate ? Math.max(0, state.snapshot.screen.lines.length - 1) : Math.max(minimum, state.snapshot.historyEnd + state.snapshot.screen.lines.length - 1);
+    const clampRow = row => Math.max(minimum, Math.min(maximum, row));
+    const visual = row => alternate ? clampRow(row) : timelineToVisualRow(state, clampRow(row));
+    const position = value => value && sameBuffer ? { row: visual(value.row), column: Math.max(0, Math.min(Math.max(0, state.snapshot.cols - 1), value.column)) } : null;
+    state.following = view.following;
+    state.followTailPending = view.following;
+    state.promptNavigationRow = sameBuffer && !alternate && view.promptRow >= 0 ? clampRow(view.promptRow) : null;
+    state.selectionAnchor = position(view.selectionAnchor);
+    state.selectionFocus = position(view.selectionFocus);
+    scrollProgrammatically(state, view.following ? state.viewport.scrollHeight : (visual(sameBuffer ? view.topRow : minimum) + view.rowFraction) * state.lineHeight);
+    state.userScroll = false;
+    positionTerminalInput(state);
+}
+
+function installTerminalView(state, reference, generation, initial) {
+    state.viewGeneration = generation;
+    state.pendingView = initial.revision > 0 ? initial : null;
+    if (state.pendingView) state.following = initial.following;
+    state.viewAdapter = createSurfacePublisher(state.container, reference, 'OnTerminalViewChanged', generation, initial, () => readTerminalView(state));
+    const ready = state.viewAdapter.registration.ready;
+    state.viewAdapter.registration.ready = () => ready() && !!state.snapshot && !state.composing && !state.promptNavigationPending;
+    const capture = state.viewAdapter.registration.capture;
+    state.viewAdapter.registration.capture = () => { if (state.snapshot) capture(); };
+}
+
+export function flushTerminalViews() {
+    return Array.from(terminals.values()).every(state => state.viewAdapter?.registration.ready());
+}
+
+/** Scarica la history tramite anchor same-origin: nessun popup e nessuna user activation richiesta. */
+export function downloadTerminalHistory(url) {
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = '';
+    anchor.rel = 'noopener';
+    anchor.hidden = true;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
 }
 let terminalVisibilityRegistration = null;
 let terminalConnectionRegistration = null;
@@ -291,13 +348,17 @@ function navigatePrompt(state, previous) {
     const fromRow = state.promptNavigationRow ?? (isAtLiveTail(state)
         ? state.snapshot.historyEnd + (state.snapshot.screen?.lines?.length || 0)
         : visualToTimelineRow(state, currentVisualRow));
+    state.promptNavigationPending = (state.promptNavigationPending || 0) + 1;
     invokeCircuitMethod(state.dotNetRef, 'FindTerminalPrompt', state.sessionId, fromRow, previous).then(function (target) {
         if (state.disposed || lifecycleGeneration !== state.lifecycleGeneration || !Number.isFinite(target) || target < 0) return;
-        state.promptNavigationRow = target;
+        state.promptNavigationRow = Math.max(state.snapshot.historyStart, Math.min(state.snapshot.historyEnd + Math.max(0, (state.snapshot.screen?.lines?.length || 0) - 1), target));
         disarmFollowTail(state);
-        scrollProgrammatically(state, Math.max(0, timelineToVisualRow(state, target) * state.lineHeight));
+        scrollProgrammatically(state, Math.max(0, timelineToVisualRow(state, state.promptNavigationRow) * state.lineHeight));
         scheduleRender(state);
-    }).catch(function () { });
+    }).catch(function () { }).finally(function () {
+        state.promptNavigationPending--;
+        if (!state.disposed) scheduleRender(state);
+    });
 }
 
 function cachePage(state, page) {
@@ -459,9 +520,12 @@ function createCellNode(cell, cursor, selected, screen) {
     if (selected) span.classList.add('selected');
     const attributes = cell.attributes || 0;
     const colors = resolveTerminalCellColors(cell, screen);
-    span.style.color = colors.foreground;
-    span.style.backgroundColor = colors.background;
-    if (cursor) {
+    // La selezione usa i colori --terminal-selection-* del CSS: nessun inline da sovrascrivere con !important
+    if (!selected) {
+        span.style.color = colors.foreground;
+        span.style.backgroundColor = colors.background;
+    }
+    if (cursor && !selected) {
         span.style.color = resolveTerminalColor(257, TERMINAL_COLOR_MODE.indexedOrDefault, true, screen);
         span.style.backgroundColor = Number.isInteger(screen?.cursorColor) ? rgbColor(screen.cursorColor) : TERMINAL_DEFAULT_FOREGROUND;
     }
@@ -619,6 +683,16 @@ function renderVisibleRows(state, followTail) {
     if (!terminalPageVisible || state.disposed || !state.snapshot || !state.viewport || !state.rowsLayer) return;
     const totalRows = getTotalRows(state);
     state.spacer.style.height = Math.max(state.viewport.clientHeight, totalRows * state.lineHeight) + 'px';
+    let restoredView = null;
+    if (state.pendingView && isRendererVisible(state)) {
+        const saved = state.pendingView;
+        restoredView = saved;
+        state.pendingView = null;
+        measureTerminalMetrics(state);
+        state.spacer.style.height = Math.max(state.viewport.clientHeight, totalRows * state.lineHeight) + 'px';
+        applyTerminalView(state, saved);
+        followTail = saved.following;
+    }
     if (followTail) {
         scrollProgrammatically(state, state.viewport.scrollHeight);
     }
@@ -639,9 +713,18 @@ function renderVisibleRows(state, followTail) {
         nextRowCache.set(index, entry);
     }
     reconcileVisibleRows(state, entries);
+    if (restoredView) {
+        state.viewport.scrollLeft = Math.max(0, Math.min(Math.max(0, state.viewport.scrollWidth - state.viewport.clientWidth), restoredView.horizontalCells * state.charWidth));
+        // Lo scroll del layout non riattiva follow-tail né cancella l'anchor del prompt.
+        state.programmaticScrollTop = state.viewport.scrollTop;
+    }
     state.renderedRows = nextRowCache;
     state.renderedStart = top;
     state.renderedEnd = bottom;
+    if (state.viewAdapter && !state.selecting) {
+        state.viewAdapter.registration.restoring = false;
+        state.viewAdapter.registration.capture();
+    }
 }
 
 function scheduleRender(state, followTail = false) {
@@ -862,6 +945,9 @@ function attachInputHandlers(state) {
         invokeCircuitMethod(state.dotNetRef, 'OnTerminalFocus', state.sessionId, false).catch(function () { });
     });
     state.viewport.addEventListener('mousedown', function (event) {
+        const bounds = state.viewport.getBoundingClientRect();
+        if (event.clientX >= bounds.left + state.viewport.clientWidth || event.clientY >= bounds.top + state.viewport.clientHeight) state.userScroll = true;
+        if (state.userScroll) return; // La scrollbar nativa non inizia una selezione di testo
         const hyperlink = event.target.closest?.('.terminal-hyperlink');
         if (hyperlink && (!state.snapshot?.screen?.mouseTracking || event.ctrlKey || event.metaKey)) return;
         if (state.input) {
@@ -916,6 +1002,8 @@ function attachInputHandlers(state) {
     });
     state.viewport.addEventListener('wheel', function (event) {
         if (event.deltaY < 0) disarmFollowTail(state);
+        state.userScroll = true;
+        if (event.deltaY > 0 && isAtLiveTail(state)) state.following = true;
         const button = event.deltaY < 0 ? 64 : 65;
         const eventType = event.deltaY < 0 ? 'wheel-up' : 'wheel-down';
         if (!event.shiftKey && sendMouse(state, event, eventType, button)) event.preventDefault();
@@ -934,6 +1022,7 @@ function attachInputHandlers(state) {
         if (!state.selecting) return;
         state.selecting = false;
         stopSelectionAutoscroll(state);
+        if (publications().freeze) return; // Il checkpoint precede il mouseup sintetico del freeze
         state.selectionFocus = getPositionFromPointer(state, event);
         scheduleRender(state);
     };
@@ -981,6 +1070,7 @@ function createRenderer(sessionId, container, dotNetReference) {
         followTailPending: false,
         following: true,
         programmaticScrollTop: null,
+        userScroll: false,
         lifecycleGeneration: 0,
         nextResyncRequest: 0,
         resyncRequest: 0,
@@ -1029,9 +1119,11 @@ function createRenderer(sessionId, container, dotNetReference) {
             return;
         }
         state.programmaticScrollTop = null;
-        state.promptNavigationRow = null;
-        if (isAtLiveTail(state)) state.following = true;
-        else disarmFollowTail(state);
+        if (state.userScroll) state.promptNavigationRow = null;
+        if (isAtLiveTail(state)) {
+            if (state.userScroll) state.following = true;
+        } else disarmFollowTail(state);
+        state.userScroll = false;
         scheduleRender(state);
     }, { passive: true });
     state.resizeObserver = new ResizeObserver(function () {
@@ -1047,26 +1139,27 @@ function createRenderer(sessionId, container, dotNetReference) {
     return state;
 }
 
-export function initTerminal(sessionId, containerId, dotNetReference) {
+export function initTerminal(sessionId, containerId, dotNetReference, generation, initial) {
     const container = document.getElementById(containerId);
     if (!container) return [120, 30];
     let state = getState(sessionId);
-    if (!state || state.container !== container) {
+    if (!state || state.container !== container || state.viewGeneration !== generation) {
         disposeTerminal(sessionId);
         state = createRenderer(sessionId, container, dotNetReference);
+        installTerminalView(state, dotNetReference, generation, initial);
     } else {
         state.dotNetRef = dotNetReference;
     }
     ensureTerminalVisibilityRegistration();
     notifyResize(state);
-    return calculateSize(state);
+    return [...calculateSize(state), state.snapshot ? 1 : 0];
 }
 
 export function applyTerminalSnapshot(sessionId, snapshot, followTailOverride = null) {
     const state = getState(sessionId);
     if (!state || state.disposed || !snapshot) return;
     if (state.snapshot && snapshot.revision < state.snapshot.revision) return;
-    const followTail = typeof followTailOverride === 'boolean' ? followTailOverride : state.following || !state.snapshot;
+    const followTail = typeof followTailOverride === 'boolean' ? followTailOverride : state.following;
     if (typeof followTailOverride === 'boolean') state.following = followTailOverride;
     if (followTail) state.promptNavigationRow = null;
     if (snapshot.screen && !snapshot.screen.colorsIncluded && state.snapshot?.screen) {
@@ -1092,14 +1185,17 @@ export function applyTerminalSnapshot(sessionId, snapshot, followTailOverride = 
         for (const [start, page] of state.pageCache) {
             if (start + page.lines.length <= snapshot.historyStart) state.pageCache.delete(start);
         }
-        if (!followTail && snapshot.historyStart > oldStart)
-            scrollProgrammatically(state, Math.max(0, oldScrollTop - (snapshot.historyStart - oldStart) * state.lineHeight));
-        if (snapshot.historyStart > oldStart && state.selectionAnchor && state.selectionFocus) {
+        if (!followTail && !snapshot.screen?.alternateBuffer && snapshot.historyStart > oldStart)
+            scrollProgrammatically(state, Math.max(0, oldScrollTop + (computeHistoryLayout(snapshot).markerRows - oldMarkerRows - (snapshot.historyStart - oldStart)) * state.lineHeight));
+        if (!snapshot.screen?.alternateBuffer && snapshot.historyStart > oldStart && state.selectionAnchor && state.selectionFocus) {
             const visualShift = computeHistoryLayout(snapshot).markerRows - oldMarkerRows - (snapshot.historyStart - oldStart);
-            state.selectionAnchor = { row: Math.max(0, state.selectionAnchor.row + visualShift), column: state.selectionAnchor.column };
-            state.selectionFocus = { row: Math.max(0, state.selectionFocus.row + visualShift), column: state.selectionFocus.column };
+            const minimum = computeHistoryLayout(snapshot).markerRows;
+            state.selectionAnchor = { row: Math.max(minimum, state.selectionAnchor.row + visualShift), column: state.selectionAnchor.column };
+            state.selectionFocus = { row: Math.max(minimum, state.selectionFocus.row + visualShift), column: state.selectionFocus.column };
         }
     }
+    if (state.promptNavigationRow !== null && !snapshot.screen?.alternateBuffer)
+        state.promptNavigationRow = Math.max(snapshot.historyStart, Math.min(snapshot.historyEnd + Math.max(0, (snapshot.screen?.lines?.length || 0) - 1), state.promptNavigationRow));
     scheduleRender(state, followTail);
 }
 
@@ -1110,7 +1206,7 @@ export function applyTerminalAttach(sessionId, attach) {
         scheduleRender(state, state.followTailPending);
         return;
     }
-    const followTail = state.followTailPending || state.following || !state.snapshot;
+    const followTail = state.following;
     state.pageCache.clear();
     state.pendingPages.clear();
     state.renderedRows.clear();
@@ -1136,11 +1232,11 @@ export function fitTerminal(sessionId) {
     return calculateSize(state);
 }
 
-export function focusTerminal(sessionId) {
+export function focusTerminal(sessionId, sequence = null) {
     const state = getState(sessionId);
-    if (isBlockingModalOpen() || !terminalPageVisible || !state || state.disposed) return;
+    if (!isTopVisibleFloatingWindow('terminal-window', sequence) || !terminalPageVisible || !state || state.disposed) return;
     requestAnimationFrame(function () {
-        if (isBlockingModalOpen() || !terminalPageVisible || state.disposed || !isRendererVisible(state)) return;
+        if (!isTopVisibleFloatingWindow('terminal-window', sequence) || !terminalPageVisible || state.disposed || !isRendererVisible(state)) return;
         notifyResize(state);
         scheduleRender(state);
         if (state.input) {
@@ -1151,27 +1247,12 @@ export function focusTerminal(sessionId) {
     });
 }
 
-export function writeTerminal() {
-    // Output is rendered only from authoritative server snapshots
-}
-
-export function clearTerminal(sessionId) {
-    const state = getState(sessionId);
-    if (state) {
-        state.pageCache.clear();
-        scheduleRender(state);
-    }
-}
-
-export function resetTerminal(sessionId) {
-    clearTerminal(sessionId);
-}
-
 export function disposeTerminal(sessionId) {
     const key = getKey(sessionId);
     const state = terminals.get(key);
     if (!state) return;
     state.disposed = true;
+    disposeSurface(state.container);
     state.lifecycleGeneration++;
     state.resyncRequest = 0;
     if (state.resizeTimer) clearTimeout(state.resizeTimer);

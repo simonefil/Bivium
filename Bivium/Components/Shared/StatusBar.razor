@@ -2,32 +2,38 @@
 @inject Bivium.Services.IFileSystemService FileSystemService
 @inject TooltipService TooltipService
 
-<div class="bivium-radzen-status-bar rz-p-1" role="status">
-    <span class="bivium-status-selection" @ref="this._selectionElement" @onmouseenter="@(() => this.ShowTooltip(this._selectionElement, this._selectionInfo))" aria-label="@this._selectionInfo"><RadzenText TagName="TagName.Span" TextStyle="TextStyle.Body2" Text="@this._selectionInfo" class="rz-m-0" /></span>
-    <div class="bivium-status-shortcuts" aria-label="Available keyboard shortcuts">
-        @foreach (string shortcutId in s_shortcutIds)
+<div class="bivium-radzen-status-bar rz-p-1">
+    <span class="bivium-status-selection" @ref="this._selectionElement" @onmouseenter="@(() => this.ShowTooltip(this._selectionElement, this._selectionInfo))" role="status"><RadzenText TagName="TagName.Span" TextStyle="TextStyle.Body2" Text="@this._selectionInfo" class="rz-m-0" /></span>
+    <div class="bivium-status-windows" role="group" aria-label="Open windows">
+        @foreach (DesktopWindowState window in this.Windows)
         {
-            CommanderCommandState command = this.GetCommand(shortcutId);
-            @if (command != null && command.Enabled && !string.IsNullOrEmpty(command.Shortcut))
-            {
-                <span @key="command.Id" class="bivium-status-shortcut rz-text-body2 rz-m-0">
-                    <RadzenBadge BadgeStyle="BadgeStyle.Base" Variant="Variant.Flat" Style="font-size:inherit" Text="@this.GetVisualShortcut(command)" />
-                    <RadzenText TagName="TagName.Span" TextStyle="TextStyle.Body2" Text="@command.Label" class="rz-m-0" />
-                </span>
-            }
+            <span @key="window.Id" class="bivium-status-window">
+                <RadzenButton Text="@window.Title" Icon="@(window.IsMinimized ? "minimize" : window.Icon)"
+                              Variant="@(window.IsActive ? Variant.Filled : Variant.Outlined)"
+                              ButtonStyle="@(window.IsActive ? ButtonStyle.Primary : ButtonStyle.Base)"
+                              Size="ButtonSize.Small" Disabled="@(!this.CanActivateWindows)"
+                              Click="@(() => this.OnWindowActivate.InvokeAsync(window.Id))"
+                              title="@(window.Title + (window.IsMinimized ? " (minimized)" : "") + (window.IsActive ? " (active)" : ""))"
+                              aria-label="@(window.Title + (window.IsMinimized ? " (minimized)" : "") + (window.IsActive ? " (active)" : "") + (window.NeedsAttention ? " (needs attention)" : ""))"
+                              aria-pressed="@(window.IsActive ? "true" : "false")" />
+                @if (window.NeedsAttention)
+                {
+                    <RadzenBadge BadgeStyle="BadgeStyle.Warning" Text="!" title="Window needs attention" aria-hidden="true" />
+                }
+            </span>
         }
     </div>
     @if (!string.IsNullOrEmpty(this._progressText) || this.CanCancelOperation)
     {
-        <span class="bivium-radzen-status-progress" @ref="this._progressElement" @onmouseenter="@(() => this.ShowTooltip(this._progressElement, this._progressText))" aria-label="@this._progressText">
-            <RadzenText TagName="TagName.Span" TextStyle="TextStyle.Body2" Text="@this._progressText" class="rz-m-0" />
+        <span class="bivium-radzen-status-progress" @ref="this._progressElement" @onmouseenter="@(() => this.ShowTooltip(this._progressElement, this._progressText))">
+            <RadzenText TagName="TagName.Span" TextStyle="TextStyle.Body2" Text="@this._progressText" class="rz-m-0" role="status" />
             @if (this.CanCancelOperation)
             {
                 <RadzenButton ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.ExtraSmall" Icon="cancel" Text="Cancel" Click="this.OnCancelOperation" MouseEnter="@(element => this.ShowTooltip(element, "Cancel the running operation"))" aria-label="Cancel the running operation" />
             }
         </span>
     }
-    <span class="bivium-status-disk" @ref="this._diskElement" @onmouseenter="@(() => this.ShowTooltip(this._diskElement, this._diskInfo))" aria-label="@this._diskInfo"><RadzenText TagName="TagName.Span" TextStyle="TextStyle.Body2" Text="@this._diskInfo" class="rz-m-0" /></span>
+    <span class="bivium-status-disk" @ref="this._diskElement" @onmouseenter="@(() => this.ShowTooltip(this._diskElement, this._diskInfo))"><RadzenText TagName="TagName.Span" TextStyle="TextStyle.Body2" Text="@this._diskInfo" class="rz-m-0" /></span>
 </div>
 
 @code {

@@ -1,0 +1,159 @@
+@namespace Bivium.Components.Shared
+@inject BiviumWorkspaceService WorkspaceService
+@inject IJSRuntime JSRuntime
+@inject NotificationService NotificationService
+@implements IAsyncDisposable
+
+@if (this.Workflow?.Kind is WorkspaceWorkflowKind.TerminalRename or WorkspaceWorkflowKind.TerminalClose or WorkspaceWorkflowKind.TerminalClipboard && this.Workflow.Phase == WorkspaceWorkflowPhase.AwaitingInput)
+{
+    <PersistentModalShell Surface="terminal" Label="@this.Workflow.InvocationParameters.Title" Width="min(92vw, 48rem)" CloseOnOverlayClick="@(this.Workflow.Kind != WorkspaceWorkflowKind.TerminalRename)" CanClose="@(!this._binding.Rejected && !this._writingClipboard)" OnCancel="this.CancelAsync" OnContentRendered="this.HandleContentRenderedAsync">
+        <div data-workspace-workflow-id="@this.Workflow.Id">
+            <RadzenTemplateForm TItem="WorkspaceTerminalDialog" Data="this" Submit="@(_ => this.ConfirmAsync())">
+                <RadzenStack Gap="1rem">
+                    @if (this.Workflow.Kind == WorkspaceWorkflowKind.TerminalRename)
+                    {
+                        <RadzenStack Gap="0.25rem">
+                            <RadzenLabel Text="Tab label" Component="terminal-workflow-label" />
+                            <RadzenTextBox @ref="this._labelInput" Name="terminal-workflow-label" @bind-Value="this._text" @bind-Value:after="this.PublishDraft" Immediate="true" data-bivium-selection-length="@this.Workflow.InvocationParameters.SelectionLength" Style="width:100%" />
+                        </RadzenStack>
+                    }
+                    else
+                    {
+                        <RadzenText Text="@(this.Workflow.Kind == WorkspaceWorkflowKind.TerminalClipboard ? this.GetClipboardPreview() : this.Workflow.InvocationParameters.Label)" Style="white-space:pre-wrap;overflow-wrap:anywhere" />
+                    }
+                    @if (!string.IsNullOrEmpty(this._error))
+                    {
+                        <RadzenAlert AlertStyle="AlertStyle.Warning">@this._error</RadzenAlert>
+                    }
+                    <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" AlignItems="AlignItems.Center" Gap="0.75rem">
+                        <RadzenButton @ref="this._cancelButton" Text="Cancel" Disabled="@this._writingClipboard" ButtonStyle="ButtonStyle.Light" Click="this.CancelAsync" />
+                        <RadzenButton @ref="this._confirmButton" data-ui-key="terminal-workflow-confirm" Text="@(this.Workflow.Kind == WorkspaceWorkflowKind.TerminalClipboard ? "Copy" : this.Workflow.Kind == WorkspaceWorkflowKind.TerminalClose ? this._confirmationText : "OK")" ButtonType="ButtonType.Submit" ButtonStyle="@(this.Workflow.Kind == WorkspaceWorkflowKind.TerminalClose ? ButtonStyle.Danger : ButtonStyle.Primary)" Disabled="@(this._binding.Rejected || this._writingClipboard)" />
+                    </RadzenStack>
+                </RadzenStack>
+            </RadzenTemplateForm>
+        </div>
+    </PersistentModalShell>
+}
+
+@code {
+    [Parameter] public WorkspaceWorkflowSnapshot Workflow { get; set; }
+    [Parameter] public string AttachmentId { get; set; } = "";
+    [Parameter] public long LeaseGeneration { get; set; }
+    private readonly WorkspaceFormBinding _binding = new WorkspaceFormBinding();
+    private IJSObjectReference _module;
+    private string _text = "";
+    private string _error = "";
+    private string _confirmationText = "";
+    private bool _writingClipboard;
+    private bool _disposed;
+    /// <summary>Campo etichetta del rename, focalizzato al mount</summary>
+    private Radzen.Blazor.RadzenTextBox _labelInput;
+    /// <summary>Annullamento, focus sicuro per la chiusura distruttiva</summary>
+    private Radzen.Blazor.RadzenButton _cancelButton;
+    /// <summary>Conferma, focus del gesto Copy</summary>
+    private Radzen.Blazor.RadzenButton _confirmButton;
+    internal bool HasNonTransferableWork => this._writingClipboard;
+
+    /// <summary>Il mount non legge o scrive la clipboard OS</summary>
+    protected override void OnParametersSet()
+    {
+        if (this._binding.Adopt(this.Workflow, this.LeaseGeneration))
+        {
+            this._text = this.Workflow.Draft;
+            this._confirmationText = System.Text.Json.JsonSerializer.Deserialize<WorkspaceTerminalContext>(this.Workflow.InvocationParameters.FormContext).ConfirmationText;
+        }
+    }
+
+    protected override async System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+        try
+        {
+            IJSObjectReference module = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js");
+            if (this._disposed)
+                await module.DisposeAsync();
+            else
+                this._module = module;
+        }
+        catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException)
+        {
+            // Circuito già rilasciato: nessun modulo da conservare
+        }
+    }
+
+    /// <summary>Focus esplicito al mount: campo del rename, Cancel per la chiusura, Copy per la clipboard</summary>
+    /// <param name="firstRender">True soltanto al primo DOM mount</param>
+    private async System.Threading.Tasks.Task HandleContentRenderedAsync(bool firstRender)
+    {
+        if (!firstRender || this._disposed || this.Workflow == null)
+            return;
+        if (this.Workflow.Kind == WorkspaceWorkflowKind.TerminalRename && this._labelInput != null)
+            await this._labelInput.Element.FocusAsync();
+        else if (this.Workflow.Kind == WorkspaceWorkflowKind.TerminalClose && this._cancelButton != null)
+            await this._cancelButton.Element.FocusAsync();
+        else if (this._confirmButton != null)
+            await this._confirmButton.Element.FocusAsync();
+    }
+
+    private void PublishDraft() => this._binding.Publish(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this._text);
+    private string GetClipboardPreview() => this._text.Length > 4096 ? this._text.Substring(0, 4096) + "\n… preview truncated; the full text will be copied" : this._text;
+
+    /// <summary>Il gesto esplicito consuma prima la risposta; duplicate e hydration non scrivono</summary>
+    private async System.Threading.Tasks.Task ConfirmAsync()
+    {
+        if (this._disposed || this._writingClipboard)
+            return;
+        WorkspaceWorkflowSnapshot captured = this._binding.Current;
+        if (captured.Kind == WorkspaceWorkflowKind.TerminalClipboard && this._module == null)
+        {
+            this._error = "Clipboard access is not ready. Use Copy again when the dialog is ready.";
+            return;
+        }
+        this._writingClipboard = captured.Kind == WorkspaceWorkflowKind.TerminalClipboard;
+        try
+        {
+            WorkspaceWorkflowResponseResult result = this._binding.Respond(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), false);
+            if (result != WorkspaceWorkflowResponseResult.Accepted)
+            {
+                this._error = "This response was not accepted; no clipboard access was attempted.";
+                return;
+            }
+            if (captured.Kind == WorkspaceWorkflowKind.TerminalClipboard)
+                await this._module.InvokeVoidAsync("writeWorkspaceClipboardText", captured.Draft);
+        }
+        catch (JSException)
+        {
+            this._error = "The browser refused clipboard access. The request was consumed and will not be repeated automatically.";
+            this.NotificationService.Notify(NotificationSeverity.Warning, "Clipboard access refused", this._error, 8000);
+        }
+        finally
+        {
+            this._writingClipboard = false;
+            if (this._disposed && this._module != null)
+            {
+                try { await this._module.DisposeAsync(); }
+                catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException) { }
+            }
+        }
+    }
+
+    private System.Threading.Tasks.Task CancelAsync()
+    {
+        if (!this._disposed && !this._writingClipboard)
+            this._binding.Respond(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), true);
+        return System.Threading.Tasks.Task.CompletedTask;
+    }
+    internal System.Threading.Tasks.Task<bool> FlushForHandoffAsync(CancellationToken cancellationToken) => this._binding.FlushAsync(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this._text, cancellationToken);
+
+    /// <summary>Detach non risponde, non cancella e non esegue la richiesta OS</summary>
+    public async ValueTask DisposeAsync()
+    {
+        this._disposed = true;
+        if (this._module != null && !this._writingClipboard)
+        {
+            try { await this._module.DisposeAsync(); }
+            catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException) { }
+        }
+    }
+}

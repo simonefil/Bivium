@@ -1,0 +1,90 @@
+@namespace Bivium.Components.Shared
+@implements IDisposable
+@inject Bivium.Services.BiviumWorkspaceService WorkspaceService
+
+@if (this.Workflow?.Kind == Bivium.Models.WorkspaceWorkflowKind.EditorClose && this.Workflow.Phase == Bivium.Models.WorkspaceWorkflowPhase.AwaitingConfirmation)
+{
+    <PersistentModalShell Surface="editor-close" @key="this.Workflow.QuestionId" Label="@this.Workflow.InvocationParameters.Title" Width="min(92vw, 40rem)" CloseOnOverlayClick="true" OnCancel="@(() => this.RespondAsync(true, ""))">
+        <div data-workspace-workflow-id="@this.Workflow.Id">
+            <RadzenStack Gap="1rem">
+                <RadzenText TextStyle="TextStyle.Body1" TagName="TagName.Div" class="rz-m-0" Style="white-space: pre-wrap; overflow-wrap: anywhere;">@this.Workflow.InvocationParameters.Label</RadzenText>
+                @if (!string.IsNullOrEmpty(this._error))
+                {
+                    <RadzenAlert AlertStyle="AlertStyle.Warning" AllowClose="false" class="rz-m-0">@this._error</RadzenAlert>
+                }
+                <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" AlignItems="AlignItems.Center" Gap="0.75rem" Wrap="FlexWrap.Wrap">
+                    <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="@(() => this.RespondAsync(true, ""))" />
+                    <RadzenButton Text="Discard" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Outlined" Click="@(() => this.RespondAsync(false, Bivium.Services.BiviumWorkspaceService.EDITOR_CLOSE_DISCARD))" />
+                    <RadzenButton Text="Save" Icon="save" ButtonStyle="ButtonStyle.Primary" Click="@(() => this.RespondAsync(false, Bivium.Services.BiviumWorkspaceService.EDITOR_CLOSE_SAVE))" />
+                </RadzenStack>
+            </RadzenStack>
+        </div>
+    </PersistentModalShell>
+}
+
+@code {
+    /// <summary>Domanda server-owned sulla chiusura dell'editor con modifiche non salvate</summary>
+    [Parameter] public Bivium.Models.WorkspaceWorkflowSnapshot Workflow { get; set; }
+    /// <summary>Attachment dell'adapter corrente</summary>
+    [Parameter] public string AttachmentId { get; set; } = "";
+    /// <summary>Generazione autorevole osservata</summary>
+    [Parameter] public long LeaseGeneration { get; set; }
+    /// <summary>Scelta consumata (save o discard) da eseguire sull'editor dell'adapter che ha risposto</summary>
+    [Parameter] public EventCallback<string> OnResolved { get; set; }
+    /// <summary>Risposta catturata per la sola domanda corrente</summary>
+    private Bivium.Models.WorkspaceWorkflowResponse _response;
+    /// <summary>Identità della domanda montata</summary>
+    private Guid _questionId;
+    /// <summary>Errore di risposta, senza retry automatico</summary>
+    private string _error = "";
+    /// <summary>Dispose rilascia soltanto l'adapter</summary>
+    private bool _disposed;
+
+    /// <summary>Hydration della domanda; nessuna risposta o effetto sull'editor</summary>
+    protected override void OnParametersSet()
+    {
+        if (this.Workflow == null || this._disposed || this._questionId == this.Workflow.QuestionId)
+            return;
+        this._questionId = this.Workflow.QuestionId;
+        this._response = null;
+        this._error = "";
+    }
+
+    /// <summary>Consuma la risposta con identità stabile e inoltra la scelta accettata</summary>
+    /// <param name="cancelled">Annulla: l'editor resta aperto</param>
+    /// <param name="choice">Scelta tipizzata save o discard</param>
+    /// <returns>Completamento del callback adapter</returns>
+    private async System.Threading.Tasks.Task RespondAsync(bool cancelled, string choice)
+    {
+        if (this._disposed || this.Workflow?.Kind != Bivium.Models.WorkspaceWorkflowKind.EditorClose || this.Workflow.Phase != Bivium.Models.WorkspaceWorkflowPhase.AwaitingConfirmation)
+            return;
+        if (this._response != null && (this._response.Cancelled != cancelled || this._response.Value != choice))
+            this._response = null;
+        this._response ??= new Bivium.Models.WorkspaceWorkflowResponse(this.Workflow.Id, this.Workflow.Revision, this.Workflow.QuestionId, Guid.NewGuid(), cancelled, choice);
+        Bivium.Models.WorkspaceWorkflowResponseResult result = this.WorkspaceService.RespondToWorkflow(new Bivium.Models.WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this._response);
+        if (result is Bivium.Models.WorkspaceWorkflowResponseResult.Stale or Bivium.Models.WorkspaceWorkflowResponseResult.Denied)
+        {
+            this._error = "This response was not accepted. The authoritative workflow is unchanged.";
+            return;
+        }
+        if (result == Bivium.Models.WorkspaceWorkflowResponseResult.Accepted && !cancelled)
+            await this.OnResolved.InvokeAsync(choice);
+    }
+
+    /// <summary>Conferma la domanda immutabile durante il drain dell'handoff</summary>
+    /// <param name="cancellationToken">Lifecycle del drain</param>
+    /// <returns>True per la stessa domanda acknowledged</returns>
+    internal System.Threading.Tasks.Task<bool> FlushForHandoffAsync(System.Threading.CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Bivium.Models.WorkspaceWorkflowSnapshot current = this.WorkspaceService.GetWorkflow(new Bivium.Models.WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration));
+        bool accepted = !this._disposed && current != null && current.Id == this.Workflow?.Id && current.QuestionId == this.Workflow.QuestionId && current.Revision == this.Workflow.Revision;
+        return System.Threading.Tasks.Task.FromResult(accepted);
+    }
+
+    /// <summary>Detach del solo adapter; non risponde né chiude l'editor</summary>
+    public void Dispose()
+    {
+        this._disposed = true;
+    }
+}

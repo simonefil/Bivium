@@ -1,127 +1,122 @@
 @namespace Bivium.Components.Shared
 @implements IDisposable
-@inject DialogService DialogService
-@inject ILogger<ConfirmDialog> Logger
+@inject Bivium.Services.BiviumWorkspaceService WorkspaceService
+
+@if (this.Workflow?.Kind is Bivium.Models.WorkspaceWorkflowKind.DeleteEntries or Bivium.Models.WorkspaceWorkflowKind.EditorAlert or Bivium.Models.WorkspaceWorkflowKind.ResetWorkspace && this.Workflow.Phase is Bivium.Models.WorkspaceWorkflowPhase.AwaitingConfirmation or Bivium.Models.WorkspaceWorkflowPhase.Failed)
+{
+    <PersistentModalShell Surface="confirm" @key="this.Workflow.QuestionId" Label="@this.GetTitle()" Width="min(92vw, 48rem)" CloseOnOverlayClick="true" OnCancel="@(() => this.RespondWorkspaceAsync(true))">
+        <div data-workspace-workflow-id="@this.Workflow.Id">
+            <RadzenStack Gap="1rem">
+                @if (this.Workflow.Phase == Bivium.Models.WorkspaceWorkflowPhase.Failed)
+                {
+                    <RadzenAlert AlertStyle="AlertStyle.Danger" AllowClose="false" class="rz-m-0" Style="white-space: pre-wrap;">@this.Workflow.ErrorMessage</RadzenAlert>
+                }
+                else
+                {
+                    <RadzenText TextStyle="TextStyle.Body1" TagName="TagName.Div" class="rz-m-0" Style="white-space: pre-wrap;">@this.Workflow.InvocationParameters.Label</RadzenText>
+                }
+                @if (!string.IsNullOrEmpty(this._workspaceError))
+                {
+                    <RadzenAlert AlertStyle="AlertStyle.Warning" AllowClose="false" class="rz-m-0">@this._workspaceError</RadzenAlert>
+                }
+                <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" AlignItems="AlignItems.Center" Gap="0.75rem">
+                    @if (this.Workflow.Phase == Bivium.Models.WorkspaceWorkflowPhase.AwaitingConfirmation)
+                    {
+                        @if (this.Workflow.Kind == Bivium.Models.WorkspaceWorkflowKind.EditorAlert)
+                        {
+                            <RadzenButton Text="OK" ButtonStyle="ButtonStyle.Primary" Click="@(() => this.RespondWorkspaceAsync(false))" />
+                        }
+                        else
+                        {
+                            <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="@(() => this.RespondWorkspaceAsync(true))" />
+                            <RadzenButton Text="@(this.Workflow.Kind == Bivium.Models.WorkspaceWorkflowKind.ResetWorkspace ? "Reset" : "Delete")" ButtonStyle="ButtonStyle.Danger" Click="@(() => this.RespondWorkspaceAsync(false))" />
+                        }
+                    }
+                    else
+                    {
+                        <RadzenButton Text="Close" ButtonStyle="ButtonStyle.Primary" Click="@(() => this.RespondWorkspaceAsync(true))" />
+                    }
+                </RadzenStack>
+            </RadzenStack>
+        </div>
+    </PersistentModalShell>
+}
 
 @code {
-    /// <summary>
-    /// Callback che riceve l'esito della conferma
-    /// </summary>
-    [Parameter]
-    public EventCallback<bool> OnClose { get; set; }
+    /// <summary>Domanda server-owned da proiettare senza reinvocare alert, delete o reset</summary>
+    [Parameter] public Bivium.Models.WorkspaceWorkflowSnapshot Workflow { get; set; }
+    /// <summary>Attachment dell'adapter corrente</summary>
+    [Parameter] public string AttachmentId { get; set; } = "";
+    /// <summary>Generazione autorevole osservata</summary>
+    [Parameter] public long LeaseGeneration { get; set; }
+    /// <summary>Solo feedback UI dopo reset esplicitamente consumato, mai esecuzione</summary>
+    [Parameter] public EventCallback OnResetConfirmed { get; set; }
+    /// <summary>Risposta catturata per una sola domanda, non un delegate di comando</summary>
+    private Bivium.Models.WorkspaceWorkflowResponse _workspaceResponse;
+    /// <summary>Identità della domanda montata</summary>
+    private Guid _workspaceQuestionId;
+    /// <summary>Errore di risposta, senza retry automatico</summary>
+    private string _workspaceError = "";
+    /// <summary>Dispose rilascia soltanto l'adapter</summary>
+    private bool _workspaceDisposed;
 
-    /// <summary>
-    /// Versione dell'apertura corrente usata per ignorare completamenti obsoleti
-    /// </summary>
-    private int _generation;
-
-    /// <summary>
-    /// Tracker dell'apertura posseduta da questo adapter
-    /// </summary>
-    private RadzenDialogLifetime _lifetime;
-
-    /// <summary>
-    /// Inizializza il tracker sul servizio scoped del circuito
-    /// </summary>
-    protected override void OnInitialized()
+    /// <summary>Hydration della domanda; nessuna risposta o mutazione filesystem</summary>
+    protected override void OnParametersSet()
     {
-        this._lifetime = new RadzenDialogLifetime(this.DialogService);
-    }
-
-    /// <summary>
-    /// Apre il dialog di conferma mantenendo il contratto sincrono legacy
-    /// </summary>
-    /// <param name="title">Titolo del dialog</param>
-    /// <param name="message">Messaggio da confermare</param>
-    /// <param name="confirmText">Testo del pulsante di conferma</param>
-    /// <param name="cancelText">Testo del pulsante di annullamento oppure stringa vuota per un alert</param>
-    public void Show(string title, string message, string confirmText, string cancelText)
-    {
-        if (this._lifetime.IsDisposed || this._lifetime.IsOpen())
+        if (this.Workflow == null || this._workspaceDisposed || this._workspaceQuestionId == this.Workflow.QuestionId)
             return;
-
-        int generation = ++this._generation;
-        _ = this.ObserveTaskAsync(this.ShowAsync(generation, title, message, confirmText, cancelText), "apertura conferma");
+        this._workspaceQuestionId = this.Workflow.QuestionId;
+        this._workspaceResponse = null;
+        this._workspaceError = "";
     }
 
-    /// <summary>
-    /// Nasconde il dialog soltanto quando l'apertura posseduta è in cima allo stack Radzen
-    /// </summary>
-    public void Hide()
+    /// <summary>Titolo della domanda o del fallimento in base al comando catturato</summary>
+    /// <returns>Titolo del dialog</returns>
+    private string GetTitle()
     {
-        this._generation++;
-        this._lifetime.RequestClose();
-    }
-
-    /// <summary>
-    /// Apre e attende il risultato del dialog Radzen
-    /// </summary>
-    /// <param name="generation">Versione dell'apertura</param>
-    /// <param name="title">Titolo del dialog</param>
-    /// <param name="message">Messaggio da confermare</param>
-    /// <param name="confirmText">Testo della conferma</param>
-    /// <param name="cancelText">Testo dell'annullamento</param>
-    private async System.Threading.Tasks.Task ShowAsync(int generation, string title, string message, string confirmText, string cancelText)
-    {
-        DialogOptions options = new DialogOptions
+        if (this.Workflow.Phase != Bivium.Models.WorkspaceWorkflowPhase.Failed)
+            return this.Workflow.InvocationParameters.Title;
+        return this.Workflow.Kind switch
         {
-            Width = "min(92vw, 48rem)",
-            ShowClose = false,
-            CloseDialogOnEsc = true,
-            CloseDialogOnOverlayClick = true,
-            AutoFocusFirstElement = true,
-            CssClass = "bivium-radzen-service-dialog",
-            WrapperCssClass = "bivium-modal-layer"
+            Bivium.Models.WorkspaceWorkflowKind.DeleteEntries => "Delete failed",
+            Bivium.Models.WorkspaceWorkflowKind.ResetWorkspace => "Reset failed",
+            _ => this.Workflow.InvocationParameters.Title
         };
-        this._lifetime.Begin(options);
-        object result;
-        try
-        {
-            result = await this.DialogService.OpenAsync(title, service => @<div>
-                <RadzenText TextStyle="TextStyle.Body1" TagName="TagName.Div" class="rz-m-0" Style="white-space: pre-wrap;">@message</RadzenText>
-                <div class="bivium-radzen-dialog-actions">
-                    @if (!string.IsNullOrEmpty(cancelText))
-                    {
-                        <RadzenButton Text="@cancelText" ButtonStyle="ButtonStyle.Light" Click="@(() => service.Close(false))" />
-                    }
-                    <RadzenButton Text="@confirmText" ButtonStyle="ButtonStyle.Primary" Click="@(() => service.Close(true))" />
-                </div>
-            </div>, options);
-        }
-        finally
-        {
-            this._lifetime.Complete(options);
-        }
-        if (generation != this._generation)
-            return;
-
-        bool confirmed = result is bool value && value;
-        await this.OnClose.InvokeAsync(confirmed);
     }
 
-    /// <summary>
-    /// Osserva e registra le eccezioni del task avviato dal contratto <see langword="void"/>
-    /// </summary>
-    /// <param name="task">Task da osservare</param>
-    /// <param name="operation">Descrizione usata nel log</param>
-    private async System.Threading.Tasks.Task ObserveTaskAsync(System.Threading.Tasks.Task task, string operation)
+    /// <summary>Risponde con identità stabile; la selezione resta nel runtime server</summary>
+    /// <param name="cancelled">Annullamento esplicito, mai dispose</param>
+    /// <returns>Completamento del callback adapter</returns>
+    private async System.Threading.Tasks.Task RespondWorkspaceAsync(bool cancelled)
     {
-        try
-        {
-            await task;
-        }
-        catch (Exception ex)
-        {
-            this.Logger.LogError(ex, "Errore durante {Operation} Radzen", operation);
-        }
+        if (this._workspaceDisposed || this.Workflow?.Kind is not (Bivium.Models.WorkspaceWorkflowKind.DeleteEntries or Bivium.Models.WorkspaceWorkflowKind.EditorAlert or Bivium.Models.WorkspaceWorkflowKind.ResetWorkspace) || this.Workflow.Phase is not (Bivium.Models.WorkspaceWorkflowPhase.AwaitingConfirmation or Bivium.Models.WorkspaceWorkflowPhase.Failed))
+            return;
+        Bivium.Models.WorkspaceWorkflowKind kind = this.Workflow.Kind;
+        if (this._workspaceResponse != null && this._workspaceResponse.Cancelled != cancelled)
+            this._workspaceResponse = null;
+        this._workspaceResponse ??= new Bivium.Models.WorkspaceWorkflowResponse(this.Workflow.Id, this.Workflow.Revision, this.Workflow.QuestionId, Guid.NewGuid(), cancelled, "");
+        Bivium.Models.WorkspaceWorkflowResponseResult result = this.WorkspaceService.RespondToWorkflow(new Bivium.Models.WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this._workspaceResponse);
+        if (result is Bivium.Models.WorkspaceWorkflowResponseResult.Stale or Bivium.Models.WorkspaceWorkflowResponseResult.Denied)
+            this._workspaceError = "This response was not accepted. The authoritative workflow is unchanged.";
+        if (result == Bivium.Models.WorkspaceWorkflowResponseResult.Accepted && kind == Bivium.Models.WorkspaceWorkflowKind.ResetWorkspace && !cancelled)
+            await this.OnResetConfirmed.InvokeAsync();
     }
 
-    /// <summary>
-    /// Rilascia il tracker senza chiudere dialog appartenenti ad altri adapter
-    /// </summary>
+    /// <summary>Conferma la domanda immutabile; non attende l'operazione eventualmente ammessa</summary>
+    /// <param name="cancellationToken">Lifecycle del drain</param>
+    /// <returns>True per la stessa domanda acknowledged o per la sua operazione già ammessa</returns>
+    internal System.Threading.Tasks.Task<bool> FlushForHandoffAsync(System.Threading.CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Bivium.Models.WorkspaceWorkflowSnapshot current = this.WorkspaceService.GetWorkflow(new Bivium.Models.WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration));
+        bool accepted = !this._workspaceDisposed && current != null && current.Id == this.Workflow?.Id
+            && ((current.QuestionId == this.Workflow.QuestionId && current.Revision == this.Workflow.Revision) || current.Phase is Bivium.Models.WorkspaceWorkflowPhase.Running or Bivium.Models.WorkspaceWorkflowPhase.Succeeded or Bivium.Models.WorkspaceWorkflowPhase.Cancelled);
+        return System.Threading.Tasks.Task.FromResult(accepted);
+    }
+
+    /// <summary>Detach del solo adapter; non risponde né cancella l'intento server-owned</summary>
     public void Dispose()
     {
-        this._generation++;
-        this._lifetime?.Dispose();
+        this._workspaceDisposed = true;
     }
 }

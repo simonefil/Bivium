@@ -1,0 +1,17 @@
+@namespace Bivium.Components.Shared
+
+<span class="rz-navigation-item-text bivium-menu-command-label">
+    @this.Label
+    @if (!string.IsNullOrEmpty(this.Shortcut))
+    {
+        <RadzenBadge BadgeStyle="BadgeStyle.Secondary" Variant="Variant.Outlined" Text="@this.Shortcut" />
+    }
+</span>
+
+@code {
+    /// <summary>Etichetta del comando</summary>
+    [Parameter] public string Label { get; set; } = "";
+
+    /// <summary>Shortcut proiettata dal Commander, oppure stringa vuota</summary>
+    [Parameter] public string Shortcut { get; set; } = "";
+}

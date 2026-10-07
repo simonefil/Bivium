@@ -1,29 +1,30 @@
 @namespace Bivium.Components.Shared
 @inject IJSRuntime JSRuntime
 
-<RadzenCard id="terminal-window" class="@("terminal-window bivium-radzen-terminal-window " + (this._isVisible ? "visible" : ""))"
+<RadzenCard id="terminal-window" Variant="Variant.Outlined" class="@("terminal-window bivium-radzen-terminal-window rz-p-0 " + (this._isVisible ? "visible" : ""))"
      data-viewport-width="@this._viewportWidth" data-viewport-height="@this._viewportHeight" data-mru-order="@this._mruOrder" data-focus-target="@this._focusTarget"
-     Style="@($"left:{this._windowLeft}px;top:{this._windowTop}px;width:{this._windowWidth}px;height:{this._windowHeight}px")">
-    <RadzenStack class="terminal-titlebar rz-p-2" Gap="0.5rem" id="terminal-titlebar" Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween">
-        <RadzenText TextStyle="TextStyle.Subtitle2" class="terminal-titlebar-title rz-m-0" Text="Terminal" />
-        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem">
-            <RadzenButton Icon="edit" Variant="Variant.Text" ButtonStyle="ButtonStyle.Base" Size="ButtonSize.Small" Disabled="@(this._activeSessionId <= 0)" Click="this.BeginRenameActiveTab" title="Rename active terminal tab" aria-label="Rename active terminal tab" />
-            <RadzenButton Icon="add" Size="ButtonSize.Small" Click="this.CreateTabAsync" title="New terminal tab" aria-label="New terminal tab" />
-            <RadzenButton Icon="download" Size="ButtonSize.Small" Click="this.ExportActiveHistory" title="Export active terminal history" aria-label="Export active terminal history" />
-            <RadzenButton Icon="minimize" Size="ButtonSize.Small" Click="this.MinimizeAsync" title="Minimize terminal" aria-label="Minimize terminal" />
-            <RadzenButton Icon="close" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small" Click="this.RequestCloseContainer" title="Close terminal" aria-label="Close terminal" />
-        </RadzenStack>
-    </RadzenStack>
+     Style="@($"left:{this._windowLeft}px;top:{this._windowTop}px;width:{this._windowWidth}px;height:{this._windowHeight}px")"
+     role="dialog" aria-modal="false" aria-labelledby="terminal-window-title">
+      <RadzenStack class="@("terminal-titlebar bivium-native-window-titlebar rz-p-2 " + (this.IsActive ? "rz-background-color-primary rz-color-on-primary" : ""))" Gap="0.5rem" id="terminal-titlebar" Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween">
+         <RadzenStack class="bivium-native-window-titlebar-content" Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+             <RadzenIcon Icon="terminal" aria-hidden="true" />
+              <RadzenText id="terminal-window-title" TextStyle="TextStyle.Subtitle2" class="@("terminal-titlebar-title bivium-native-window-title rz-m-0 " + (this.IsActive ? "rz-color-on-primary" : ""))" Text="@this.GetTitle()" />
+         </RadzenStack>
+         <RadzenStack class="bivium-native-window-titlebar-actions" Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem">
+             <RadzenButton Icon="minimize" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" Size="ButtonSize.Small" Click="this.MinimizeAsync" title="Minimize terminal" aria-label="Minimize terminal" />
+             <RadzenButton Icon="close" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Text" Size="ButtonSize.Small" Click="this.RequestCloseContainer" title="Close terminal" aria-label="Close terminal" />
+         </RadzenStack>
+     </RadzenStack>
 
     <div class="terminal-tabbar bivium-radzen-terminal-header-shell">
-        <div id="terminal-tab-strip" class="terminal-tab-strip" style="position: relative; flex: 1; min-width: 0; overflow: hidden;" @ref="this._tabStripElement">
+        <div data-workspace-terminal-strip="true" id="terminal-tab-strip" class="terminal-tab-strip" style="position: relative; flex: 1; min-width: 0; overflow: hidden;" @ref="this._tabStripElement">
         <RadzenTabs RenderMode="TabRenderMode.Client" SelectedIndex="@this.GetSelectedTabIndex()" Change="this.HandleSelectedTabChangedAsync" class="bivium-radzen-terminal-tabs">
             <Tabs>
                 @foreach (TerminalSessionSnapshot session in this._sessions)
                 {
                     <RadzenTabsItem @key="session.Id" Text="@session.Label" Attributes="@this.GetTabHeaderAttributes(session)">
                         <Template>
-                            <span class="@this.GetTabCssClass(session)" @ondblclick="() => this.BeginRename(session)" title="@session.WorkingDirectory">
+                            <span class="terminal-tab" @ondblclick="() => this.BeginRename(session)" title="@session.WorkingDirectory">
                                 @if (session.ProgressState != TerminalProgressState.None)
                                 {
                                     @if (session.ProgressState == TerminalProgressState.Indeterminate)
@@ -61,29 +62,21 @@
             {
                 <RadzenButton @key="session.Id" class="terminal-tab-close" Style="position: absolute; visibility: hidden; pointer-events: auto;" data-terminal-close-id="@session.Id" Icon="close" Variant="Variant.Text" ButtonStyle="@(session.Id == this._activeSessionId ? ButtonStyle.Light : ButtonStyle.Base)" Size="ButtonSize.Small" Click="() => this.RequestCloseTabAsync(session.Id)" title="@("Close terminal tab " + session.Label)" aria-label="@("Close terminal tab " + session.Label)" />
             }
-        </div>
-        </div>
-    </div>
+         </div>
+         </div>
+         <RadzenStack class="terminal-tab-actions" Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem">
+             <RadzenButton Icon="edit" Variant="Variant.Text" ButtonStyle="ButtonStyle.Base" Size="ButtonSize.Small" Disabled="@(this._activeSessionId <= 0)" Click="this.BeginRenameActiveTab" title="Rename active terminal tab" aria-label="Rename active terminal tab" />
+             <RadzenButton Icon="add" Variant="Variant.Text" ButtonStyle="ButtonStyle.Base" Size="ButtonSize.Small" Click="this.CreateTabAsync" title="New terminal tab" aria-label="New terminal tab" />
+             <RadzenButton Icon="download" Variant="Variant.Text" ButtonStyle="ButtonStyle.Base" Size="ButtonSize.Small" Click="this.ExportActiveHistory" title="Export active terminal history" aria-label="Export active terminal history" />
+         </RadzenStack>
+      </div>
 
     <div class="terminal-body">
         @foreach (TerminalSessionSnapshot session in this._sessions)
         {
-            <div @key="session.Id" id="terminal-container-@session.Id" class="terminal-session @(session.Id == this._activeSessionId ? "active" : "")"></div>
+            <div data-workspace-terminal-view="true" @key="session.Id" id="terminal-container-@session.Id" class="terminal-session @(session.Id == this._activeSessionId ? "active" : "")"></div>
         }
     </div>
      <div class="terminal-resize-handle" id="terminal-resize-handle"><RadzenIcon Icon="drag_handle" class="resize-grip-icon" aria-hidden="true" /></div>
 </RadzenCard>
 
-<div class="terminal-toast-stack">
-    @foreach (TerminalClientEvent toast in this._toasts)
-    {
-        <RadzenButton @key="toast.Id" ButtonStyle="ButtonStyle.Base" class="terminal-toast" Click="() => this.OpenToastAsync(toast)">
-            <RadzenText TagName="TagName.Span" TextStyle="TextStyle.Subtitle2" class="terminal-toast-title rz-m-0" Text="@toast.Title" />
-            <RadzenText TagName="TagName.Span" TextStyle="TextStyle.Body2" class="terminal-toast-body rz-m-0" Text="@toast.Text" />
-        </RadzenButton>
-    }
-</div>
-
-<Bivium.Components.Shared.ConfirmDialog @ref="this._confirmDialog" OnClose="this.HandleConfirmClose" />
-<Bivium.Components.Shared.ConfirmDialog @ref="this._clipboardDialog" OnClose="this.HandleClipboardConfirmation" />
-<Bivium.Components.Shared.InputDialog @ref="this._renameDialog" OnClose="this.HandleRenameDialogCloseAsync" />

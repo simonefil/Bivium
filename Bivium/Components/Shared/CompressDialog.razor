@@ -2,18 +2,31 @@
 
 @if (this._isVisible)
 {
-    <PersistentModalShell Label="Compress" OnCancel="this.HandleCancel" OnContentRendered="this.HandleContentRenderedAsync">
+    <PersistentModalShell Surface="compress" Label="Compress" CanClose="@(!this._binding.Rejected)" OnCancel="this.HandleCancel" OnContentRendered="this.HandleContentRenderedAsync">
+        <div data-workspace-workflow-id="@this.Workflow.Id">
+        <RadzenTemplateForm TItem="CompressDialog" Data="this" Submit="@(_ => this.HandleConfirm())">
         <RadzenStack class="bivium-radzen-modal" Gap="1rem" Style="width:100%;max-height:calc(100dvh - 9rem);box-sizing:border-box;">
                 <RadzenFormField Text="Format" Component="compress-format" Style="width:100%;">
-                    <RadzenDropDown TValue="Bivium.Models.ArchiveFormat" id="compress-format" Name="compress-format" Data="this._formats" TextProperty="Value" ValueProperty="Key" @bind-Value="this._selectedFormat" Change="this.HandleFormatChange" Style="width:100%;" />
+                    <WorkspaceFormatDropDown data-workspace-format-surface="true" data-ui-key="compress-format" Workflow="this.Workflow" AttachmentId="@this.AttachmentId" LeaseGeneration="this.LeaseGeneration" id="compress-format" Name="compress-format" Data="this._formats" TextProperty="Value" ValueProperty="Key" @bind-Value="this._selectedFormat" Change="this.HandleFormatChange" Style="width:100%;" />
                 </RadzenFormField>
                 <RadzenFormField Text="Output file name" Component="compress-output" Style="width:100%;">
-                    <div @onkeydown="this.HandleKeyDown" @onkeydown:stopPropagation="true"><RadzenTextBox id="compress-output" Name="compress-output" @ref="this._outputNameElement" @bind-Value="this._outputName" Immediate="true" Style="width:100%;" /></div>
+                    <ChildContent><RadzenTextBox id="compress-output" Name="compress-output" @ref="this._outputNameElement" @bind-Value="this._outputName" @bind-Value:after="this.PublishDraft" Immediate="true" Style="width:100%;" /></ChildContent>
+                    <Helper><RadzenRequiredValidator Component="compress-output" Text="Enter a file name" /></Helper>
                 </RadzenFormField>
-                <div class="bivium-radzen-dialog-actions">
+                @if (!string.IsNullOrEmpty(this.Workflow.ErrorMessage))
+                {
+                    <RadzenAlert AlertStyle="AlertStyle.Danger">@this.Workflow.ErrorMessage</RadzenAlert>
+                }
+                @if (!string.IsNullOrEmpty(this._binding.Error))
+                {
+                    <RadzenAlert AlertStyle="AlertStyle.Warning">@this._binding.Error</RadzenAlert>
+                }
+                <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" AlignItems="AlignItems.Center" Gap="0.75rem">
                     <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="this.HandleCancel" />
-                    <RadzenButton Text="OK" ButtonStyle="ButtonStyle.Primary" Click="this.HandleConfirm" />
-                </div>
+                    <RadzenButton Text="OK" ButtonType="ButtonType.Submit" Disabled="@this._binding.Rejected" ButtonStyle="ButtonStyle.Primary" />
+                </RadzenStack>
         </RadzenStack>
+        </RadzenTemplateForm>
+        </div>
     </PersistentModalShell>
 }

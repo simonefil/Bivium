@@ -1,11 +1,8 @@
 // Geometry adapter only. Blazor owns every close button and its callback.
+import { createSurfacePublisher, disposeSurface } from './surface-adapters.js';
 const strips = new Map();
 
-export function ownsFocus(wrapper) {
-    return !!wrapper?.contains(document.activeElement);
-}
-
-export function refresh(wrapper) {
+export function refresh(wrapper, reference, generation, initial) {
     if (!wrapper?.isConnected) return;
     // A replaced element must not retain observers for its detached predecessor.
     for (const element of strips.keys()) {
@@ -16,6 +13,7 @@ export function refresh(wrapper) {
         state = createStrip(wrapper);
         strips.set(wrapper, state);
     }
+    if (state.generation !== generation) state.installView(reference, generation, initial);
     state.schedule();
 }
 
@@ -24,6 +22,8 @@ function createStrip(wrapper) {
     let disposed = false;
     let nav = null;
     let observed = new Set();
+    let viewAdapter = null;
+    let pendingView = null;
     const schedule = () => {
         if (!disposed && !frame) frame = requestAnimationFrame(layout);
     };
@@ -92,13 +92,40 @@ function createStrip(wrapper) {
                 position.button.style.top = `${position.top}px`;
             }
         }
+        if (viewAdapter && nav) {
+            if (pendingView && nav.clientWidth > 0) {
+                const saved = pendingView;
+                pendingView = null;
+                const anchor = headers.find(header => Number(header.dataset.terminalTabId) === saved.anchorSessionId)?.closest('li');
+                const rect = anchor?.getBoundingClientRect();
+                const left = rect ? nav.scrollLeft + rect.left - nav.getBoundingClientRect().left + saved.anchorFraction * rect.width : saved.left;
+                nav.scrollLeft = Math.max(0, Math.min(Math.max(0, nav.scrollWidth - nav.clientWidth), left));
+                nav.scrollTop = Math.max(0, Math.min(Math.max(0, nav.scrollHeight - nav.clientHeight), saved.top));
+            }
+            viewAdapter.registration.restoring = false;
+            viewAdapter.registration.capture();
+        }
     }
 
     document.fonts?.addEventListener('loadingdone', schedule);
     document.fonts?.ready.then(schedule);
-    return { schedule, dispose() {
+    const result = { schedule, generation: null,
+      installView(reference, generation, initial) {
+        result.generation = generation;
+        pendingView = initial.revision > 0 ? initial : null;
+        viewAdapter = createSurfacePublisher(wrapper, reference, 'OnTerminalStripViewChanged', generation, initial, () => {
+            if (pendingView) return pendingView;
+            const origin = nav.getBoundingClientRect().left;
+            const header = Array.from(nav.querySelectorAll('[role="tab"][data-terminal-tab-id]')).find(element => element.closest('li').getBoundingClientRect().right > origin);
+            const rect = header?.closest('li').getBoundingClientRect();
+            return { anchorSessionId: Number(header?.dataset.terminalTabId || 0), anchorFraction: rect?.width ? Math.max(0, Math.min(1, (origin - rect.left) / rect.width)) : 0, left: nav.scrollLeft, top: nav.scrollTop };
+        });
+        const ready = viewAdapter.registration.ready;
+        viewAdapter.registration.ready = () => ready() && !!nav?.isConnected;
+      }, dispose() {
         if (disposed) return;
         disposed = true;
+        disposeSurface(wrapper);
         if (frame) cancelAnimationFrame(frame);
         frame = 0;
         resize.disconnect();
@@ -107,6 +134,7 @@ function createStrip(wrapper) {
         document.fonts?.removeEventListener('loadingdone', schedule);
         observed.clear();
     } };
+    return result;
 }
 
 export function dispose(wrapper) {

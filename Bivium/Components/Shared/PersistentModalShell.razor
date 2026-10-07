@@ -1,21 +1,35 @@
 @namespace Bivium.Components.Shared
-@implements IDisposable
+@implements IAsyncDisposable
 @inject DialogService DialogService
 @inject ILogger<PersistentModalShell> Logger
+@inject IJSRuntime JSRuntime
+@inject Bivium.Services.BiviumWorkspaceService WorkspaceService
 
 @code {
+    /// <summary>Identità semantica della form, indipendente dal titolo</summary>
+    [Parameter] public string Surface { get; set; } = "";
+    /// <summary>Lease e domanda/sessione catturate dal Commander</summary>
+    [CascadingParameter] public Bivium.Models.WorkspaceSurfaceOwner SurfaceOwner { get; set; }
+    /// <summary>Adapter del solo stato visuale</summary>
+    private IJSObjectReference _surfaceModule;
+    /// <summary>Callback posseduto dal mount shell</summary>
+    private DotNetObjectReference<PersistentModalShell> _surfaceReference;
+    /// <summary>Identità visuale acknowledged</summary>
+    private Bivium.Models.WorkspaceDialogVisualDraft _visualDraft;
+    /// <summary>Lease installata sul bridge</summary>
+    private long _visualGeneration = -1;
     /// <summary>Contenuto appartenente all'owner, senza ricreare la form</summary>
     [Parameter] public RenderFragment ChildContent { get; set; }
     /// <summary>Titolo accessibile nativo</summary>
     [Parameter] public string Label { get; set; } = "Dialog";
-    /// <summary>Classe di presentazione opzionale sul wrapper nativo</summary>
-    [Parameter] public string OverlayClass { get; set; } = "";
     /// <summary>Annullamento richiesto dall'utente, una sola volta per apertura</summary>
     [Parameter] public EventCallback OnCancel { get; set; }
     /// <summary>Notifica DOM pronto: true al primo mount, false sui refresh</summary>
     [Parameter] public EventCallback<bool> OnContentRendered { get; set; }
     /// <summary>Abilita X, Escape e backdrop quando l'owner permette la chiusura</summary>
     [Parameter] public bool CanClose { get; set; } = true;
+    /// <summary>Il click sul backdrop chiude soltanto le form senza campi di input; Escape e Cancel restano sempre disponibili</summary>
+    [Parameter] public bool CloseOnOverlayClick { get; set; }
     /// <summary>Larghezza di presentazione del dialog</summary>
     [Parameter] public string Width { get; set; } = "min(94vw, 58rem)";
 
@@ -25,8 +39,6 @@
     private ModalContentHost _host;
     /// <summary>Opzioni aggiornabili dell'apertura posseduta</summary>
     private DialogOptions _options;
-    /// <summary>Task osservato dell'apertura, senza bloccare il lifecycle</summary>
-    private System.Threading.Tasks.Task _openTask;
     /// <summary>Guardia di rilascio e callback</summary>
     private bool _isDisposed;
 
@@ -45,12 +57,17 @@
         if (this._isDisposed || this._options == null)
             return;
 
-        this._options.ShowClose = this.CanClose;
-        // Il listener Escape Radzen cattura l'opzione al mount; CanClose rivalida lo stato corrente
-        this._options.CloseDialogOnEsc = true;
-        this._options.CloseDialogOnOverlayClick = this.CanClose;
-        this._options.Width = this.Width;
-        this._host?.Refresh(this.ChildContent, !this._skipNextRenderNotification);
+        bool closeOnOverlayClick = this.CanClose && this.CloseOnOverlayClick;
+        if (this._options.ShowClose != this.CanClose || this._options.CloseDialogOnOverlayClick != closeOnOverlayClick || this._options.Width != this.Width)
+        {
+            this._options.ShowClose = this.CanClose;
+            this._options.CloseDialogOnOverlayClick = closeOnOverlayClick;
+            this._options.Width = this.Width;
+            // La title bar nativa legge le opzioni soltanto quando RadzenDialog rirenderizza
+            this.DialogService.Refresh();
+        }
+        bool visualOwnerChanged = this._visualDraft != null && this.SurfaceOwner != null && (this._visualGeneration != this.SurfaceOwner.Generation || (this.Surface != "upload" && (this._visualDraft.OwnerId != this.SurfaceOwner.WorkflowId || this._visualDraft.QuestionId != this.SurfaceOwner.QuestionId || this._visualDraft.Phase != this.SurfaceOwner.Phase)));
+        this._host?.Refresh(this.ChildContent, visualOwnerChanged || !this._skipNextRenderNotification);
         this._skipNextRenderNotification = false;
     }
 
@@ -64,15 +81,16 @@
         this._options = new DialogOptions
         {
             Width = this.Width,
-            WrapperCssClass = "bivium-modal-layer " + this.OverlayClass,
             ShowClose = this.CanClose,
+            // Il listener Escape Radzen cattura l'opzione al mount; CanClose rivalida lo stato corrente
             CloseDialogOnEsc = true,
-            CloseDialogOnOverlayClick = this.CanClose,
-            AutoFocusFirstElement = true,
+            CloseDialogOnOverlayClick = this.CanClose && this.CloseOnOverlayClick,
+            // L'owner che riceve OnContentRendered imposta il focus: il focus Radzen differito di 500 ms lo sovrascriverebbe
+            AutoFocusFirstElement = !this.OnContentRendered.HasDelegate,
             CanClose = () => System.Threading.Tasks.Task.FromResult(!this._isDisposed && this.CanClose)
         };
         this._lifetime.Begin(this._options);
-        this._openTask = this.ObserveOpenAsync(this._options);
+        _ = this.ObserveOpenAsync(this._options);
     }
 
     /// <summary>Osserva chiusura ed errori senza un await pendente nel lifecycle Blazor</summary>
@@ -81,7 +99,7 @@
     {
         try
         {
-            await this.DialogService.OpenAsync(this.Label, service => @<ModalContentHost @ref="this._host" ChildContent="this.ChildContent" OnContentRendered="this.HandleContentRenderedAsync" />, options);
+            await this.DialogService.OpenAsync(this.Label, service => @<ModalContentHost @ref="this._host" Surface="@this.Surface" ChildContent="this.ChildContent" OnContentRendered="this.HandleContentRenderedAsync" />, options);
             if (!this._isDisposed)
                 await this.OnCancel.InvokeAsync();
         }
@@ -97,22 +115,77 @@
 
     /// <summary>Inoltra il mount reale soltanto mentre l'owner è vivo</summary>
     /// <param name="firstRender">True soltanto al primo DOM mount</param>
-    private System.Threading.Tasks.Task HandleContentRenderedAsync(bool firstRender)
+    private async System.Threading.Tasks.Task HandleContentRenderedAsync(bool firstRender)
     {
         this._skipNextRenderNotification = this.OnContentRendered.HasDelegate;
-        return this._isDisposed ? System.Threading.Tasks.Task.CompletedTask : this.OnContentRendered.InvokeAsync(firstRender);
+        if (this._isDisposed)
+            return;
+        await this.OnContentRendered.InvokeAsync(firstRender);
+        Bivium.Models.WorkspaceSurfaceOwner owner = this.SurfaceOwner;
+        if (this._isDisposed || owner == null || string.IsNullOrEmpty(this.Surface) || this._host == null)
+            return;
+        Guid id = this.Surface == "upload" ? owner.UploadId : owner.WorkflowId;
+        Guid question = this.Surface == "upload" ? Guid.Empty : owner.QuestionId;
+        Bivium.Models.WorkspaceWorkflowPhase phase = this.Surface == "upload" ? Bivium.Models.WorkspaceWorkflowPhase.Dismissed : owner.Phase;
+        if (this._visualGeneration == owner.Generation && this._visualDraft?.OwnerId == id && this._visualDraft.QuestionId == question && this._visualDraft.Phase == phase)
+            return;
+        Bivium.Models.WorkspaceDialogVisualDraft identity = new Bivium.Models.WorkspaceDialogVisualDraft(0, id, question, phase, this.Surface, "", -1, -1, "none", []);
+        Bivium.Models.WorkspaceDialogVisualDraft draft = this.WorkspaceService.GetDialogVisualDraft(new Bivium.Models.WorkspaceClientToken(owner.AttachmentId, owner.Generation), identity);
+        if (draft == null)
+            return;
+        IJSObjectReference module = this._surfaceModule ?? await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/surface-adapters.js");
+        if (this._isDisposed || this.SurfaceOwner != owner)
+        {
+            if (this._surfaceModule == null)
+                await module.DisposeAsync();
+            return;
+        }
+        this._surfaceModule = module;
+        this._surfaceReference ??= DotNetObjectReference.Create(this);
+        this._visualDraft = draft;
+        if (await this._surfaceModule.InvokeAsync<bool>("installDialogSurface", this._host.Element, this._surfaceReference, owner.Generation, draft))
+            this._visualGeneration = owner.Generation;
+    }
+
+    /// <summary>Checkpoint visuale, distinto dal publisher del valore della form</summary>
+    /// <param name="generation">Lease catturata</param>
+    /// <param name="draft">Identità, focus, selezione e scroll</param>
+    /// <returns>Revisione acknowledged oppure -1</returns>
+    [JSInvokable]
+    public long OnDialogSurfaceChanged(long generation, Bivium.Models.WorkspaceDialogVisualDraft draft)
+    {
+        if (this._isDisposed || this.SurfaceOwner == null || generation != this.SurfaceOwner.Generation || draft?.Surface != this.Surface)
+            return -1;
+        long revision = this.WorkspaceService.PublishDialogVisualDraft(new Bivium.Models.WorkspaceClientToken(this.SurfaceOwner.AttachmentId, generation), draft);
+        if (revision >= 0)
+            this._visualDraft = draft with { Revision = revision };
+        return revision;
     }
 
     /// <summary>Owner Hide non annulla nuovamente l'owner e non chiude dialog sovrapposti</summary>
-    public void Dispose()
+    public async System.Threading.Tasks.ValueTask DisposeAsync()
     {
         if (this._isDisposed)
             return;
 
         this._isDisposed = true;
-        this._host?.Detach();
-        this._lifetime?.Dispose();
-        if (this._openTask?.IsCompleted == true)
-            this._openTask = null;
+        try
+        {
+            if (this._surfaceModule != null)
+            {
+                try
+                {
+                    try { if (this._host != null) await this._surfaceModule.InvokeVoidAsync("disposeSurface", this._host.Element); }
+                    finally { await this._surfaceModule.DisposeAsync(); }
+                }
+                catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException) { }
+            }
+        }
+        finally
+        {
+            this._surfaceReference?.Dispose();
+            this._host?.Detach();
+            this._lifetime?.Dispose();
+        }
     }
 }

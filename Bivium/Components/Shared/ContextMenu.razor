@@ -1,9 +1,23 @@
 @namespace Bivium.Components.Shared
-@implements IDisposable
+@implements IAsyncDisposable
 @inject ContextMenuService ContextMenuService
+@inject IJSRuntime JSRuntime
 
 @code {
-    [Parameter] public bool IsVisible { get; set; }
+    /// <summary>Apertura materializzata dal Commander</summary>
+    [Parameter] public Bivium.Models.WorkspaceContextMenuDraft Draft { get; set; }
+    /// <summary>CAS visuale delegato al proprietario del contesto catturato</summary>
+    [Parameter] public Func<Bivium.Models.WorkspaceContextMenuDraft, long> PublishVisual { get; set; }
+    /// <summary>Lease del mount</summary>
+    [CascadingParameter] public Bivium.Models.WorkspaceSurfaceOwner SurfaceOwner { get; set; }
+    /// <summary>Modulo e callback posseduti dall'apertura del portal</summary>
+    private IJSObjectReference _surfaceModule;
+    /// <summary>Callback rilasciato anche alla disconnessione</summary>
+    private DotNetObjectReference<ContextMenu> _surfaceReference;
+    /// <summary>Root reale usata dal cleanup visuale</summary>
+    private ElementReference _surfaceRoot;
+    /// <summary>Disponibilità e shortcut calcolati esclusivamente dal Commander</summary>
+    [Parameter] public IReadOnlyList<CommanderCommandState> Commands { get; set; } = Array.Empty<CommanderCommandState>();
     [Parameter] public double X { get; set; }
     [Parameter] public double Y { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
@@ -47,58 +61,53 @@
     {
         if (this._isDisposed)
             return System.Threading.Tasks.Task.CompletedTask;
-        if (this.IsVisible && !this._opened)
+        // Commander monta il componente solo con un'apertura visibile e lo rimuove alla chiusura
+        if (firstRender)
         {
             this._opened = true;
             this._closing = false;
             MouseEventArgs args = new MouseEventArgs { ClientX = this.X, ClientY = this.Y };
-            this.ContextMenuService.Open(args, service => @<RadzenMenu IsContextMenu="true" Close="this.HandleCloseAsync" AriaLabel="File actions">
+            this.ContextMenuService.Open(args, service => @<ContextMenuSurfaceHost OnMounted="this.HandleSurfaceMountedAsync"><RadzenMenu Responsive="false" IsContextMenu="true" Close="this.HandleCloseAsync" AriaLabel="File actions">
                 @if (this.IsDirectory && !this.IsMultiSelection)
                 {
-                    <RadzenMenuItem id="context-open" Text="Open" Icon="folder_open" Click="async _ => await this.HandleActionAsync(this.OnOpen)" />
+                    <RadzenMenuItem id="context-open" Text="Open" Icon="folder_open" Disabled="@(!this.IsEnabled("open"))" Template="@this.CommandTemplate("open", "Open")" Click="async _ => await this.HandleActionAsync(this.OnOpen)" />
                 }
                 @if (!this.IsDirectory && !this.IsMultiSelection && this.IsEditable)
                 {
-                    <RadzenMenuItem id="context-edit" Text="Edit" Icon="edit" Click="async _ => await this.HandleActionAsync(this.OnEdit)" />
+                    <RadzenMenuItem id="context-edit" Text="Edit" Icon="edit" Disabled="@(!this.IsEnabled("edit"))" Template="@this.CommandTemplate("edit", "Edit")" Click="async _ => await this.HandleActionAsync(this.OnEdit)" />
                 }
-                <RadzenMenuItem id="context-cut" Text="Cut" Icon="content_cut" Click="async _ => await this.HandleActionAsync(this.OnCut)" />
-                <RadzenMenuItem id="context-copy" Text="Copy" Icon="content_copy" Click="async _ => await this.HandleActionAsync(this.OnCopy)" />
-                <RadzenMenuItem id="context-paste" Text="Paste" Icon="content_paste" Click="async _ => await this.HandleActionAsync(this.OnPaste)" />
+                <RadzenMenuItem id="context-cut" Text="Cut" Icon="content_cut" Disabled="@(!this.IsEnabled("cut"))" Template="@this.CommandTemplate("cut", "Cut")" Click="async _ => await this.HandleActionAsync(this.OnCut)" />
+                <RadzenMenuItem id="context-copy" Text="Copy" Icon="content_copy" Disabled="@(!this.IsEnabled("copy"))" Template="@this.CommandTemplate("copy", "Copy")" Click="async _ => await this.HandleActionAsync(this.OnCopy)" />
+                <RadzenMenuItem id="context-paste" Text="Paste" Icon="content_paste" Disabled="@(!this.IsEnabled("paste"))" Template="@this.CommandTemplate("paste", "Paste")" Click="async _ => await this.HandleActionAsync(this.OnPaste)" />
                 @if (!this.IsMultiSelection)
                 {
-                    <RadzenMenuItem id="context-rename" Text="Rename" Icon="drive_file_rename_outline" Click="async _ => await this.HandleActionAsync(this.OnRename)" />
+                    <RadzenMenuItem id="context-rename" Text="Rename" Icon="drive_file_rename_outline" Disabled="@(!this.IsEnabled("rename"))" Template="@this.CommandTemplate("rename", "Rename")" Click="async _ => await this.HandleActionAsync(this.OnRename)" />
                 }
                 @if (this.HasSelection)
                 {
-                    <RadzenMenuItem id="context-advanced-rename" Text="Advanced Rename..." Icon="edit_note" Click="async _ => await this.HandleActionAsync(this.OnAdvancedRename)" />
+                    <RadzenMenuItem id="context-advanced-rename" Text="Advanced Rename..." Icon="edit_note" Disabled="@(!this.IsEnabled("advanced-rename"))" Template="@this.CommandTemplate("advanced-rename", "Advanced Rename...")" Click="async _ => await this.HandleActionAsync(this.OnAdvancedRename)" />
                 }
-                <RadzenMenuItem id="context-delete" Text="Delete" Icon="delete" Click="async _ => await this.HandleActionAsync(this.OnDelete)" />
-                <RadzenMenuItem id="context-new-file" Text="New File" Icon="note_add" Click="async _ => await this.HandleActionAsync(this.OnNewFile)" />
-                <RadzenMenuItem id="context-new-folder" Text="New Folder" Icon="create_new_folder" Click="async _ => await this.HandleActionAsync(this.OnNewFolder)" />
-                <RadzenMenuItem id="context-download" Text="@(this.IsMultiSelection ? "Download as ZIP" : "Download")" Icon="download" Click="async _ => await this.HandleActionAsync(this.OnDownload)" />
-                <RadzenMenuItem id="context-upload" Text="Upload" Icon="upload" Click="async _ => await this.HandleActionAsync(this.OnUpload)" />
+                <RadzenMenuItem id="context-delete" Text="Delete" Icon="delete" Disabled="@(!this.IsEnabled("delete"))" Template="@this.CommandTemplate("delete", "Delete")" Click="async _ => await this.HandleActionAsync(this.OnDelete)" />
+                <RadzenMenuItem id="context-new-file" Text="New File" Icon="note_add" Disabled="@(!this.IsEnabled("new-file"))" Template="@this.CommandTemplate("new-file", "New File")" Click="async _ => await this.HandleActionAsync(this.OnNewFile)" />
+                <RadzenMenuItem id="context-new-folder" Text="New Folder" Icon="create_new_folder" Disabled="@(!this.IsEnabled("new-folder"))" Template="@this.CommandTemplate("new-folder", "New Folder")" Click="async _ => await this.HandleActionAsync(this.OnNewFolder)" />
+                <RadzenMenuItem id="context-download" Text="@(this.IsMultiSelection ? "Download as ZIP" : "Download")" Icon="download" Disabled="@(!this.IsEnabled("download"))" Template="@this.CommandTemplate("download", this.IsMultiSelection ? "Download as ZIP" : "Download")" Click="async _ => await this.HandleActionAsync(this.OnDownload)" />
+                <RadzenMenuItem id="context-upload" Text="Upload" Icon="upload" Disabled="@(!this.IsEnabled("upload"))" Template="@this.CommandTemplate("upload", "Upload")" Click="async _ => await this.HandleActionAsync(this.OnUpload)" />
                 @if (this.IsArchive)
                 {
-                    <RadzenMenuItem id="context-extract" Text="Extract Here" Icon="unarchive" Click="async _ => await this.HandleActionAsync(this.OnExtract)" />
-                    <RadzenMenuItem id="context-extract-folder" Text="@("Extract to " + (this.IsMultiSelection ? "*/" : this.ArchiveBaseName + "/"))" Icon="folder_zip" Click="async _ => await this.HandleActionAsync(this.OnExtractToFolder)" />
+                    <RadzenMenuItem id="context-extract" Text="Extract Here" Icon="unarchive" Disabled="@(!this.IsEnabled("extract"))" Template="@this.CommandTemplate("extract", "Extract Here")" Click="async _ => await this.HandleActionAsync(this.OnExtract)" />
+                    <RadzenMenuItem id="context-extract-folder" Text="@("Extract to " + (this.IsMultiSelection ? "*/" : this.ArchiveBaseName + "/"))" Icon="folder_zip" Disabled="@(!this.IsEnabled("extract"))" Template="@this.CommandTemplate("extract", "Extract to " + (this.IsMultiSelection ? "*/" : this.ArchiveBaseName + "/"))" Click="async _ => await this.HandleActionAsync(this.OnExtractToFolder)" />
                 }
                 @if (this.HasSelection)
                 {
-                    <RadzenMenuItem id="context-compress" Text="Compress to..." Icon="archive" Click="async _ => await this.HandleActionAsync(this.OnCompress)" />
+                    <RadzenMenuItem id="context-compress" Text="Compress to..." Icon="archive" Disabled="@(!this.IsEnabled("compress"))" Template="@this.CommandTemplate("compress", "Compress to...")" Click="async _ => await this.HandleActionAsync(this.OnCompress)" />
                 }
-                <RadzenMenuItem id="context-refresh" Text="Refresh" Icon="refresh" Click="async _ => await this.HandleActionAsync(this.OnRefresh)" />
+                <RadzenMenuItem id="context-refresh" Text="Refresh" Icon="refresh" Disabled="@(!this.IsEnabled("refresh"))" Template="@this.CommandTemplate("refresh", "Refresh")" Click="async _ => await this.HandleActionAsync(this.OnRefresh)" />
                 @if (!this.IsMultiSelection)
                 {
-                    <RadzenMenuItem id="context-permissions" Text="Permissions" Icon="admin_panel_settings" Click="async _ => await this.HandleActionAsync(this.OnPermissions)" />
-                    <RadzenMenuItem id="context-properties" Text="Properties" Icon="info" Click="async _ => await this.HandleActionAsync(this.OnProperties)" />
+                    <RadzenMenuItem id="context-permissions" Text="Permissions" Icon="admin_panel_settings" Disabled="@(!this.IsEnabled("permissions"))" Template="@this.CommandTemplate("permissions", "Permissions")" Click="async _ => await this.HandleActionAsync(this.OnPermissions)" />
+                    <RadzenMenuItem id="context-properties" Text="Properties" Icon="info" Disabled="@(!this.IsEnabled("properties"))" Template="@this.CommandTemplate("properties", "Properties")" Click="async _ => await this.HandleActionAsync(this.OnProperties)" />
                 }
-            </RadzenMenu>);
-        }
-        else if (!this.IsVisible && this._opened)
-        {
-            this._closing = true;
-            this._opened = false;
-            this.ContextMenuService.Close();
+            </RadzenMenu></ContextMenuSurfaceHost>);
         }
 
         return System.Threading.Tasks.Task.CompletedTask;
@@ -106,7 +115,7 @@
 
     private async System.Threading.Tasks.Task HandleActionAsync(EventCallback callback)
     {
-        if (this._isDisposed)
+        if (this._isDisposed || this.CanInvoke == null || !this.CanInvoke())
             return;
         this._closing = true;
         this.ContextMenuService.Close();
@@ -122,6 +131,7 @@
         if (this._isDisposed || this._closing)
             return;
         this._closing = true;
+        this.ContextMenuService.Close();
         this._opened = false;
         await this.OnClose.InvokeAsync();
     }
@@ -135,13 +145,72 @@
         _ = this.InvokeAsync(async () => await this.OnClose.InvokeAsync());
     }
 
-    public void Dispose()
+    /// <summary>Installa l'adapter dopo il mount del portal, non dopo un timer</summary>
+    /// <param name="root">Root app realmente montata</param>
+    private async System.Threading.Tasks.Task HandleSurfaceMountedAsync(ElementReference root)
+    {
+        this._surfaceRoot = root;
+        if (this._isDisposed || this.Draft == null || this.SurfaceOwner == null)
+            return;
+        IJSObjectReference module = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/surface-adapters.js");
+        if (this._isDisposed)
+        {
+            await module.DisposeAsync();
+            return;
+        }
+        this._surfaceModule = module;
+        this._surfaceReference = DotNetObjectReference.Create(this);
+        await this._surfaceModule.InvokeVoidAsync("installContextSurface", root, this._surfaceReference, this.SurfaceOwner.Generation, this.Draft);
+    }
+
+    /// <summary>Posizione/viewport dell'apertura catturata, mai flag ricalcolati</summary>
+    /// <param name="generation">Lease catturata</param>
+    /// <param name="draft">Checkpoint visuale</param>
+    /// <returns>Revisione acknowledged oppure -1</returns>
+    [JSInvokable]
+    public long OnContextSurfaceChanged(long generation, Bivium.Models.WorkspaceContextMenuDraft draft)
+    {
+        if (this._isDisposed || this.SurfaceOwner?.Generation != generation || draft?.Id != this.Draft?.Id)
+            return -1;
+        return this.PublishVisual?.Invoke(draft) ?? -1;
+    }
+
+    /// <summary>Template condiviso con la menu bar: etichetta seguita dalla shortcut</summary>
+    /// <param name="id">Identificatore nella proiezione ricevuta</param>
+    /// <param name="label">Etichetta mostrata</param>
+    /// <returns>Etichetta semantica senza controlli annidati</returns>
+    private RenderFragment CommandTemplate(string id, string label) => @<CommandMenuLabel Label="@label" Shortcut="@this.GetCommand(id)?.Shortcut" />;
+
+    /// <summary>Consulta la proiezione senza introdurre regole nel renderer</summary>
+    /// <param name="id">Identificatore del comando</param>
+    /// <returns>Descriptor oppure null</returns>
+    private CommanderCommandState GetCommand(string id) => this.Commands.FirstOrDefault(command => command.Id == id);
+
+    /// <summary>Legge la disponibilità già calcolata dal proprietario</summary>
+    /// <param name="id">Identificatore del comando</param>
+    /// <returns>True se abilitato</returns>
+    private bool IsEnabled(string id) => this.GetCommand(id)?.Enabled == true;
+
+    public async System.Threading.Tasks.ValueTask DisposeAsync()
     {
         if (this._isDisposed)
             return;
         this._isDisposed = true;
         this.ContextMenuService.OnClose -= this.HandleServiceClose;
         if (this._opened)
+        {
+            this._opened = false;
             this.ContextMenuService.Close();
+        }
+        if (this._surfaceModule != null)
+        {
+            try
+            {
+                try { await this._surfaceModule.InvokeVoidAsync("disposeSurface", this._surfaceRoot); }
+                finally { await this._surfaceModule.DisposeAsync(); }
+            }
+            catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException) { }
+            finally { this._surfaceReference?.Dispose(); }
+        }
     }
 }

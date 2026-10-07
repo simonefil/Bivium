@@ -40,38 +40,6 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Resolves a path safely, combining base and relative parts
-        /// </summary>
-        /// <param name="basePath">Base directory path</param>
-        /// <param name="relativePath">Relative path to combine</param>
-        /// <returns>Resolved absolute path, or empty string if invalid</returns>
-        public string ResolvePath(string basePath, string relativePath)
-        {
-            string result = "";
-
-            if (!string.IsNullOrWhiteSpace(basePath) && !string.IsNullOrWhiteSpace(relativePath))
-            {
-                string combined = Path.Combine(basePath, relativePath);
-                string resolved = Path.GetFullPath(combined);
-
-                // Ensure the resolved path still starts with the base path
-                // This prevents .. traversal beyond the base
-                string resolvedBase = Path.GetFullPath(basePath);
-                if (!resolvedBase.EndsWith(Path.DirectorySeparatorChar))
-                {
-                    resolvedBase += Path.DirectorySeparatorChar;
-                }
-
-                if (resolved.StartsWith(resolvedBase, StringComparison.OrdinalIgnoreCase))
-                {
-                    result = resolved;
-                }
-            }
-
-            return result;
-        }
-
-        /// <summary>
         /// Validates that both source and destination paths are safe
         /// </summary>
         /// <param name="sourcePath">Source path</param>

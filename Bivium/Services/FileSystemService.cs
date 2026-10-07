@@ -252,6 +252,13 @@ namespace Bivium.Services
         /// <returns>Total size in bytes</returns>
         public long CalculateDirectorySize(string path, out int fileCount, out int dirCount)
         {
+            return this.CalculateDirectorySize(path, out fileCount, out dirCount, CancellationToken.None);
+        }
+
+        /// <summary>Calcolo preesistente con lifetime e progresso del task chiamante</summary>
+        public long CalculateDirectorySize(string path, out int fileCount, out int dirCount, CancellationToken cancellationToken, Action<int, int> onProgress = null)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
             long totalSize = 0;
             fileCount = 0;
             dirCount = 0;
@@ -262,7 +269,7 @@ namespace Bivium.Services
 
                 if (dirInfo.Exists)
                 {
-                    this.CalculateDirectorySizeRecursive(dirInfo, ref totalSize, ref fileCount, ref dirCount);
+                    this.CalculateDirectorySizeRecursive(dirInfo, ref totalSize, ref fileCount, ref dirCount, cancellationToken, onProgress);
                 }
             }
 
@@ -411,16 +418,19 @@ namespace Bivium.Services
         /// <param name="totalSize">Running total of bytes</param>
         /// <param name="fileCount">Running count of files</param>
         /// <param name="dirCount">Running count of subdirectories</param>
-        private void CalculateDirectorySizeRecursive(DirectoryInfo dirInfo, ref long totalSize, ref int fileCount, ref int dirCount)
+        private void CalculateDirectorySizeRecursive(DirectoryInfo dirInfo, ref long totalSize, ref int fileCount, ref int dirCount, CancellationToken cancellationToken, Action<int, int> onProgress)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             // Sum file sizes
             try
             {
                 FileInfo[] files = dirInfo.GetFiles();
                 for (int i = 0; i < files.Length; i++)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     totalSize += files[i].Length;
                     fileCount++;
+                    onProgress?.Invoke(fileCount, dirCount);
                 }
             }
             catch (UnauthorizedAccessException)
@@ -434,8 +444,9 @@ namespace Bivium.Services
                 DirectoryInfo[] subdirs = dirInfo.GetDirectories();
                 for (int i = 0; i < subdirs.Length; i++)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     dirCount++;
-                    this.CalculateDirectorySizeRecursive(subdirs[i], ref totalSize, ref fileCount, ref dirCount);
+                    this.CalculateDirectorySizeRecursive(subdirs[i], ref totalSize, ref fileCount, ref dirCount, cancellationToken, onProgress);
                 }
             }
             catch (UnauthorizedAccessException)

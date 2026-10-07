@@ -1,8 +1,7 @@
 @namespace Bivium.Components.Layout
 @inherits LayoutComponentBase
-@implements IAsyncDisposable
-@inject IJSRuntime JSRuntime
 
+@* RadzenTheme legge Theme solo in OnInitialized: i cambi successivi passano da ThemeService (Commander) e un re-render del layout non li annulla *@
 <RadzenTheme Theme="@RadzenThemeCatalog.DEFAULT_THEME" />
 <RadzenDialog />
 <RadzenContextMenu />
@@ -12,51 +11,3 @@
 <main class="bivium-radzen">
     @Body
 </main>
-
-@code {
-    /// <summary>Modulo UI posseduto dal layout, non dalle singole form</summary>
-    private IJSObjectReference _popupModule;
-    /// <summary>Guardia contro registrazioni tardive</summary>
-    private bool _isDisposed;
-
-    /// <summary>Registra il layering dei popup dopo il mount interattivo</summary>
-    /// <param name="firstRender">Primo render del layout</param>
-    protected override async System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (!firstRender || this._isDisposed)
-            return;
-        IJSObjectReference module = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js");
-        if (this._isDisposed)
-        {
-            await module.DisposeAsync();
-            return;
-        }
-        this._popupModule = module;
-        await module.InvokeVoidAsync("registerNativePopupLayers");
-    }
-
-    /// <summary>Rilascia observer e modulo del layout</summary>
-    /// <returns>Operazione asincrona di rilascio</returns>
-    public async ValueTask DisposeAsync()
-    {
-        if (this._isDisposed)
-            return;
-        this._isDisposed = true;
-        if (this._popupModule == null)
-            return;
-        try
-        {
-            try
-            {
-                await this._popupModule.InvokeVoidAsync("disposeNativePopupLayers");
-            }
-            finally
-            {
-                await this._popupModule.DisposeAsync();
-            }
-        }
-        catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException)
-        {
-        }
-    }
-}

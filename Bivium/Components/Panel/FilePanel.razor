@@ -2,7 +2,10 @@
 @implements IAsyncDisposable
 @inject Bivium.Services.IFileSystemService FileSystemService
 @inject IJSRuntime JSRuntime
+@inject Bivium.Services.BiviumWorkspaceService WorkspaceService
+@inject NotificationService NotificationService
 @using System.Globalization
+@using System.Collections.Immutable
 
 <RadzenCard Variant="@(this.IsActive ? Variant.Outlined : Variant.Flat)" class="@("radzen-file-panel " + (this.IsActive ? "active" : ""))" @onclick="this.ActivateAsync">
     <div class="radzen-panel-toolbar rz-p-1">
@@ -10,8 +13,8 @@
                       Click="this.NavigateUpAsync" aria-label="Up one directory" title="Up one directory" />
         @if (this._isEditingPath)
         {
-            <div id="@(this.PanelId + "-path-host")" class="radzen-path-editor" @onkeydown="this.HandlePathKeyDownAsync" @onfocusout="this.HandlePathBlur">
-                <RadzenAutoComplete Data="@this._autocompleteCandidates" Value="@this._editPath" ValueChanged="this.HandlePathValueChanged"
+            <div id="@(this.PanelId + "-path-host")" class="radzen-path-editor" @onfocusout="this.HandlePathBlur">
+                <RadzenAutoComplete Data="@this._autocompleteCandidates" Value="@this._editPathValue" ValueChanged="this.HandlePathValueChanged"
                                     FilterOperator="StringFilterOperator.StartsWith" MinLength="0" OpenOnFocus="false"
                                     Placeholder="Directory path" Style="width:100%" aria-label="Directory path" />
             </div>
@@ -40,7 +43,7 @@
                                 Min="15%" Max="85%" Collapsible="true" Collapsed="@this.State.TreeCollapsed"
                                 ResizeAriaLabel="Resize directory tree" CollapseAriaLabel="Collapse directory tree" ExpandAriaLabel="Expand directory tree">
                 <div class="radzen-panel-tree">
-                    <Bivium.Components.Tree.DirectoryTree RootPath="@this.State.CurrentPath" CurrentPath="@this.State.CurrentPath"
+                    <Bivium.Components.Tree.DirectoryTree CurrentPath="@this.State.CurrentPath" Entries="@this.State.Entries"
                         ExpandedDirectoryPaths="@this.State.ExpandedDirectoryPaths" OnExpansionChanged="this.HandleTreeExpansionAsync"
                         OnDirectorySelected="this.NavigateAsync" />
                 </div>
@@ -75,6 +78,16 @@
     /// </summary>
     [Parameter]
     public string PanelId { get; set; } = "";
+    /// <summary>Identità del mount autorizzato, mai dedotta dal callback tardivo</summary>
+    [Parameter] public string AttachmentId { get; set; } = "";
+    /// <summary>Generazione del publisher path</summary>
+    [Parameter] public long LeaseGeneration { get; set; }
+    /// <summary>Ultimo draft visuale acknowledged</summary>
+    private WorkspacePanelPathDraft _pathDraft;
+    /// <summary>Rifiuto ferma il publisher senza retry cieco</summary>
+    private bool _pathDraftRejected;
+    /// <summary>Ultima lease hydrated</summary>
+    private long _pathLease;
 
     /// <summary>
     /// Inoltra una richiesta di navigazione a Commander
@@ -141,6 +154,12 @@
     private string _editPath = "";
 
     /// <summary>
+    /// Valore passato all'AutoComplete: cambia solo quando il server imposta il testo di proposito.
+    /// Seguire _editPath a ogni tasto farebbe riscrivere a ogni render un valore in ritardo sull'input
+    /// </summary>
+    private string _editPathValue = "";
+
+    /// <summary>
     /// Candidati completi mostrati da RadzenAutoComplete
     /// </summary>
     private List<string> _autocompleteCandidates = new List<string>();
@@ -196,10 +215,40 @@
     private bool _isDisposed;
 
     /// <summary>
+    /// Chiave (lease, base path) dell'adapter path installato, oppure null se assente
+    /// </summary>
+    private (long Generation, string BasePath)? _installedPathAdapter;
+
+    /// <summary>
     /// Avvia l'editing richiesto semanticamente da Commander
     /// </summary>
     protected override void OnParametersSet()
     {
+        WorkspacePanelPathDraft draft = this.WorkspaceService.GetPanelPathDraft(new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this.PanelId);
+        bool hydratePath = this._pathLease != this.LeaseGeneration || this._pathDraft == null || this._pathDraft.BasePath != draft?.BasePath;
+        if (hydratePath)
+        {
+            this._pathLease = this.LeaseGeneration;
+            this._pathDraftRejected = false;
+            if (draft == null)
+            {
+                this.CancelPendingPathWork();
+                this._pathDraft = null;
+                this._isEditingPath = false;
+            }
+        }
+        if (hydratePath && draft != null && !this._pathDraftRejected)
+        {
+            this._pathDraft = draft;
+            this._isEditingPath = draft.Editing;
+            this._editPath = draft.Text;
+            this._editPathValue = draft.Text;
+            this._autocompleteCandidates = draft.Candidates.ToList();
+            this._autocompleteMatches = draft.Matches.ToList();
+            this._autocompleteIndex = draft.MatchIndex;
+            this._autocompleteParentDirectory = draft.ParentDirectory;
+            this._autocompleteCycleValue = draft.CycleValue;
+        }
         if (this.State.PathEditRequestVersion != this._pathEditRequestVersion)
         {
             this._pathEditRequestVersion = this.State.PathEditRequestVersion;
@@ -215,15 +264,35 @@
     {
         if (firstRender)
         {
-            this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260922-file-columns-v1");
+            IJSObjectReference module = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js");
+            if (this._isDisposed)
+            {
+                await module.DisposeAsync();
+                return;
+            }
+            this._jsModule = module;
             this._dotNetReference = DotNetObjectReference.Create(this);
             await this._jsModule.InvokeVoidAsync("registerRadzenFilePanel", this.PanelId, this._dotNetReference);
         }
 
-        if (this._isEditingPath && this._jsModule != null)
-            await this._jsModule.InvokeVoidAsync("installRadzenPathAdapter", this.PanelId + "-path-host", this._dotNetReference);
-        else if (this._jsModule != null)
-            await this._jsModule.InvokeVoidAsync("uninstallRadzenPathAdapter", this.PanelId + "-path-host");
+        if (this._jsModule == null || this._isDisposed)
+            return;
+
+        // L'adapter si installa o rimuove solo al cambio di editing, lease o base path, non a ogni render
+        (long Generation, string BasePath)? pathAdapter = this._isEditingPath && this._pathDraft != null ? (this.LeaseGeneration, this._pathDraft.BasePath) : null;
+        if (pathAdapter != this._installedPathAdapter)
+        {
+            if (pathAdapter != null)
+            {
+                if (await this._jsModule.InvokeAsync<bool>("installRadzenPathAdapter", this.PanelId + "-path-host", this._dotNetReference, this.LeaseGeneration, this._pathDraft))
+                    this._installedPathAdapter = pathAdapter;
+            }
+            else
+            {
+                await this._jsModule.InvokeVoidAsync("uninstallRadzenPathAdapter", this.PanelId + "-path-host");
+                this._installedPathAdapter = null;
+            }
+        }
 
         if (this._jsModule != null && !string.IsNullOrEmpty(this.State.ScrollAnchorPath) && this.State.ScrollAnchorPath != this._restoredScrollAnchorPath)
         {
@@ -287,6 +356,9 @@
     private List<PathCrumb> GetPathCrumbs()
     {
         List<PathCrumb> result = new List<PathCrumb>();
+        // Il pannello può renderizzare prima che lo stato riceva il percorso iniziale
+        if (string.IsNullOrEmpty(this.State.CurrentPath))
+            return result;
         DirectoryInfo current = new DirectoryInfo(this.State.CurrentPath);
         while (current != null)
         {
@@ -303,10 +375,16 @@
     /// </summary>
     private void StartPathEdit()
     {
+        if (!this.WorkspaceService.ValidateMutation(new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration)))
+            return;
         this.CancelPendingPathWork();
         this._isEditingPath = true;
         this._editPath = this.State.CurrentPath;
+        this._editPathValue = this._editPath;
         this.ResetAutocomplete();
+        if (this._pathDraft != null)
+            this._pathDraft = this._pathDraft with { Focused = true, SelectionStart = this._editPath.Length, SelectionEnd = this._editPath.Length };
+        this.PublishPathDraft();
     }
 
     /// <summary>
@@ -316,31 +394,55 @@
     private void HandlePathValueChanged(string value)
     {
         this._editPath = value ?? "";
+        this._editPathValue = this._editPath;
         if (this._autocompleteMatches.Count == 0)
             this.ResetAutocomplete();
+        this.PublishPathDraft();
     }
 
     /// <summary>
-    /// Gestisce Enter ed Escape lasciando Tab all'adapter catturante
+    /// Riceve Escape dall'adapter: un @onkeydown Blazor sul wrapper renderizzerebbe a ogni tasto
+    /// e riscriverebbe nell'input il valore precedente, cancellando il carattere appena digitato
     /// </summary>
-    /// <param name="args">Tasto ricevuto dal wrapper editor</param>
-    private async System.Threading.Tasks.Task HandlePathKeyDownAsync(KeyboardEventArgs args)
+    /// <param name="generation">Lease catturata dall'adapter</param>
+    /// <param name="basePath">Directory di base del mount</param>
+    [JSInvokable]
+    public void OnRadzenPathCancel(long generation, string basePath)
     {
-        if (args.Key == "Enter")
-            await this.CommitPathEditAsync();
-        else if (args.Key == "Escape")
-            this.CancelPathEdit();
+        if (this._isDisposed || !this._isEditingPath || this._pathDraftRejected || generation != this.LeaseGeneration || this._pathDraft?.BasePath != basePath)
+            return;
+        this.CancelPathEdit();
+        this.StateHasChanged();
+    }
+
+    /// <summary>
+    /// Riceve Enter dall'adapter con il valore reale dell'input, senza suggerimento evidenziato
+    /// </summary>
+    /// <param name="generation">Lease catturata dall'adapter</param>
+    /// <param name="basePath">Directory di base del mount</param>
+    /// <param name="inputValue">Valore reale dell'input al momento della pressione</param>
+    /// <returns>Completamento della conferma</returns>
+    [JSInvokable]
+    public async System.Threading.Tasks.Task OnRadzenPathCommit(long generation, string basePath, string inputValue)
+    {
+        if (this._isDisposed || !this._isEditingPath || this._pathDraftRejected || generation != this.LeaseGeneration || this._pathDraft?.BasePath != basePath || !this.WorkspaceService.ValidateMutation(new WorkspaceClientToken(this.AttachmentId, generation)))
+            return;
+        this._editPath = inputValue ?? "";
+        await this.CommitPathEditAsync();
+        this.StateHasChanged();
     }
 
     /// <summary>
     /// Riceve Tab dall'adapter e applica prefisso comune o ciclo legacy
     /// </summary>
+    /// <param name="generation">Lease catturata dall'adapter Tab</param>
+    /// <param name="basePath">Directory di base del mount</param>
     /// <param name="inputValue">Valore reale dell'input al momento della pressione</param>
     /// <returns>Percorso completato da riflettere nell'input Radzen</returns>
     [JSInvokable]
-    public string OnRadzenPathTab(string inputValue)
+    public string OnRadzenPathTab(long generation, string basePath, string inputValue)
     {
-        if (!this._isEditingPath)
+        if (!this._isEditingPath || this._pathDraftRejected || generation != this.LeaseGeneration || this._pathDraft?.BasePath != basePath || !this.WorkspaceService.ValidatePublication(new WorkspaceClientToken(this.AttachmentId, generation)))
             return this._editPath;
 
         string actualInput = inputValue ?? "";
@@ -349,6 +451,7 @@
             this._autocompleteIndex = (this._autocompleteIndex + 1) % this._autocompleteMatches.Count;
             this._editPath = this._autocompleteParentDirectory + this._autocompleteMatches[this._autocompleteIndex] + Path.DirectorySeparatorChar;
             this._autocompleteCycleValue = this._editPath;
+            this.PublishPathDraft();
             this.StateHasChanged();
             return this._editPath;
         }
@@ -360,11 +463,17 @@
         string parent = separator >= 0 ? input.Substring(0, separator + 1) : this.State.CurrentPath + Path.DirectorySeparatorChar;
         string prefix = separator >= 0 ? input.Substring(separator + 1) : input;
         if (!Directory.Exists(parent))
+        {
+            this.PublishPathDraft();
             return this._editPath;
+        }
 
         List<string> matches = this.FileSystemService.GetMatchingDirectories(parent, prefix);
         if (matches.Count == 0)
+        {
+            this.PublishPathDraft();
             return this._editPath;
+        }
         this._autocompleteParentDirectory = parent;
         this._autocompleteMatches = matches;
         this._autocompleteCandidates = matches.Select(match => parent + match + Path.DirectorySeparatorChar).ToList();
@@ -380,6 +489,7 @@
             this._autocompleteIndex = -1;
         }
         this._autocompleteCycleValue = this._editPath;
+        this.PublishPathDraft();
         this.StateHasChanged();
         return this._editPath;
     }
@@ -402,9 +512,10 @@
         try
         {
             await System.Threading.Tasks.Task.Delay(120, token);
-            if (!token.IsCancellationRequested)
+            if (!token.IsCancellationRequested && this.WorkspaceService.ValidateMutation(new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration)))
             {
                 this._isEditingPath = false;
+                this.PublishPathDraft();
                 await this.InvokeAsync(this.StateHasChanged);
             }
         }
@@ -419,13 +530,18 @@
     private async System.Threading.Tasks.Task CommitPathEditAsync()
     {
         string path = this._editPath.Trim();
-        if (!string.IsNullOrEmpty(path) && Directory.Exists(path))
+        if (string.IsNullOrEmpty(path))
+            return;
+        if (!Directory.Exists(path))
         {
-            path = Path.TrimEndingDirectorySeparator(path);
-            this.CancelPendingPathWork();
-            this._isEditingPath = false;
-            await this.OnNavigate.InvokeAsync(path);
+            this.NotificationService.Notify(NotificationSeverity.Warning, "Directory not found", path, 6000);
+            return;
         }
+        path = Path.TrimEndingDirectorySeparator(path);
+        this.CancelPendingPathWork();
+        this._isEditingPath = false;
+        this.PublishPathDraft();
+        await this.OnNavigate.InvokeAsync(path);
     }
 
     /// <summary>
@@ -437,6 +553,37 @@
         this._isEditingPath = false;
         this._editPath = this.State.CurrentPath;
         this.ResetAutocomplete();
+        this.PublishPathDraft();
+    }
+
+    /// <summary>Pubblica solo il draft visuale; non conferma né naviga il percorso</summary>
+    private void PublishPathDraft()
+    {
+        if (this._isDisposed || this._pathDraftRejected || this._pathDraft == null)
+            return;
+        WorkspacePanelPathDraft draft = this._pathDraft with { Editing = this._isEditingPath, Text = this._editPath, Candidates = this._autocompleteCandidates.ToImmutableArray(), Matches = this._autocompleteMatches.ToImmutableArray(), MatchIndex = this._autocompleteIndex, ParentDirectory = this._autocompleteParentDirectory, CycleValue = this._autocompleteCycleValue, SelectionStart = Math.Min(this._pathDraft.SelectionStart, this._editPath.Length), SelectionEnd = Math.Min(this._pathDraft.SelectionEnd, this._editPath.Length) };
+        WorkspacePanelPathDraft accepted = this.WorkspaceService.PublishPanelPathDraft(new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this.PanelId, this._pathDraft.Revision, draft);
+        if (accepted == null) this._pathDraftRejected = true;
+        else this._pathDraft = accepted;
+    }
+
+    /// <summary>Checkpoint del valore reale, selezione e focus dell'input semantico path</summary>
+    /// <param name="generation">Lease catturata dall'adapter</param>
+    /// <param name="basePath">Directory di base catturata dal mount</param>
+    /// <param name="value">Testo non confermato</param>
+    /// <param name="start">Inizio selezione UTF-16</param>
+    /// <param name="end">Fine selezione UTF-16</param>
+    /// <param name="focused">Focus sul controllo path</param>
+    /// <returns>True soltanto per un checkpoint acknowledged</returns>
+    [JSInvokable]
+    public bool OnRadzenPathDraftChanged(long generation, string basePath, string value, int start, int end, bool focused)
+    {
+        if (this._isDisposed || this._pathDraftRejected || generation != this.LeaseGeneration || this._pathDraft?.BasePath != basePath || this._pathDraft == null || value == null || start < 0 || end < start || end > value.Length)
+            return false;
+        this._editPath = value;
+        this._pathDraft = this._pathDraft with { SelectionStart = start, SelectionEnd = end, Focused = focused };
+        this.PublishPathDraft();
+        return !this._pathDraftRejected;
     }
 
     /// <summary>

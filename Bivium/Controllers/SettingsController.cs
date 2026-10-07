@@ -1,7 +1,6 @@
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Options;
 using Bivium.Models;
 using Bivium.Services;
 
@@ -15,11 +14,6 @@ namespace Bivium.Controllers
     public class SettingsController : ControllerBase
     {
         #region Class Variables
-
-        /// <summary>
-        /// Application settings monitor for hot-reload
-        /// </summary>
-        private readonly IOptionsMonitor<CommanderSettings> _settingsMonitor;
 
         /// <summary>
         /// Hosting environment for resolving appsettings.json path
@@ -43,13 +37,11 @@ namespace Bivium.Controllers
         /// <summary>
         /// Creates a new SettingsController
         /// </summary>
-        /// <param name="settingsMonitor">Settings monitor for hot-reload</param>
         /// <param name="environment">Hosting environment</param>
         /// <param name="authenticationService">Authentication service</param>
         /// <param name="workspaceService">Workspace lease authority</param>
-        public SettingsController(IOptionsMonitor<CommanderSettings> settingsMonitor, IWebHostEnvironment environment, AuthenticationService authenticationService, BiviumWorkspaceService workspaceService)
+        public SettingsController(IWebHostEnvironment environment, AuthenticationService authenticationService, BiviumWorkspaceService workspaceService)
         {
-            this._settingsMonitor = settingsMonitor;
             this._environment = environment;
             this._authenticationService = authenticationService;
             this._workspaceService = workspaceService;
@@ -58,134 +50,6 @@ namespace Bivium.Controllers
         #endregion
 
         #region Public Methods
-
-        /// <summary>
-        /// Gets the current editable extensions list
-        /// </summary>
-        /// <returns>List of extensions</returns>
-        [HttpGet("extensions")]
-        public IActionResult GetExtensions()
-        {
-            List<string> extensions = this._settingsMonitor.CurrentValue.EditableExtensions;
-            IActionResult result = this.Ok(extensions);
-            return result;
-        }
-
-        /// <summary>
-        /// Updates the editable extensions list and writes back to appsettings.json
-        /// </summary>
-        /// <param name="extensions">New list of extensions</param>
-        /// <returns>Result</returns>
-        [HttpPut("extensions")]
-        public IActionResult UpdateExtensions([FromBody] List<string> extensions)
-        {
-            if (!this.HasValidWorkspaceLease())
-                return this.Conflict("This browser no longer controls the workspace");
-            CancellationToken cancellationToken = this.GetWorkspaceRevocationToken();
-            IActionResult result;
-
-            try
-            {
-                // Read current appsettings.json
-                string settingsPath = Path.Combine(this._environment.ContentRootPath, "appsettings.json");
-                string json = System.IO.File.ReadAllText(settingsPath);
-
-                // Parse and update
-                JsonDocumentOptions docOptions = new JsonDocumentOptions();
-                docOptions.CommentHandling = JsonCommentHandling.Skip;
-                JsonDocument doc = JsonDocument.Parse(json, docOptions);
-
-                // Rebuild JSON with updated extensions
-                Dictionary<string, object> root = this.JsonElementToDict(doc.RootElement);
-                doc.Dispose();
-
-                // Ensure CommanderSettings section exists
-                if (!root.ContainsKey("CommanderSettings"))
-                {
-                    root["CommanderSettings"] = new Dictionary<string, object>();
-                }
-
-                Dictionary<string, object> settings = (Dictionary<string, object>)root["CommanderSettings"];
-                settings["EditableExtensions"] = extensions;
-
-                // Write back with indentation
-                JsonSerializerOptions writeOptions = new JsonSerializerOptions();
-                writeOptions.WriteIndented = true;
-                string updatedJson = JsonSerializer.Serialize(root, writeOptions);
-                cancellationToken.ThrowIfCancellationRequested();
-                System.IO.File.WriteAllText(settingsPath, updatedJson);
-
-                result = this.Ok(new { success = true });
-            }
-            catch (IOException ex)
-            {
-                result = this.StatusCode(500, "Failed to write settings: " + ex.Message);
-            }
-            catch (OperationCanceledException)
-            {
-                result = this.Conflict("This browser no longer controls the workspace");
-            }
-
-            return result;
-        }
-
-        /// <summary>
-        /// Updates default permissions for newly created entries and writes them to appsettings.json
-        /// </summary>
-        /// <param name="settingsRequest">New default creation permission settings</param>
-        /// <returns>Result</returns>
-        [HttpPut("default-creation-permissions")]
-        public IActionResult UpdateDefaultCreationPermissions([FromBody] DefaultCreationPermissionsSettings settingsRequest)
-        {
-            if (!this.HasValidWorkspaceLease())
-                return this.Conflict("This browser no longer controls the workspace");
-            if (settingsRequest == null || settingsRequest.FilePermissions == null || settingsRequest.DirectoryPermissions == null)
-                return this.BadRequest("Invalid default creation permissions");
-
-            CancellationToken cancellationToken = this.GetWorkspaceRevocationToken();
-            IActionResult result;
-
-            try
-            {
-                settingsRequest.Owner = settingsRequest.Owner?.Trim() ?? "";
-                settingsRequest.Group = settingsRequest.Group?.Trim() ?? "";
-
-                string settingsPath = Path.Combine(this._environment.ContentRootPath, "appsettings.json");
-                string json = System.IO.File.ReadAllText(settingsPath);
-
-                JsonDocumentOptions docOptions = new JsonDocumentOptions();
-                docOptions.CommentHandling = JsonCommentHandling.Skip;
-                JsonDocument doc = JsonDocument.Parse(json, docOptions);
-                Dictionary<string, object> root = this.JsonElementToDict(doc.RootElement);
-                doc.Dispose();
-
-                if (!root.ContainsKey("CommanderSettings"))
-                {
-                    root["CommanderSettings"] = new Dictionary<string, object>();
-                }
-
-                Dictionary<string, object> settings = (Dictionary<string, object>)root["CommanderSettings"];
-                settings["DefaultCreationPermissions"] = settingsRequest;
-
-                JsonSerializerOptions writeOptions = new JsonSerializerOptions();
-                writeOptions.WriteIndented = true;
-                string updatedJson = JsonSerializer.Serialize(root, writeOptions);
-                cancellationToken.ThrowIfCancellationRequested();
-                System.IO.File.WriteAllText(settingsPath, updatedJson);
-
-                result = this.Ok(new { success = true });
-            }
-            catch (IOException ex)
-            {
-                result = this.StatusCode(500, "Failed to write settings: " + ex.Message);
-            }
-            catch (OperationCanceledException)
-            {
-                result = this.Conflict("This browser no longer controls the workspace");
-            }
-
-            return result;
-        }
 
         /// <summary>
         /// Aggiorna il tema Radzen predefinito e lo scrive in appsettings.json
@@ -212,33 +76,24 @@ namespace Bivium.Controllers
 
             try
             {
-                string settingsPath = Path.Combine(this._environment.ContentRootPath, "appsettings.json");
-                string json = System.IO.File.ReadAllText(settingsPath);
-
-                JsonDocumentOptions docOptions = new JsonDocumentOptions();
-                docOptions.CommentHandling = JsonCommentHandling.Skip;
-                JsonDocument doc = JsonDocument.Parse(json, docOptions);
-                Dictionary<string, object> root = this.JsonElementToDict(doc.RootElement);
-                doc.Dispose();
-
-                if (!root.ContainsKey("CommanderSettings"))
-                {
-                    root["CommanderSettings"] = new Dictionary<string, object>();
-                }
-
-                Dictionary<string, object> settings = (Dictionary<string, object>)root["CommanderSettings"];
-                settings["DefaultTheme"] = normalizedTheme;
-
-                JsonSerializerOptions writeOptions = new JsonSerializerOptions();
-                writeOptions.WriteIndented = true;
-                string updatedJson = JsonSerializer.Serialize(root, writeOptions);
-
                 bool committed = this._workspaceService.TryExecuteMutation(workspaceToken, () =>
                 {
-                    using FileStream stream = new FileStream(settingsPath, FileMode.Open, FileAccess.Write, FileShare.Read);
-                    stream.SetLength(0);
-                    using StreamWriter writer = new StreamWriter(stream, new UTF8Encoding(false));
-                    writer.Write(updatedJson);
+                    lock (AuthenticationService.SettingsWriteLock)
+                    {
+                        string settingsPath = Path.Combine(this._environment.ContentRootPath, "appsettings.json");
+                        string json = System.IO.File.ReadAllText(settingsPath);
+                        using JsonDocument doc = JsonDocument.Parse(json, new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip });
+                        Dictionary<string, object> root = JsonElementToDict(doc.RootElement);
+                        if (!root.ContainsKey("CommanderSettings"))
+                            root["CommanderSettings"] = new Dictionary<string, object>();
+                        Dictionary<string, object> settings = (Dictionary<string, object>)root["CommanderSettings"];
+                        settings["DefaultTheme"] = normalizedTheme;
+                        string updatedJson = JsonSerializer.Serialize(root, new JsonSerializerOptions { WriteIndented = true });
+                        using FileStream stream = new FileStream(settingsPath, FileMode.Open, FileAccess.Write, FileShare.Read);
+                        stream.SetLength(0);
+                        using StreamWriter writer = new StreamWriter(stream, new UTF8Encoding(false));
+                        writer.Write(updatedJson);
+                    }
                 });
                 if (committed)
                 {
@@ -290,7 +145,7 @@ namespace Bivium.Controllers
                 }
                 else
                 {
-                    await this._authenticationService.UpdateAuthenticationAsync(request, cancellationToken);
+                    await this._authenticationService.UpdateAuthenticationAsync(request, cancellationToken, this.GetWorkspaceToken());
                     result = this.Ok(new { success = true });
                 }
             }
@@ -331,7 +186,7 @@ namespace Bivium.Controllers
                 }
                 else
                 {
-                    await this._authenticationService.ChangePasswordAsync(request, cancellationToken);
+                    await this._authenticationService.ChangePasswordAsync(request, cancellationToken, this.GetWorkspaceToken());
                     result = this.Ok(new { success = true });
                 }
             }
@@ -378,6 +233,9 @@ namespace Bivium.Controllers
                     }
 
                     TwoFactorSetupResult setup = await this._authenticationService.CreateTwoFactorSetupAsync(currentPassword, cancellationToken);
+                    WorkspaceClientToken token = this.GetWorkspaceToken();
+                    if (!this._workspaceService.TryExecuteMutation(token, () => this._authenticationService.SetPendingTwoFactorSetup(setup.Secret, token)))
+                        return this.Conflict("This browser no longer controls the workspace");
                     result = this.Ok(setup);
                 }
             }
@@ -426,7 +284,7 @@ namespace Bivium.Controllers
                         currentPassword = request.CurrentPassword;
                     }
 
-                    await this._authenticationService.EnableTwoFactorAsync(code, currentPassword, cancellationToken);
+                    await this._authenticationService.EnableTwoFactorAsync(code, currentPassword, this._workspaceService, this.GetWorkspaceToken(), cancellationToken);
                     result = this.Ok(new { success = true });
                 }
             }
@@ -472,7 +330,7 @@ namespace Bivium.Controllers
                         currentPassword = request.CurrentPassword;
                     }
 
-                    await this._authenticationService.DisableTwoFactorAsync(currentPassword, cancellationToken);
+                    await this._authenticationService.DisableTwoFactorAsync(currentPassword, cancellationToken, this.GetWorkspaceToken());
                     result = this.Ok(new { success = true });
                 }
             }
@@ -495,6 +353,31 @@ namespace Bivium.Controllers
         #endregion
 
         #region Private Methods
+
+        /// <summary>Commit condiviso con il runner; lease e validazioni restano responsabilità del chiamante</summary>
+        internal static void CommitEditableSettings(IWebHostEnvironment environment, string key, object value, CancellationToken cancellationToken)
+        {
+            if (value is DefaultCreationPermissionsSettings permissions)
+            {
+                permissions.Owner = permissions.Owner?.Trim() ?? "";
+                permissions.Group = permissions.Group?.Trim() ?? "";
+            }
+            lock (AuthenticationService.SettingsWriteLock)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                string settingsPath = Path.Combine(environment.ContentRootPath, "appsettings.json");
+                string json = System.IO.File.ReadAllText(settingsPath);
+                using JsonDocument doc = JsonDocument.Parse(json, new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip });
+                Dictionary<string, object> root = JsonElementToDict(doc.RootElement);
+                if (!root.ContainsKey("CommanderSettings"))
+                    root["CommanderSettings"] = new Dictionary<string, object>();
+                Dictionary<string, object> settings = (Dictionary<string, object>)root["CommanderSettings"];
+                settings[key] = value;
+                string updatedJson = JsonSerializer.Serialize(root, new JsonSerializerOptions { WriteIndented = true });
+                cancellationToken.ThrowIfCancellationRequested();
+                System.IO.File.WriteAllText(settingsPath, updatedJson);
+            }
+        }
 
         /// <summary>
         /// Validates attachment and generation received through server-side headers
@@ -522,18 +405,26 @@ namespace Bivium.Controllers
             return this._workspaceService.GetRevocationToken(new WorkspaceClientToken(attachmentId, generation));
         }
 
+        /// <summary>Restituisce l'identità della richiesta per il commit atomico MFA</summary>
+        private WorkspaceClientToken GetWorkspaceToken()
+        {
+            string attachmentId = this.Request.Headers["X-Bivium-Attachment"].ToString();
+            long.TryParse(this.Request.Headers["X-Bivium-Lease-Generation"].ToString(), out long generation);
+            return new WorkspaceClientToken(attachmentId, generation);
+        }
+
         /// <summary>
         /// Converts a JsonElement tree into a Dictionary for re-serialization
         /// </summary>
         /// <param name="element">JSON element to convert</param>
         /// <returns>Dictionary representation</returns>
-        private Dictionary<string, object> JsonElementToDict(JsonElement element)
+        private static Dictionary<string, object> JsonElementToDict(JsonElement element)
         {
             Dictionary<string, object> dict = new Dictionary<string, object>();
 
             foreach (JsonProperty prop in element.EnumerateObject())
             {
-                dict[prop.Name] = this.JsonElementToObject(prop.Value);
+                dict[prop.Name] = JsonElementToObject(prop.Value);
             }
 
             return dict;
@@ -544,20 +435,20 @@ namespace Bivium.Controllers
         /// </summary>
         /// <param name="element">JSON element</param>
         /// <returns>.NET object</returns>
-        private object JsonElementToObject(JsonElement element)
+        private static object JsonElementToObject(JsonElement element)
         {
             object result;
 
             if (element.ValueKind == JsonValueKind.Object)
             {
-                result = this.JsonElementToDict(element);
+                result = JsonElementToDict(element);
             }
             else if (element.ValueKind == JsonValueKind.Array)
             {
                 List<object> list = new List<object>();
                 foreach (JsonElement item in element.EnumerateArray())
                 {
-                    list.Add(this.JsonElementToObject(item));
+                    list.Add(JsonElementToObject(item));
                 }
                 result = list;
             }

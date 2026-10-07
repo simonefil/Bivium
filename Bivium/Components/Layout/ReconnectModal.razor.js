@@ -8,6 +8,8 @@ let retryTimer = null;
 let reconnectState = 'hide';
 
 reconnectModal.addEventListener('components-reconnect-state-changed', handleReconnectStateChanged);
+// Il dialog nativo resta aperto finché il circuito non è recuperato: Escape non lo chiude
+reconnectModal.addEventListener('cancel', event => event.preventDefault());
 retryButton.addEventListener('click', retry);
 resumeButton.addEventListener('click', resume);
 window.addEventListener('offline', suspendCircuit);

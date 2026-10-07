@@ -1,8 +1,15 @@
 /* Terminal window styles - floating draggable window */
 .terminal-window {
+    /* Il viewport resta scuro per progetto; selezione e marker seguono il tema Radzen */
+    --terminal-background: #000;
+    --terminal-foreground: #fff;
+    --terminal-muted-color: color-mix(in srgb, var(--terminal-foreground) 45%, var(--terminal-background));
+    --terminal-marker-color: var(--rz-warning-light, #ffcc66);
+    --terminal-selection-background: var(--rz-primary, #264f78);
+    --terminal-selection-color: var(--rz-on-primary, #fff);
     display: none;
     position: fixed;
-    z-index: 2000;
+    z-index: var(--bivium-floating-window-zindex);
     flex-direction: column;
     min-width: min(40ch, calc(100vw - 2ch));
     min-height: min(10lh, calc(100vh - 2lh));
@@ -15,16 +22,6 @@
     display: flex;
 }
 
-/* Terminal title bar (draggable) */
-.terminal-titlebar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    cursor: move;
-    user-select: none;
-    flex-shrink: 0;
-}
-
 .terminal-titlebar-title {
     min-width: 0;
     overflow: hidden;
@@ -35,9 +32,21 @@
 .terminal-tabbar {
     display: flex;
     align-items: center;
-    gap: 0;
+    gap: .25rem;
     overflow: hidden;
     user-select: none;
+    flex-shrink: 0;
+    border-block-end: var(--rz-border-normal);
+}
+
+.terminal-tab-actions {
+    flex: 0 0 auto;
+    min-width: max-content;
+    padding-inline-start: .25rem;
+    border-inline-start: var(--rz-border-normal);
+}
+
+.terminal-tab-actions .rz-button {
     flex-shrink: 0;
 }
 
@@ -50,37 +59,6 @@
     cursor: pointer;
     box-sizing: border-box;
     flex-shrink: 0;
-}
-
-.terminal-toast-stack {
-    position: fixed;
-    top: 2lh;
-    right: 2ch;
-    z-index: 3100;
-    display: flex;
-    width: min(48ch, calc(100vw - 4ch));
-    flex-direction: column;
-    gap: 1lh;
-}
-
-.terminal-toast {
-    display: flex;
-    text-align: left;
-    cursor: pointer;
-    flex-direction: column;
-}
-
-/* Native button children remain phrasing content; only their arrangement is local. */
-.terminal-toast .rz-button-box {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-}
-
-.terminal-toast-body {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 .terminal-tab-label {
@@ -111,7 +89,7 @@
     flex: 1;
     min-height: 0;
     overflow: hidden;
-    background-color: #000;
+    background-color: var(--terminal-background);
 }
 
 .terminal-session {
@@ -129,8 +107,8 @@
     width: 100%;
     height: 100%;
     overflow: auto;
-    background: #000;
-    color: #fff;
+    background: var(--terminal-background);
+    color: var(--terminal-foreground);
     font-family: monospace;
     font-size: 14px;
     line-height: 18px;
@@ -173,15 +151,11 @@
 }
 
 .terminal-virtual-row.loading {
-    color: #777;
-}
-
-.terminal-virtual-row.selected {
-    background-color: #264f78;
+    color: var(--terminal-muted-color);
 }
 
 .terminal-truncation-marker {
-    color: #ffcc66;
+    color: var(--terminal-marker-color);
     font-style: italic;
 }
 
@@ -191,14 +165,9 @@
     white-space: pre;
 }
 
-.terminal-cell.cursor {
-    color: #000;
-    background-color: #fff;
-}
-
 .terminal-cell.selected {
-    color: var(--rz-base-background-color) !important;
-    background-color: var(--rz-text-color) !important;
+    color: var(--terminal-selection-color);
+    background-color: var(--terminal-selection-background);
 }
 
 .terminal-hyperlink {

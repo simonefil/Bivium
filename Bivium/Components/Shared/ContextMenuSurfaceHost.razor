@@ -1,0 +1,16 @@
+@namespace Bivium.Components.Shared
+
+<div @ref="this._root" data-workspace-context-surface="true">@this.ChildContent</div>
+
+@code {
+    /// <summary>Controlli ufficiali appartenenti all'apertura context menu</summary>
+    [Parameter] public RenderFragment ChildContent { get; set; }
+    /// <summary>Notifica soltanto il mount reale del portal Radzen</summary>
+    [Parameter] public EventCallback<ElementReference> OnMounted { get; set; }
+    /// <summary>Root app del portal, non ricavata tramite indici DOM</summary>
+    private ElementReference _root;
+
+    /// <summary>Barriera di mount del contenuto, senza polling o delay arbitrari</summary>
+    /// <param name="firstRender">True al primo mount</param>
+    protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) => firstRender ? this.OnMounted.InvokeAsync(this._root) : System.Threading.Tasks.Task.CompletedTask;
+}

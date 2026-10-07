@@ -67,7 +67,7 @@ The window is split into two areas:
 
 **Configuration panel** (right) — where you select a method type from the dropdown, configure its parameters, and click **Add** to commit it to the method stack. Below the parameters, the method stack lists all committed methods with controls to reorder or remove them.
 
-**Status bar** (bottom) — shows the file count, number of changed names, and any conflicts or errors. Contains the **Rename** and **Cancel** buttons.
+**Status bar** (bottom) — shows the file count, number of changed names, and any conflicts or errors. Contains the **Rename** and **Cancel** buttons. While a rename is running, the status bar shows a progress bar and a **Stop** button, and the configuration panel is locked.
 
 The window can be dragged by its title bar and resized from the bottom-right corner.
 
@@ -426,6 +426,8 @@ The **Rename** button becomes active when all of the following are true:
 - No errors
 - At least one file has a new name different from the original
 
+While the rename runs, the progress bar shows how many files have been processed. **Stop** ends the batch: files already renamed keep their new names, and the status bar shows *Stopping...* until the batch ends.
+
 On success, the dialog closes and both panels refresh automatically. If some renames fail (e.g. permission denied), the dialog stays open and shows how many files were renamed and how many failed. Failed files are rolled back to their original names.
 
 ---
@@ -435,4 +437,4 @@ On success, the dialog closes and both panels refresh automatically. If some ren
 | Key | Action |
 |---|---|
 | **Ctrl+F2** | Open Advanced Rename (from main view) |
-| **Escape** | Close the dialog |
+| **Escape** | Close the dialog when the focus is inside it (an open dropdown closes first) |

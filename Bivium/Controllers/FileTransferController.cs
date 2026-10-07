@@ -33,11 +33,6 @@ namespace Bivium.Controllers
         /// </summary>
         private readonly BiviumWorkspaceService _workspaceService;
 
-        /// <summary>
-        /// Permission service for configured upload defaults
-        /// </summary>
-        private readonly IPermissionService _permissionService;
-
         #endregion
 
         #region Constructor
@@ -47,12 +42,10 @@ namespace Bivium.Controllers
         /// </summary>
         /// <param name="securityService">Security service instance</param>
         /// <param name="workspaceService">Global workspace</param>
-        /// <param name="permissionService">Permission service instance</param>
-        public FileTransferController(SecurityService securityService, BiviumWorkspaceService workspaceService, IPermissionService permissionService)
+        public FileTransferController(SecurityService securityService, BiviumWorkspaceService workspaceService)
         {
             this._securityService = securityService;
             this._workspaceService = workspaceService;
-            this._permissionService = permissionService;
         }
 
         #endregion
@@ -175,140 +168,25 @@ namespace Bivium.Controllers
         [RequestSizeLimit(MAX_CHUNK_SIZE + 4096)]
         public async System.Threading.Tasks.Task<IActionResult> UploadAsync()
         {
-            IActionResult result;
-            string tempPath = "";
-
             WorkspaceClientToken workspaceToken;
             if (!this.TryGetWorkspaceToken(out workspaceToken))
                 return this.StatusCode(409, "Workspace lease revoked");
-            CancellationToken revocationToken = this._workspaceService.GetRevocationToken(workspaceToken);
-            using CancellationTokenSource uploadCancellation = CancellationTokenSource.CreateLinkedTokenSource(this.HttpContext.RequestAborted, revocationToken);
-            CancellationToken cancellationToken = uploadCancellation.Token;
-
             string destinationDir = Uri.UnescapeDataString(this.Request.Headers["X-Destination-Dir"].ToString());
             string fileName = Uri.UnescapeDataString(this.Request.Headers["X-File-Name"].ToString());
             string relativePath = Uri.UnescapeDataString(this.Request.Headers["X-Relative-Path"].ToString());
-            string chunkIndexStr = this.Request.Headers["X-Chunk-Index"].ToString();
-            string totalChunksStr = this.Request.Headers["X-Total-Chunks"].ToString();
-            string uploadIdStr = this.Request.Headers["X-Upload-Id"].ToString();
-
-            if (string.IsNullOrWhiteSpace(destinationDir) || !this._securityService.IsPathSafe(destinationDir))
+            if (!Guid.TryParse(this.Request.Headers["X-Upload-Session"], out Guid sessionId) || !Guid.TryParse(this.Request.Headers["X-Upload-Id"], out Guid fileId) || !int.TryParse(this.Request.Headers["X-Chunk-Index"], out int chunk) || !int.TryParse(this.Request.Headers["X-Total-Chunks"], out int total))
+                return this.BadRequest("Invalid upload chunk metadata");
+            try
             {
-                result = this.BadRequest("Invalid destination directory");
+                bool verifyOnly = string.Equals(this.Request.Headers["X-Verify-Only"], "true", StringComparison.OrdinalIgnoreCase);
+                await this._workspaceService.ReceiveUploadChunkAsync(workspaceToken, sessionId, fileId, destinationDir, relativePath, fileName, chunk, total, this.Request.Body, this.HttpContext.RequestAborted, verifyOnly);
+                return this.Ok(new { success = true, chunk = chunk, total = total });
             }
-            else if (string.IsNullOrWhiteSpace(fileName))
-            {
-                result = this.BadRequest("Missing file name");
-            }
-            else if (fileName != Path.GetFileName(fileName) || fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
-            {
-                result = this.BadRequest("Invalid file name");
-            }
-            else if (!Directory.Exists(destinationDir))
-            {
-                result = this.BadRequest("Destination directory not found");
-            }
-            else if (!Guid.TryParse(uploadIdStr, out Guid uploadId))
-            {
-                result = this.BadRequest("Invalid upload id");
-            }
-            else
-            {
-                if (string.IsNullOrEmpty(relativePath))
-                    relativePath = fileName;
-
-                string destPath;
-                string pathError;
-                if (!this.TryResolveUploadPath(destinationDir, relativePath, out destPath, out pathError))
-                    return this.BadRequest(pathError);
-                if (Path.GetFileName(destPath) != fileName)
-                    return this.BadRequest("File name does not match relative path");
-                if (!Directory.Exists(Path.GetDirectoryName(destPath)))
-                    return this.BadRequest("Upload directory was not prepared");
-
-                int chunkIndex;
-                int totalChunks;
-                bool chunkIndexValid = int.TryParse(chunkIndexStr, out chunkIndex);
-                bool totalChunksValid = int.TryParse(totalChunksStr, out totalChunks);
-
-                if (!chunkIndexValid || !totalChunksValid || totalChunks <= 0 || chunkIndex < 0 || chunkIndex >= totalChunks)
-                {
-                    result = this.BadRequest("Invalid chunk metadata");
-                }
-                else
-                {
-                    try
-                    {
-                        tempPath = Path.Combine(destinationDir, "." + fileName + "." + uploadId.ToString("N") + ".uploading");
-                        cancellationToken.ThrowIfCancellationRequested();
-
-                        if (chunkIndex > 0)
-                        {
-                            if (!System.IO.File.Exists(tempPath))
-                            {
-                                result = this.BadRequest("Upload chunks must be sent in order");
-                                return result;
-                            }
-
-                            long expectedLength = chunkIndex * MAX_CHUNK_SIZE;
-                            FileInfo tempInfo = new FileInfo(tempPath);
-                            if (tempInfo.Length != expectedLength)
-                            {
-                                this.DeleteUploadTempFile(tempPath);
-                                result = this.BadRequest("Upload chunk sequence is inconsistent");
-                                return result;
-                            }
-                        }
-
-                        // Write chunk data to temp file
-                        FileMode fileMode = chunkIndex == 0 ? FileMode.Create : FileMode.Append;
-                        await using (FileStream fs = new FileStream(tempPath, fileMode, FileAccess.Write, FileShare.None, 81920, true))
-                        {
-                            await this.Request.Body.CopyToAsync(fs, cancellationToken);
-                            await fs.FlushAsync(cancellationToken);
-                        }
-
-                        // Last chunk: rename temp file to final name
-                        if (chunkIndex >= totalChunks - 1)
-                        {
-                            FileOperationResult permissionResult = null;
-                            bool committed = this._workspaceService.TryExecuteMutation(workspaceToken, () =>
-                            {
-                                System.IO.File.Move(tempPath, destPath, true);
-                                permissionResult = this._permissionService.ApplyDefaultCreationPermissions(destPath, false, cancellationToken);
-                            });
-                            if (!committed)
-                            {
-                                this.DeleteUploadTempFile(tempPath);
-                                return this.StatusCode(409, "Workspace lease revoked");
-                            }
-                            if (permissionResult != null && !permissionResult.Success)
-                            {
-                                return this.StatusCode(500, permissionResult.ErrorMessage);
-                            }
-                        }
-
-                        result = this.Ok(new { success = true, chunk = chunkIndex, total = totalChunks });
-                    }
-                    catch (UnauthorizedAccessException ex)
-                    {
-                        this.DeleteUploadTempFile(tempPath);
-                        result = this.StatusCode(403, "Access denied: " + ex.Message);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        this.DeleteUploadTempFile(tempPath);
-                        result = this.StatusCode(409, "Workspace lease revoked");
-                    }
-                    catch (IOException ex)
-                    {
-                        this.DeleteUploadTempFile(tempPath);
-                        result = this.StatusCode(500, "I/O error: " + ex.Message);
-                    }
-                }
-            }
-
-            return result;
+            catch (OperationCanceledException) { return this.StatusCode(409, "Workspace lease revoked"); }
+            catch (InvalidOperationException ex) { return this.Conflict(ex.Message); }
+            catch (ArgumentException ex) { return this.BadRequest(ex.Message); }
+            catch (UnauthorizedAccessException ex) { return this.StatusCode(403, "Access denied: " + ex.Message); }
+            catch (IOException ex) { return this.StatusCode(500, "I/O error: " + ex.Message); }
         }
 
         /// <summary>
@@ -326,60 +204,91 @@ namespace Bivium.Controllers
             string relativePath = Uri.UnescapeDataString(this.Request.Headers["X-Relative-Path"].ToString());
             bool finalize = string.Equals(this.Request.Headers["X-Finalize"].ToString(), "true", StringComparison.OrdinalIgnoreCase);
 
-            if (string.IsNullOrWhiteSpace(destinationDir) || !this._securityService.IsPathSafe(destinationDir) || !Directory.Exists(destinationDir))
-                return this.BadRequest("Invalid destination directory");
-
-            string directoryPath;
-            string pathError;
-            if (!this.TryResolveUploadPath(destinationDir, relativePath, out directoryPath, out pathError))
-                return this.BadRequest(pathError);
-
-            CancellationToken cancellationToken = this._workspaceService.GetRevocationToken(workspaceToken);
+            if (!Guid.TryParse(this.Request.Headers["X-Upload-Session"], out Guid sessionId))
+                return this.BadRequest("Invalid upload session");
             try
             {
-                bool created = false;
-                FileOperationResult permissionResult = null;
-                bool committed = this._workspaceService.TryExecuteMutation(workspaceToken, () =>
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (finalize)
-                    {
-                        if (!Directory.Exists(directoryPath))
-                            throw new DirectoryNotFoundException("Upload directory not found: " + relativePath);
-                        permissionResult = this._permissionService.ApplyDefaultCreationPermissions(directoryPath, true, cancellationToken);
-                    }
-                    else
-                    {
-                        created = !Directory.Exists(directoryPath);
-                        Directory.CreateDirectory(directoryPath);
-                    }
-                });
-
-                if (!committed)
-                    return this.StatusCode(409, "Workspace lease revoked");
-                if (permissionResult != null && !permissionResult.Success)
-                    return this.StatusCode(500, permissionResult.ErrorMessage);
-
-                IActionResult result = this.Ok(new { success = true, created = created });
-                return result;
+                this._workspaceService.ReceiveUploadDirectory(workspaceToken, sessionId, destinationDir, relativePath, finalize);
+                return this.Ok(new { success = true });
             }
             catch (UnauthorizedAccessException ex)
             {
-                return this.StatusCode(403, "Access denied: " + ex.Message);
+                return this.UploadFailure(workspaceToken, sessionId, 403, "Access denied: " + ex.Message);
             }
             catch (OperationCanceledException)
             {
                 return this.StatusCode(409, "Workspace lease revoked");
             }
+            catch (InvalidOperationException ex) { return this.Conflict(ex.Message); }
+            catch (ArgumentException ex) { return this.UploadFailure(workspaceToken, sessionId, 400, ex.Message); }
             catch (IOException ex)
             {
-                return this.StatusCode(500, "I/O error: " + ex.Message);
+                return this.UploadFailure(workspaceToken, sessionId, 500, "I/O error: " + ex.Message);
             }
+        }
+
+        /// <summary>Manifest e ricevute non sono mai restituiti a un attachment senza lease</summary>
+        [HttpGet("upload-state")]
+        public IActionResult GetUploadState()
+        {
+            if (!this.TryGetWorkspaceToken(out WorkspaceClientToken token))
+                return this.StatusCode(409, "Workspace lease revoked");
+            WorkspaceUploadSnapshot upload = this._workspaceService.GetUpload(token);
+            return upload == null ? this.StatusCode(409, "Workspace lease revoked") : this.Ok(upload);
+        }
+
+        /// <summary>Checkpoint del manifest via HTTP, senza dipendere dalle dimensioni dei messaggi SignalR</summary>
+        [HttpPost("upload-manifest")]
+        [RequestSizeLimit(WorkspaceUploadManifestRequest.MAX_REQUEST_BYTES)]
+        public IActionResult SetUploadManifest([FromQuery] Guid id, [FromQuery] long revision, [FromBody] WorkspaceUploadManifestRequest manifest)
+        {
+            if (!this.TryGetWorkspaceToken(out WorkspaceClientToken token))
+                return this.StatusCode(409, "Workspace lease revoked");
+            if (manifest == null)
+                return this.BadRequest("Invalid upload manifest");
+            try
+            {
+                if (!this._workspaceService.TrySetUploadManifest(token, id, revision, manifest.Files, manifest.Directories))
+                    return this.Conflict("Upload manifest changed. Select the source again.");
+                WorkspaceUploadSnapshot upload = this._workspaceService.GetUpload(token);
+                return upload == null ? this.StatusCode(409, "Workspace lease revoked") : this.Ok(upload);
+            }
+            catch (ArgumentException ex) { return this.UploadFailure(token, id, 400, ex.Message); }
+        }
+
+        /// <summary>Avvio esplicito dopo la riselezione verificata della sorgente</summary>
+        [HttpPost("upload-start")]
+        public IActionResult StartUpload([FromQuery] Guid id, [FromQuery] long revision)
+        {
+            if (!this.TryGetWorkspaceToken(out WorkspaceClientToken token))
+                return this.StatusCode(409, "Workspace lease revoked");
+            try { return this.Ok(this._workspaceService.StartUpload(token, id, revision)); }
+            catch (OperationCanceledException) { return this.StatusCode(409, "Workspace lease revoked"); }
+            catch (InvalidOperationException ex) { return this.Conflict(ex.Message); }
+        }
+
+        /// <summary>La conclusione deriva dalle ricevute server e dalla finalizzazione directory</summary>
+        [HttpPost("upload-complete")]
+        public IActionResult CompleteUpload([FromQuery] Guid id)
+        {
+            if (!this.TryGetWorkspaceToken(out WorkspaceClientToken token))
+                return this.StatusCode(409, "Workspace lease revoked");
+            try { return this.Ok(this._workspaceService.CompleteUpload(token, id)); }
+            catch (OperationCanceledException) { return this.StatusCode(409, "Workspace lease revoked"); }
+            catch (InvalidOperationException ex) { return this.Conflict(ex.Message); }
+            catch (IOException ex) { return this.StatusCode(500, ex.Message); }
         }
 
         #endregion
 
         #region Private Methods
+
+        /// <summary>Conserva l'errore HTTP nel workspace senza consentire pubblicazioni da lease obsolete</summary>
+        private IActionResult UploadFailure(WorkspaceClientToken token, Guid sessionId, int status, string message)
+        {
+            this._workspaceService.RecordUploadError(token, sessionId, message);
+            return this.StatusCode(status, message);
+        }
 
         /// <summary>
         /// Validates request lease headers and returns the current workspace token
@@ -405,7 +314,7 @@ namespace Bivium.Controllers
         /// <param name="resolvedPath">Validated absolute path</param>
         /// <param name="errorMessage">Validation error</param>
         /// <returns>True when the path is valid and inside the destination</returns>
-        private bool TryResolveUploadPath(string destinationDir, string relativePath, out string resolvedPath, out string errorMessage)
+        internal static bool TryResolveUploadPath(string destinationDir, string relativePath, out string resolvedPath, out string errorMessage)
         {
             resolvedPath = "";
             errorMessage = "Invalid relative upload path";
@@ -434,30 +343,6 @@ namespace Bivium.Controllers
             resolvedPath = fullPath;
             errorMessage = "";
             return true;
-        }
-
-        /// <summary>
-        /// Removes the temporary file of a cancelled upload without hiding the primary result
-        /// </summary>
-        /// <param name="tempPath">Temporary path already validated and built by the controller</param>
-        private void DeleteUploadTempFile(string tempPath)
-        {
-            if (string.IsNullOrEmpty(tempPath))
-                return;
-
-            try
-            {
-                if (System.IO.File.Exists(tempPath))
-                    System.IO.File.Delete(tempPath);
-            }
-            catch (IOException)
-            {
-                // Best-effort cleanup must not hide the primary HTTP result
-            }
-            catch (UnauthorizedAccessException)
-            {
-                // Best-effort cleanup must not hide the primary HTTP result
-            }
         }
 
         #endregion

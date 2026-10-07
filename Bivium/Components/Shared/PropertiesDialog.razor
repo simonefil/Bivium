@@ -1,293 +1,98 @@
 @namespace Bivium.Components.Shared
-@implements IDisposable
-@inject DialogService DialogService
-@inject IPermissionService PermissionService
-@inject IFileSystemService FileSystemService
+@inject BiviumWorkspaceService WorkspaceService
 @inject NotificationService NotificationService
-@inject ILogger<PropertiesDialog> Logger
+@using System.Text.Json
 
-@code {
-    /// <summary>
-    /// Callback invocato alla chiusura
-    /// </summary>
-    [Parameter]
-    public EventCallback OnClose { get; set; }
-
-    /// <summary>
-    /// Versione dell'apertura e dei calcoli associati
-    /// </summary>
-    private int _generation;
-
-    /// <summary>
-    /// Entry mostrata nel dialog
-    /// </summary>
-    private FileSystemEntry _entry = new FileSystemEntry();
-
-    /// <summary>
-    /// Permessi letti per l'entry corrente
-    /// </summary>
-    private PermissionModel _permissions;
-
-    /// <summary>
-    /// Dimensione calcolata oppure -1 quando non disponibile
-    /// </summary>
-    private long _calculatedSize = -1;
-
-    /// <summary>
-    /// Numero di file rilevati dal calcolo
-    /// </summary>
-    private int _calculatedFileCount;
-
-    /// <summary>
-    /// Numero di directory rilevate dal calcolo
-    /// </summary>
-    private int _calculatedDirCount;
-
-    /// <summary>
-    /// Indica che il calcolo è in corso
-    /// </summary>
-    private bool _isCalculating;
-
-    /// <summary>
-    /// Errore dell'ultimo calcolo mostrato nel dialog
-    /// </summary>
-    private string _calculationError = "";
-
-    /// <summary>
-    /// Indica che il componente è stato rilasciato
-    /// </summary>
-    private bool _isDisposed;
-
-    /// <summary>
-    /// Tracker dell'apertura posseduta
-    /// </summary>
-    private RadzenDialogLifetime _lifetime;
-
-    /// <summary>
-    /// Inizializza il tracker del dialog
-    /// </summary>
-    protected override void OnInitialized()
-    {
-        this._lifetime = new RadzenDialogLifetime(this.DialogService);
-    }
-
-    /// <summary>
-    /// Apre le proprietà dell'entry indicata
-    /// </summary>
-    /// <param name="entry">Entry da visualizzare</param>
-    public void Show(FileSystemEntry entry)
-    {
-        if (this._lifetime.IsDisposed || this._lifetime.IsOpen())
-            return;
-
-        this._entry = entry;
-        this._calculatedSize = -1;
-        this._calculatedFileCount = 0;
-        this._calculatedDirCount = 0;
-        this._isCalculating = false;
-        this._calculationError = "";
-        try
-        {
-            this._permissions = this.PermissionService.GetPermissions(entry.FullPath);
-        }
-        catch (Exception ex)
-        {
-            this._permissions = null;
-            this.Logger.LogWarning(ex, "Impossibile leggere i permessi di {Path}", entry.FullPath);
-        }
-
-        int generation = ++this._generation;
-        _ = this.ObserveTaskAsync(this.ShowAsync(generation), "apertura proprietà");
-    }
-
-    /// <summary>
-    /// Nasconde soltanto l'apertura posseduta quando è in cima allo stack
-    /// </summary>
-    public void Hide()
-    {
-        this._generation++;
-        this._isCalculating = false;
-        this._lifetime.RequestClose();
-    }
-
-    /// <summary>
-    /// Apre e attende la chiusura del dialog Radzen
-    /// </summary>
-    /// <param name="generation">Versione dell'apertura</param>
-    private async System.Threading.Tasks.Task ShowAsync(int generation)
-    {
-        DialogOptions options = new DialogOptions
-        {
-            Width = "min(94vw, 58rem)",
-            ShowClose = true,
-            CloseDialogOnEsc = true,
-            CloseDialogOnOverlayClick = true,
-            AutoFocusFirstElement = true,
-            CssClass = "bivium-radzen-service-dialog",
-            WrapperCssClass = "bivium-modal-layer"
-        };
-        this._lifetime.Begin(options);
-        try
-        {
-            await this.DialogService.OpenAsync("Properties - " + this._entry.Name, service => @<RadzenStack Gap="0.5rem">
-                <RadzenRow><RadzenColumn Size="3"><RadzenText TextStyle="TextStyle.Subtitle2" TagName="TagName.Div" class="rz-m-0"><strong>Name</strong></RadzenText></RadzenColumn><RadzenColumn Size="9"><RadzenText TextStyle="TextStyle.Body1" TagName="TagName.Div" class="rz-m-0">@this._entry.Name</RadzenText></RadzenColumn></RadzenRow>
-                <RadzenRow><RadzenColumn Size="3"><RadzenText TextStyle="TextStyle.Subtitle2" TagName="TagName.Div" class="rz-m-0"><strong>Path</strong></RadzenText></RadzenColumn><RadzenColumn Size="9" Style="overflow-wrap:anywhere;"><RadzenText TextStyle="TextStyle.Body1" TagName="TagName.Div" class="rz-m-0">@this._entry.FullPath</RadzenText></RadzenColumn></RadzenRow>
-                <RadzenRow><RadzenColumn Size="3"><RadzenText TextStyle="TextStyle.Subtitle2" TagName="TagName.Div" class="rz-m-0"><strong>Type</strong></RadzenText></RadzenColumn><RadzenColumn Size="9"><RadzenText TextStyle="TextStyle.Body1" TagName="TagName.Div" class="rz-m-0">@(this._entry.IsDirectory ? "Directory" : "File")</RadzenText></RadzenColumn></RadzenRow>
-                <RadzenRow><RadzenColumn Size="3"><RadzenText TextStyle="TextStyle.Subtitle2" TagName="TagName.Div" class="rz-m-0"><strong>Size</strong></RadzenText></RadzenColumn><RadzenColumn Size="9"><RadzenText TextStyle="TextStyle.Body1" TagName="TagName.Div" class="rz-m-0">@this.RenderSize()</RadzenText></RadzenColumn></RadzenRow>
-                <RadzenRow><RadzenColumn Size="3"><RadzenText TextStyle="TextStyle.Subtitle2" TagName="TagName.Div" class="rz-m-0"><strong>Modified</strong></RadzenText></RadzenColumn><RadzenColumn Size="9"><RadzenText TextStyle="TextStyle.Body1" TagName="TagName.Div" class="rz-m-0">@this._entry.FormatDate()</RadzenText></RadzenColumn></RadzenRow>
-                <RadzenRow><RadzenColumn Size="3"><RadzenText TextStyle="TextStyle.Subtitle2" TagName="TagName.Div" class="rz-m-0"><strong>Attributes</strong></RadzenText></RadzenColumn><RadzenColumn Size="9"><RadzenText TextStyle="TextStyle.Body1" TagName="TagName.Div" class="rz-m-0">@this._entry.Attributes</RadzenText></RadzenColumn></RadzenRow>
-                @if (this._permissions != null)
+@if (this.Workflow?.Kind == WorkspaceWorkflowKind.Properties && this.Workflow.IsActive && this._draft != null)
+{
+    <PersistentModalShell Surface="properties" Label="@("Properties - " + this._draft.Entry.Name)" CloseOnOverlayClick="true" OnCancel="this.CloseAsync">
+        <div data-workspace-workflow-id="@this.Workflow.Id">
+            <RadzenStack Gap="0.5rem">
+                <RadzenRow><RadzenColumn Size="3"><strong>Name</strong></RadzenColumn><RadzenColumn Size="9">@this._draft.Entry.Name</RadzenColumn></RadzenRow>
+                <RadzenRow><RadzenColumn Size="3"><strong>Path</strong></RadzenColumn><RadzenColumn Size="9" Style="overflow-wrap:anywhere;">@this._draft.Entry.FullPath</RadzenColumn></RadzenRow>
+                <RadzenRow><RadzenColumn Size="3"><strong>Type</strong></RadzenColumn><RadzenColumn Size="9">@(this._draft.Entry.IsDirectory ? "Directory" : "File")</RadzenColumn></RadzenRow>
+                <RadzenRow><RadzenColumn Size="3"><strong>Size</strong></RadzenColumn><RadzenColumn Size="9">@this.RenderSize()</RadzenColumn></RadzenRow>
+                <RadzenRow><RadzenColumn Size="3"><strong>Modified</strong></RadzenColumn><RadzenColumn Size="9">@this._draft.Entry.FormatDate()</RadzenColumn></RadzenRow>
+                <RadzenRow><RadzenColumn Size="3"><strong>Attributes</strong></RadzenColumn><RadzenColumn Size="9">@this._draft.Entry.Attributes</RadzenColumn></RadzenRow>
+                @if (this._draft.Permissions != null)
                 {
-                    <RadzenRow><RadzenColumn Size="3"><RadzenText TextStyle="TextStyle.Subtitle2" TagName="TagName.Div" class="rz-m-0"><strong>Owner</strong></RadzenText></RadzenColumn><RadzenColumn Size="9"><RadzenText TextStyle="TextStyle.Body1" TagName="TagName.Div" class="rz-m-0">@this._permissions.Owner</RadzenText></RadzenColumn></RadzenRow>
-                    @if (this._permissions.IsUnix)
+                    <RadzenRow><RadzenColumn Size="3"><strong>Owner</strong></RadzenColumn><RadzenColumn Size="9">@this._draft.Permissions.Owner</RadzenColumn></RadzenRow>
+                    @if (this._draft.Permissions.IsUnix)
                     {
-                        <RadzenRow><RadzenColumn Size="3"><RadzenText TextStyle="TextStyle.Subtitle2" TagName="TagName.Div" class="rz-m-0"><strong>Group</strong></RadzenText></RadzenColumn><RadzenColumn Size="9"><RadzenText TextStyle="TextStyle.Body1" TagName="TagName.Div" class="rz-m-0">@this._permissions.Group</RadzenText></RadzenColumn></RadzenRow>
+                        <RadzenRow><RadzenColumn Size="3"><strong>Group</strong></RadzenColumn><RadzenColumn Size="9">@this._draft.Permissions.Group</RadzenColumn></RadzenRow>
                     }
-                    <RadzenRow><RadzenColumn Size="3"><RadzenText TextStyle="TextStyle.Subtitle2" TagName="TagName.Div" class="rz-m-0"><strong>Permissions</strong></RadzenText></RadzenColumn><RadzenColumn Size="9"><RadzenText TextStyle="TextStyle.Body1" TagName="TagName.Div" class="rz-m-0">@this._permissions.ToDisplayString()</RadzenText></RadzenColumn></RadzenRow>
+                    <RadzenRow><RadzenColumn Size="3"><strong>Permissions</strong></RadzenColumn><RadzenColumn Size="9">@this._draft.Permissions.ToDisplayString()</RadzenColumn></RadzenRow>
                 }
-                @if (this._entry.IsDirectory && this._calculatedSize < 0 && !this._isCalculating)
+                @if (this._draft.Entry.IsDirectory && this._draft.Size < 0 && this.Workflow.Phase == WorkspaceWorkflowPhase.AwaitingInput)
                 {
-                    <RadzenButton Text="Calculate size" Icon="calculate" Click="this.HandleCalculateSizeAsync" />
+                    <RadzenButton Text="Calculate size" Icon="calculate" Click="this.CalculateAsync" />
                 }
-                @if (this._isCalculating)
+                @if (this.Workflow.Phase == WorkspaceWorkflowPhase.Running)
                 {
                     <RadzenProgressBar Mode="ProgressBarMode.Indeterminate" ShowValue="false" />
+                    @if (this.Operation != null)
+                    {
+                        <RadzenText Text="@(this.Operation.ProgressCurrent.ToString("N0") + " files visited")" />
+                    }
+                    <RadzenButton Text="Cancel calculation" Icon="stop" ButtonStyle="ButtonStyle.Light" Click="this.CancelCalculation" />
                 }
-                @if (!string.IsNullOrEmpty(this._calculationError))
+                @if (!string.IsNullOrEmpty(this.Workflow.ErrorMessage))
                 {
-                    <RadzenAlert AlertStyle="AlertStyle.Danger">@this._calculationError</RadzenAlert>
+                    <RadzenAlert AlertStyle="AlertStyle.Danger">@this.Workflow.ErrorMessage</RadzenAlert>
                 }
-                <div class="bivium-radzen-dialog-actions"><RadzenButton Text="OK" ButtonStyle="ButtonStyle.Primary" Click="@(() => service.Close())" /></div>
-            </RadzenStack>, options);
-        }
-        finally
-        {
-            this._lifetime.Complete(options);
-        }
-        if (generation != this._generation)
-            return;
-        this._generation++;
-        this._isCalculating = false;
-        await this.OnClose.InvokeAsync();
+                <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" AlignItems="AlignItems.Center" Gap="0.75rem" class="rz-mt-4"><RadzenButton Text="OK" ButtonStyle="ButtonStyle.Primary" Click="this.CloseAsync" /></RadzenStack>
+            </RadzenStack>
+        </div>
+    </PersistentModalShell>
+}
+
+@code {
+    [Parameter] public WorkspaceWorkflowSnapshot Workflow { get; set; }
+    [Parameter] public WorkspaceOperationSnapshot Operation { get; set; }
+    [Parameter] public string AttachmentId { get; set; } = "";
+    [Parameter] public long LeaseGeneration { get; set; }
+    private readonly WorkspaceFormBinding _binding = new WorkspaceFormBinding();
+    private WorkspacePropertiesDraft _draft;
+
+    /// <summary>Il mount legge il risultato, non riavvia il calcolo</summary>
+    protected override void OnParametersSet()
+    {
+        if (this._binding.Adopt(this.Workflow, this.LeaseGeneration))
+            this._draft = JsonSerializer.Deserialize<WorkspacePropertiesDraft>(this.Workflow.Draft);
     }
 
-    /// <summary>
-    /// Costruisce il frammento con la dimensione corrente
-    /// </summary>
-    /// <returns>Contenuto della riga dimensione</returns>
-    private RenderFragment RenderSize()
+    private System.Threading.Tasks.Task CalculateAsync()
     {
-        return builder =>
-        {
-            string text;
-            if (!this._entry.IsDirectory)
-                text = this._entry.FormatSize() + " (" + this._entry.SizeBytes.ToString("N0") + " bytes)";
-            else if (this._isCalculating)
-                text = "Calculating...";
-            else if (this._calculatedSize >= 0)
-                text = this.FormatCalculatedSize() + " (" + this._calculatedFileCount.ToString("N0") + " files, " + this._calculatedDirCount.ToString("N0") + " folders)";
-            else
-                text = "<DIR>";
-            builder.AddContent(0, text);
-        };
+        this._binding.Respond(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), false);
+        return System.Threading.Tasks.Task.CompletedTask;
     }
 
-    /// <summary>
-    /// Calcola la dimensione senza bloccare il circuito e gestisce ogni errore del lavoro legacy
-    /// </summary>
-    private async System.Threading.Tasks.Task HandleCalculateSizeAsync()
+    private System.Threading.Tasks.Task CloseAsync()
     {
-        string entryPath = this._entry.FullPath;
-        int generation = this._generation;
-        this._isCalculating = true;
-        this._calculationError = "";
-        this.DialogService.Refresh();
-        try
-        {
-            (long Size, int FileCount, int DirectoryCount) result = await System.Threading.Tasks.Task.Run(() =>
-            {
-                int fileCount;
-                int directoryCount;
-                long size = this.FileSystemService.CalculateDirectorySize(entryPath, out fileCount, out directoryCount);
-                return (size, fileCount, directoryCount);
-            });
-
-            if (!this.IsCurrent(generation, entryPath))
-                return;
-
-            this._calculatedSize = result.Size;
-            this._calculatedFileCount = result.FileCount;
-            this._calculatedDirCount = result.DirectoryCount;
-            this._isCalculating = false;
-            this.DialogService.Refresh();
-        }
-        catch (Exception ex)
-        {
-            this.Logger.LogError(ex, "Errore durante il calcolo dimensione di {Path}", entryPath);
-            if (!this.IsCurrent(generation, entryPath))
-                return;
-
-            this._isCalculating = false;
-            this._calculationError = "Unable to calculate directory size: " + ex.Message;
-            this.NotificationService.Notify(NotificationSeverity.Error, "Size calculation failed", this._calculationError, 8000);
-            this.DialogService.Refresh();
-        }
+        this._binding.Respond(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), true);
+        return System.Threading.Tasks.Task.CompletedTask;
     }
 
-    /// <summary>
-    /// Verifica che un completamento appartenga ancora al dialog corrente
-    /// </summary>
-    /// <param name="generation">Versione catturata all'avvio</param>
-    /// <param name="entryPath">Path catturata all'avvio</param>
-    /// <returns><see langword="true"/> se il risultato può ancora aggiornare il dialog</returns>
-    private bool IsCurrent(int generation, string entryPath)
+    private void CancelCalculation()
     {
-        return !this._isDisposed && generation == this._generation && this._lifetime.IsOpen() && string.Equals(this._entry.FullPath, entryPath, StringComparison.Ordinal);
+        if (this.Operation != null && !this.WorkspaceService.TryCancelWorkspaceOperation(new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this.Operation.Id, this.Operation.Revision))
+            this.NotificationService.Notify(NotificationSeverity.Warning, "Cancellation not accepted", "The authoritative operation is unchanged.", 8000);
     }
 
-    /// <summary>
-    /// Formatta la dimensione calcolata
-    /// </summary>
-    /// <returns>Dimensione leggibile</returns>
-    private string FormatCalculatedSize()
-    {
-        if (this._calculatedSize < 1024)
-            return this._calculatedSize + " B";
-        if (this._calculatedSize < 1024 * 1024)
-            return (this._calculatedSize / 1024.0).ToString("F1") + " KB";
-        if (this._calculatedSize < 1024L * 1024 * 1024)
-            return (this._calculatedSize / (1024.0 * 1024.0)).ToString("F1") + " MB";
-        return (this._calculatedSize / (1024.0 * 1024.0 * 1024.0)).ToString("F2") + " GB";
-    }
+    internal System.Threading.Tasks.Task<bool> FlushForHandoffAsync(CancellationToken cancellationToken) => this._binding.FlushAsync(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this._binding.Current.Draft, cancellationToken);
 
-    /// <summary>
-    /// Osserva e registra le eccezioni del task avviato da <see cref="Show"/>
-    /// </summary>
-    /// <param name="task">Task da osservare</param>
-    /// <param name="operation">Descrizione usata nel log</param>
-    private async System.Threading.Tasks.Task ObserveTaskAsync(System.Threading.Tasks.Task task, string operation)
+    /// <summary>Formattazione UI dei dati già calcolati dal servizio</summary>
+    private string RenderSize()
     {
-        try
-        {
-            await task;
-        }
-        catch (Exception ex)
-        {
-            this.Logger.LogError(ex, "Errore durante {Operation} Radzen", operation);
-        }
-    }
-
-    /// <summary>
-    /// Invalida i completamenti e rilascia il tracker
-    /// </summary>
-    public void Dispose()
-    {
-        if (this._isDisposed)
-            return;
-
-        this._isDisposed = true;
-        this._generation++;
-        this._isCalculating = false;
-        this._lifetime?.Dispose();
+        FileSystemEntry entry = this._draft.Entry;
+        if (!entry.IsDirectory)
+            return entry.FormatSize() + " (" + entry.SizeBytes.ToString("N0") + " bytes)";
+        if (this.Workflow.Phase == WorkspaceWorkflowPhase.Running)
+            return "Calculating...";
+        if (this._draft.Size < 0)
+            return "<DIR>";
+        long size = this._draft.Size;
+        string formatted = ByteSizeFormatter.Format(size);
+        return formatted + " (" + this._draft.FileCount.ToString("N0") + " files, " + this._draft.DirectoryCount.ToString("N0") + " folders)";
     }
 }

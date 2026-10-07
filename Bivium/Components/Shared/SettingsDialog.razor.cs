@@ -1,6 +1,4 @@
-using System.Text.Json;
 using Microsoft.AspNetCore.Components;
-using Microsoft.JSInterop;
 
 namespace Bivium.Components.Shared
 {
@@ -11,23 +9,35 @@ namespace Bivium.Components.Shared
     {
         #region Parameters
 
-        /// <summary>
-        /// Callback when dialog is closed
-        /// </summary>
-        [Parameter]
-        public EventCallback OnClose { get; set; }
-
         [Parameter]
         public string AttachmentId { get; set; } = "";
 
         [Parameter]
         public long LeaseGeneration { get; set; }
 
-        /// <summary>
-        /// Rivalida l'autorità del browser prima e dopo il salvataggio asincrono
-        /// </summary>
-        [Parameter]
-        public Func<bool> CanInvoke { get; set; }
+        [Parameter] public Bivium.Models.WorkspaceWorkflowSnapshot Workflow { get; set; }
+        [Inject] private Bivium.Services.BiviumWorkspaceService WorkspaceService { get; set; }
+        private readonly WorkspaceFormBinding _binding = new WorkspaceFormBinding();
+
+        /// <summary>Hydration senza caricare o salvare impostazioni</summary>
+        protected override void OnParametersSet()
+        {
+            if (this.Workflow == null)
+            {
+                this._isVisible = false;
+                return;
+            }
+            if (!this._binding.Adopt(this.Workflow, this.LeaseGeneration))
+                return;
+            this._extensionsText = this.Workflow.Draft;
+            this._statusText = this.Workflow.ErrorMessage;
+            this._isVisible = this.Workflow.Phase is Bivium.Models.WorkspaceWorkflowPhase.AwaitingInput or Bivium.Models.WorkspaceWorkflowPhase.Failed;
+        }
+
+        private void PublishDraft() => this._binding.Publish(this.WorkspaceService, new Bivium.Models.WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this._extensionsText);
+
+        /// <summary>La barriera attende soltanto il checkpoint del testo</summary>
+        internal System.Threading.Tasks.Task<bool> FlushForHandoffAsync(CancellationToken cancellationToken) => this._binding.FlushAsync(this.WorkspaceService, new Bivium.Models.WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this._extensionsText, cancellationToken);
 
         #endregion
 
@@ -49,34 +59,13 @@ namespace Bivium.Components.Shared
         private string _statusText = "";
 
         /// <summary>
-        /// JS module reference for interop
-        /// </summary>
-        private IJSObjectReference _jsModule;
-
-        /// <summary>
         /// Reference to the textarea for focus
         /// </summary>
         private Radzen.Blazor.RadzenTextArea _textareaElement;
 
-        /// <summary>Protegge il commit asincrono non cancellabile</summary>
-        private bool _isSaving;
-
         #endregion
 
-        #region Public Methods
-
-        /// <summary>
-        /// Shows the dialog with the current extensions list
-        /// </summary>
-        /// <param name="currentExtensions">List of current editable extensions</param>
-        public void Show(List<string> currentExtensions)
-        {
-            this._extensionsText = string.Join("\n", currentExtensions);
-            this._statusText = "";
-            this._isVisible = true;
-            this.StateHasChanged();
-
-        }
+        #region Private Methods
 
         /// <summary>
         /// Focuses the textarea after render
@@ -88,98 +77,16 @@ namespace Bivium.Components.Shared
                 await this._textareaElement.Element.FocusAsync();
         }
 
-        /// <summary>
-        /// Hides the dialog
-        /// </summary>
-        public void Hide()
+        /// <summary>Conferma il draft; il salvataggio delle estensioni appartiene al workflow server</summary>
+        private void HandleSave()
         {
-            this._isVisible = false;
-            this.StateHasChanged();
+            this._binding.Respond(this.WorkspaceService, new Bivium.Models.WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), false);
         }
 
-        #endregion
-
-        #region Private Methods
-
-        /// <summary>
-        /// Ensures the JS interop module is loaded
-        /// </summary>
-        private async System.Threading.Tasks.Task EnsureJsModule()
+        /// <summary>Chiude senza salvare</summary>
+        private void HandleCancel()
         {
-            if (this._jsModule == null)
-            {
-                this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js");
-            }
-        }
-
-        /// <summary>
-        /// Handles the Save button click - sends updated extensions to the server
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleSave()
-        {
-            if (this.CanInvoke != null && !this.CanInvoke())
-                return;
-
-            // Parse textarea back to a list of non-empty extensions
-            string[] lines = this._extensionsText.Split('\n');
-            List<string> extensions = new List<string>();
-            for (int i = 0; i < lines.Length; i++)
-            {
-                string trimmed = lines[i].Trim();
-                if (!string.IsNullOrEmpty(trimmed))
-                {
-                    extensions.Add(trimmed);
-                }
-            }
-
-            // Serialize extensions list to JSON
-            string jsonBody = JsonSerializer.Serialize(extensions);
-
-            // Load JS module and send PUT request via fetch
-            await this.EnsureJsModule();
-            bool success = await this._jsModule.InvokeAsync<bool>("putJson", "/api/Settings/extensions", jsonBody, this.AttachmentId, this.LeaseGeneration);
-
-            if (this.CanInvoke != null && !this.CanInvoke())
-                return;
-
-            if (success)
-            {
-                this._isVisible = false;
-                await this.OnClose.InvokeAsync();
-            }
-            else
-            {
-                this._statusText = "Failed to save extensions";
-            }
-        }
-
-        /// <summary>
-        /// Handles the Cancel button click
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleCancel()
-        {
-            if (this._isSaving)
-                return;
-            this._isVisible = false;
-            await this.OnClose.InvokeAsync();
-        }
-
-        /// <summary>Blocca chiusura e doppi salvataggi fino al termine della richiesta</summary>
-        private async System.Threading.Tasks.Task HandleSaveAsync()
-        {
-            if (this._isSaving)
-                return;
-
-            this._isSaving = true;
-            this.StateHasChanged();
-            try
-            {
-                await this.HandleSave();
-            }
-            finally
-            {
-                this._isSaving = false;
-            }
+            this._binding.Respond(this.WorkspaceService, new Bivium.Models.WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), true);
         }
 
         #endregion

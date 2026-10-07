@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
+using Bivium.Models;
+using Bivium.Services;
 using System;
 using System.Collections.Generic;
 
@@ -13,10 +15,14 @@ namespace Bivium.Components.Shared
         #region Injected Services
 
         /// <summary>
-        /// JS runtime for theme interop
+        /// JS runtime per gli adapter del menu
         /// </summary>
         [Inject]
         private IJSRuntime _jsRuntime { get; set; }
+        /// <summary>Runtime workspace del solo draft visuale</summary>
+        [Inject] private BiviumWorkspaceService WorkspaceService { get; set; }
+        /// <summary>Lease catturata dal render Commander</summary>
+        [CascadingParameter] public WorkspaceSurfaceOwner SurfaceOwner { get; set; }
 
         #endregion
 
@@ -49,12 +55,6 @@ namespace Bivium.Components.Shared
         /// </summary>
         [Parameter]
         public EventCallback OnUpload { get; set; }
-
-        /// <summary>
-        /// Callback for Exit action
-        /// </summary>
-        [Parameter]
-        public EventCallback OnExit { get; set; }
 
         /// <summary>
         /// Callback for the explicit destructive workspace reset
@@ -224,11 +224,6 @@ namespace Bivium.Components.Shared
         #region Class Variables
 
         /// <summary>
-        /// Currently active (open) menu name, empty if none
-        /// </summary>
-        private string _activeMenu = "";
-
-        /// <summary>
         /// Host del menu Radzen usato dall'adapter hover
         /// </summary>
         private ElementReference _radzenMenuHost;
@@ -240,18 +235,71 @@ namespace Bivium.Components.Shared
 
         /// <summary>Impedisce registrazioni dopo il rilascio del menu</summary>
         private bool _isDisposed;
+        /// <summary>Draft menu acknowledged, senza comandi o delegate</summary>
+        private WorkspaceMenuDraft _menuDraft;
+        /// <summary>Modulo delle superfici app-owned</summary>
+        private IJSObjectReference _surfaceModule;
+        /// <summary>Callback del mount posseduto</summary>
+        private DotNetObjectReference<MenuBar> _surfaceReference;
+        /// <summary>Lease installata, distinta dai render ordinari</summary>
+        private long _surfaceGeneration = -1;
+        /// <summary>Lease in installazione: OnAfterRenderAsync rientra durante gli await e una seconda installazione ripartirebbe da una revisione già superata</summary>
+        private long _surfaceInstallingGeneration = -1;
 
         #endregion
 
         #region Overrides
 
         /// <summary>
-        /// Load saved theme on first render
+        /// Collega hover e adapter della superficie menu dopo il render
         /// </summary>
+        /// <param name="firstRender">True al primo render</param>
         protected override async System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender)
         {
             if (firstRender && !this._isDisposed)
                 await this.InitializeRadzenMenuAsync();
+            if (!this._isDisposed && this.SurfaceOwner != null && this._surfaceGeneration != this.SurfaceOwner.Generation && this._surfaceInstallingGeneration != this.SurfaceOwner.Generation)
+            {
+                WorkspaceSurfaceOwner owner = this.SurfaceOwner;
+                this._surfaceInstallingGeneration = owner.Generation;
+                try
+                {
+                    this._menuDraft = this.WorkspaceService.GetMenuDraft(new WorkspaceClientToken(owner.AttachmentId, owner.Generation));
+                    if (this._menuDraft == null)
+                        return;
+                    IJSObjectReference module = this._surfaceModule ?? await this._jsRuntime.InvokeAsync<IJSObjectReference>("import", "./js/surface-adapters.js");
+                    if (this._isDisposed || this.SurfaceOwner.Generation != owner.Generation)
+                    {
+                        if (this._surfaceModule == null)
+                            await module.DisposeAsync();
+                        return;
+                    }
+                    this._surfaceModule = module;
+                    this._surfaceReference ??= DotNetObjectReference.Create(this);
+                    if (await this._surfaceModule.InvokeAsync<bool>("installMenuSurface", this._radzenMenuHost, this._surfaceReference, owner.Generation, this._menuDraft))
+                        this._surfaceGeneration = owner.Generation;
+                }
+                finally
+                {
+                    if (this._surfaceInstallingGeneration == owner.Generation)
+                        this._surfaceInstallingGeneration = -1;
+                }
+            }
+        }
+
+        /// <summary>CAS del solo menu visuale; il comando resta nell'owner esistente</summary>
+        /// <param name="generation">Lease catturata dall'adapter</param>
+        /// <param name="draft">Identità visuali catturate</param>
+        /// <returns>Revisione acknowledged oppure -1</returns>
+        [JSInvokable]
+        public long OnMenuSurfaceChanged(long generation, WorkspaceMenuDraft draft)
+        {
+            if (this._isDisposed || this.SurfaceOwner == null || generation != this.SurfaceOwner.Generation)
+                return -1;
+            long revision = this.WorkspaceService.PublishMenuDraft(new WorkspaceClientToken(this.SurfaceOwner.AttachmentId, generation), draft);
+            if (revision >= 0)
+                this._menuDraft = draft with { Revision = revision };
+            return revision;
         }
 
         #endregion
@@ -298,6 +346,16 @@ namespace Bivium.Components.Shared
             if (this._isDisposed)
                 return;
             this._isDisposed = true;
+            if (this._surfaceModule != null)
+            {
+                try
+                {
+                    try { await this._surfaceModule.InvokeVoidAsync("disposeSurface", this._radzenMenuHost); }
+                    finally { await this._surfaceModule.DisposeAsync(); }
+                }
+                catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException) { }
+                finally { this._surfaceReference?.Dispose(); }
+            }
             if (this._jsRadzenModule == null)
                 return;
 
@@ -372,43 +430,6 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Toggles a dropdown menu open/closed
-        /// </summary>
-        /// <param name="menuName">Name of the menu to toggle</param>
-        private void ToggleMenu(string menuName)
-        {
-            if (this._activeMenu == menuName)
-            {
-                this._activeMenu = "";
-            }
-            else
-            {
-                this._activeMenu = menuName;
-            }
-        }
-
-        /// <summary>
-        /// Switches to a different menu on hover (only if a menu is already open)
-        /// </summary>
-        /// <param name="menuName">Name of the menu being hovered</param>
-        private void HoverMenu(string menuName)
-        {
-            // Only switch on hover if a menu is already open
-            if (!string.IsNullOrEmpty(this._activeMenu))
-            {
-                this._activeMenu = menuName;
-            }
-        }
-
-        /// <summary>
-        /// Closes the active dropdown menu
-        /// </summary>
-        private void CloseMenu()
-        {
-            this._activeMenu = "";
-        }
-
-        /// <summary>
         /// Handles New File action
         /// </summary>
         private async System.Threading.Tasks.Task HandleNewFile()
@@ -438,14 +459,6 @@ namespace Bivium.Components.Shared
         private async System.Threading.Tasks.Task HandleUpload()
         {
             await this.HandleAction(this.OnUpload);
-        }
-
-        /// <summary>
-        /// Handles Exit action
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleExit()
-        {
-            await this.HandleAction(this.OnExit);
         }
 
         /// <summary>
@@ -589,19 +602,17 @@ namespace Bivium.Components.Shared
         /// </summary>
         private async System.Threading.Tasks.Task HandleToggleSinglePanel()
         {
-            this._activeMenu = "";
             await this.HandleAction(this.OnToggleSinglePanel);
         }
 
         /// <summary>
-        /// Closes the active menu and invokes the selected action
+        /// Rivalida l'autorità e invoca l'azione selezionata
         /// </summary>
         /// <param name="callback">Action callback</param>
         private async System.Threading.Tasks.Task HandleAction(EventCallback callback)
         {
             if (this.CanInvoke == null || !this.CanInvoke())
                 return;
-            this._activeMenu = "";
             await callback.InvokeAsync();
         }
 

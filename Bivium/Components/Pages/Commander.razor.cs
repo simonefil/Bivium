@@ -11,7 +11,9 @@ using Bivium.Components.Tree;
 using Radzen;
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace Bivium.Components.Pages
 {
@@ -102,11 +104,6 @@ namespace Bivium.Components.Pages
         private const long MAX_EDITOR_SIZE = 5L * 1024 * 1024;
 
         /// <summary>
-        /// Minimum interval between progress UI updates
-        /// </summary>
-        private const int PROGRESS_UPDATE_INTERVAL_MS = 100;
-
-        /// <summary>
         /// Maximum interval between characters in incremental entry search
         /// </summary>
         private const int TYPE_SEARCH_TIMEOUT_MS = 1000;
@@ -145,6 +142,9 @@ namespace Bivium.Components.Pages
         /// </summary>
         private ClipboardState _clipboard = new ClipboardState();
 
+        /// <summary>Proiezione desktop autorevole, disponibile anche prima del mount JS</summary>
+        private BiviumWorkspaceSnapshot _desktopWorkspace;
+
         /// <summary>
         /// Context menu visibility
         /// </summary>
@@ -161,14 +161,12 @@ namespace Bivium.Components.Pages
         private double _contextMenuY = 0;
 
         /// <summary>
-        /// Pending operation type for dialog callbacks
-        /// </summary>
-        private string _pendingOperation = "";
-
-        /// <summary>
         /// Reference to confirm dialog component
         /// </summary>
         private ConfirmDialog _confirmDialog;
+
+        /// <summary>Domanda server-owned sulla chiusura dell'editor con modifiche non salvate</summary>
+        private EditorCloseDialog _editorCloseDialog;
 
         /// <summary>
         /// Reference to overwrite dialog component
@@ -179,6 +177,18 @@ namespace Bivium.Components.Pages
         /// Reference to input dialog component
         /// </summary>
         private InputDialog _inputDialog;
+
+        /// <summary>Proiezione autorizzata del runtime workflow, mai continuazione del comando locale</summary>
+        private WorkspaceWorkflowSnapshot _workspaceWorkflow;
+
+        /// <summary>Projection Upload letta soltanto dal browser che possiede la lease</summary>
+        private WorkspaceUploadSnapshot _workspaceUpload;
+        private Guid _observedCompletedUploadId;
+        /// <summary>Errore dei workflow form migrati, ripristinabile senza callback legacy</summary>
+        private WorkspaceFormFailureDialog _formFailureDialog;
+        private WorkspaceTerminalDialog _terminalWorkflowDialog;
+        /// <summary>Ultimo risultato riconciliato nell'adapter, senza rieseguire l'operazione</summary>
+        private Guid _observedCompletedOperationId;
 
         /// <summary>
         /// Reference to properties dialog component
@@ -235,6 +245,21 @@ namespace Bivium.Components.Pages
         /// </summary>
         private TerminalPanel _terminalPanel;
 
+        /// <summary>Lifecycle del takeover e del drain, distinto dalle operazioni file</summary>
+        private readonly CancellationTokenSource _handoffLifetimeCancellation = new CancellationTokenSource();
+
+        /// <summary>Tentativo posseduto dall'adapter corrente</summary>
+        private Guid _handoffDrainId;
+
+        /// <summary>Attesa bounded del drain, cancellata anche su snapshot che invalida la richiesta</summary>
+        private CancellationTokenSource _handoffDrainCancellation;
+
+        /// <summary>Previene richieste duplicate dallo stesso pulsante durante l'attesa</summary>
+        private bool _takeoverInProgress;
+
+        /// <summary>Identità attiva ricevuta dall'unico stack JS</summary>
+        private string _activeWindowId = "";
+
         /// <summary>
         /// JS module reference for keyboard capture
         /// </summary>
@@ -249,11 +274,6 @@ namespace Bivium.Components.Pages
         /// Progress text displayed in the status bar during file operations
         /// </summary>
         private string _progressText = "";
-
-        /// <summary>
-        /// Cancellation source of the running file operation, null when none is running
-        /// </summary>
-        private CancellationTokenSource _operationCancellation;
 
         /// <summary>
         /// File rows visible in the left panel, used by page jumps
@@ -311,49 +331,14 @@ namespace Bivium.Components.Pages
         private int _collapsedPanelIndex = -1;
 
         /// <summary>
-        /// CSS class for the panels area
+        /// Viewport stretto: in modalità doppia viene mostrato solo il pannello attivo
         /// </summary>
-        private string _panelsAreaClass = "panels-area";
+        private bool _compactLayout;
 
         /// <summary>
         /// Flag to scroll cursor into view after next render
         /// </summary>
         private bool _scrollAfterRender = false;
-
-        /// <summary>
-        /// Source paths waiting for overwrite decisions before paste
-        /// </summary>
-        private List<string> _pendingPastePaths = new List<string>();
-
-        /// <summary>
-        /// Source paths that have an overwrite conflict
-        /// </summary>
-        private List<string> _pendingPasteConflictPaths = new List<string>();
-
-        /// <summary>
-        /// Source paths approved for overwrite
-        /// </summary>
-        private List<string> _pendingPasteOverwritePaths = new List<string>();
-
-        /// <summary>
-        /// Source paths skipped during overwrite prompts
-        /// </summary>
-        private List<string> _pendingPasteSkippedPaths = new List<string>();
-
-        /// <summary>
-        /// Destination directory for the pending paste operation
-        /// </summary>
-        private string _pendingPasteDestinationDir = "";
-
-        /// <summary>
-        /// Whether the pending paste operation is a cut/move
-        /// </summary>
-        private bool _pendingPasteIsCut = false;
-
-        /// <summary>
-        /// Current conflict index for the pending overwrite prompt sequence
-        /// </summary>
-        private int _pendingPasteConflictIndex = 0;
 
         /// <summary>
         /// Whether authentication state has been checked
@@ -455,16 +440,13 @@ namespace Bivium.Components.Pages
         /// </summary>
         private bool _isDisposed = false;
 
-        /// <summary>Conferma workspace posseduta, anche durante takeover senza lease</summary>
+        /// <summary>Conferma locale takeover del browser non-owner, non trasferita nel workflow di A</summary>
         private RadzenDialogLifetime _workspaceConfirmationLifetime;
 
         /// <summary>
         /// Tema selezionato dal Commander
         /// </summary>
         private string _currentTheme = RadzenThemeCatalog.DEFAULT_THEME;
-
-        /// <summary>Workflow modal occupato prima dell'apertura e fino al callback conclusivo</summary>
-        private bool _commandDialogOpen;
 
         /// <summary>Disponibilità del solo contesto tastiera comunicata dal browser</summary>
         private bool _keyboardGeneral, _keyboardControl, _keyboardNavigation, _keyboardPanelSwitch, _keyboardTerminal;
@@ -577,8 +559,6 @@ namespace Bivium.Components.Pages
         private void ApplyAttachResult(WorkspaceAttachResult result)
         {
             this._hasActiveLease = result != null && result.HasControl;
-            if (!this._hasActiveLease)
-                this._commandDialogOpen = false;
             this._observedLease = result?.ActiveLease;
             this._leaseGeneration = this._hasActiveLease && result.ActiveLease != null ? result.ActiveLease.Generation : 0;
             if (result != null)
@@ -604,7 +584,6 @@ namespace Bivium.Components.Pages
                     if (this._isDisposed)
                         return;
                     this._hasActiveLease = false;
-                    this._commandDialogOpen = false;
                     this._leaseGeneration = 0;
                     this._panelsInitialized = false;
                     await this.UpdateWorkspacePresenceLeaseAsync();
@@ -618,22 +597,41 @@ namespace Bivium.Components.Pages
         /// </summary>
         private async System.Threading.Tasks.Task RequestWorkspaceTakeover()
         {
-            if (!this._clientAttached)
+            if (!this._clientAttached || this._takeoverInProgress)
                 return;
 
             string activeIp = this._observedLease?.RemoteIp ?? "unknown";
-            string confirmationMessage = "Hai Bivium già aperto da IP " + activeIp + ". Vuoi rendere attiva questa sessione?";
+            string confirmationMessage = "Bivium is already open from IP " + activeIp + ". Make this session active?";
             bool confirmed = await this.ConfirmWorkspaceActionAsync("Activate this session", confirmationMessage, "Activate");
             if (!confirmed || this._isDisposed || !this._clientAttached)
                 return;
 
             long expectedGeneration = this._observedLease?.Generation ?? 0;
-            WorkspaceAttachResult result = this._workspaceService.TryTakeover(this._attachmentId, expectedGeneration);
-            this.ApplyAttachResult(result);
-            await this.UpdateWorkspacePresenceLeaseAsync();
-            if (this._hasActiveLease)
-                this.InitializePanels();
+            this._takeoverInProgress = true;
             this.StateHasChanged();
+            try
+            {
+                WorkspaceAttachResult result = await this._workspaceService.TryTakeoverAsync(this._attachmentId, expectedGeneration, this._handoffLifetimeCancellation.Token);
+                if (this._isDisposed)
+                    return;
+                // Una notifica successiva può aver già trasferito di nuovo il lease
+                BiviumWorkspaceSnapshot current = this._workspaceService.GetSnapshot();
+                result.ActiveLease = current.ActiveClientLease;
+                result.WorkspaceRevision = current.Revision;
+                result.HasControl = current.ActiveClientLease?.AttachmentId == this._attachmentId && current.ActiveClientLease.Connected;
+                this.ApplyAttachResult(result);
+                if (!string.IsNullOrEmpty(result.ErrorMessage))
+                    this.NotifyWarning("Activate this session", result.ErrorMessage);
+                await this.UpdateWorkspacePresenceLeaseAsync();
+                if (this._hasActiveLease)
+                    this.InitializePanels();
+            }
+            finally
+            {
+                this._takeoverInProgress = false;
+                if (!this._isDisposed)
+                    this.StateHasChanged();
+            }
         }
 
         /// <summary>
@@ -643,30 +641,170 @@ namespace Bivium.Components.Pages
         {
             if (this._isDisposed || workspace == null)
                 return;
-
-            ActiveClientLeaseSnapshot lease = workspace.ActiveClientLease;
-            bool hasControl = lease != null && lease.AttachmentId == this._attachmentId;
-            bool changed = hasControl != this._hasActiveLease || (hasControl && lease.Generation != this._leaseGeneration);
-            this._observedLease = lease;
-            this._workspaceRevision = Math.Max(this._workspaceRevision, workspace.Revision);
-            if (!changed)
-                return;
-
-            this._hasActiveLease = hasControl;
-            this._leaseGeneration = hasControl ? lease.Generation : 0;
-            this.ConfigureLeaseRevocation();
-            if (!hasControl)
-            {
-                this._panelsInitialized = false;
-                this._commandDialogOpen = false;
-            }
             _ = this.InvokeAsync(async () =>
             {
-                await this.UpdateWorkspacePresenceLeaseAsync();
-                if (this._hasActiveLease)
-                    this.InitializePanels();
+                if (this._isDisposed || (this._desktopWorkspace != null && workspace.Revision < this._desktopWorkspace.Revision))
+                    return;
+                ActiveClientLeaseSnapshot lease = workspace.ActiveClientLease;
+                bool hasControl = lease != null && lease.Connected && lease.AttachmentId == this._attachmentId;
+                bool changed = hasControl != this._hasActiveLease || (hasControl && lease.Generation != this._leaseGeneration);
+                this._observedLease = lease;
+                this._workspaceRevision = Math.Max(this._workspaceRevision, workspace.Revision);
+                bool workspaceReset = workspace.Panels == null && this._desktopWorkspace?.Panels != null;
+                if (workspaceReset)
+                    this._panelsInitialized = false;
+                this._desktopWorkspace = workspace;
+                if (this._handoffDrainId != Guid.Empty && workspace.Handoff?.Id != this._handoffDrainId)
+                    this._handoffDrainCancellation?.Cancel();
+                this._clipboard = new ClipboardState { Paths = new List<string>(workspace.Desktop.ClipboardPaths), IsCut = workspace.Desktop.ClipboardIsCut };
+                if (changed)
+                {
+                    this._hasActiveLease = hasControl;
+                    this._leaseGeneration = hasControl ? lease.Generation : 0;
+                    this.ConfigureLeaseRevocation();
+                    if (!hasControl)
+                    {
+                        this._panelsInitialized = false;
+                    }
+                    await this.UpdateWorkspacePresenceLeaseAsync();
+                    if (this._hasActiveLease)
+                        this.InitializePanels();
+                }
+                if (workspaceReset && hasControl && !changed && this.CanMutateWorkspace())
+                {
+                    try { this.InitializePanels(); }
+                    catch (UnauthorizedAccessException) { /* Un takeover o freeze concorrente lascia l'inizializzazione al nuovo owner */ }
+                }
+                this.RefreshWorkspaceWorkflow();
                 this.StateHasChanged();
+                if (hasControl && workspace.Handoff != null && workspace.Handoff.OwnerAttachmentId == this._attachmentId && this._handoffDrainId == Guid.Empty)
+                    await this.ProcessWorkspaceHandoffAsync(workspace.Handoff);
             });
+        }
+
+        /// <summary>Coordina freeze e publisher; i workflow non migrati costituiscono soltanto una guardia transitoria</summary>
+        /// <param name="handoff">Richiesta server-owned osservata</param>
+        /// <returns>Drain bounded senza trasferire credenziali, upload o workflow locali</returns>
+        private async Task ProcessWorkspaceHandoffAsync(WorkspaceHandoffSnapshot handoff)
+        {
+            WorkspaceClientToken token = this.GetClientToken();
+            if (this._isDisposed || this._handoffDrainId != Guid.Empty)
+                return;
+            if (this.HasNonTransferableHandoffWork())
+            {
+                this._workspaceService.RejectHandoff(token, handoff.Id, "The active browser has a workflow or operation that is not transferable yet. Finish it, then retry activation.");
+                return;
+            }
+            this._handoffDrainId = handoff.Id;
+            using CancellationTokenSource cancellation = CancellationTokenSource.CreateLinkedTokenSource(this._handoffLifetimeCancellation.Token);
+            this._handoffDrainCancellation = cancellation;
+            cancellation.CancelAfter(TimeSpan.FromMilliseconds(Math.Max(1, (handoff.DeadlineUtc - DateTime.UtcNow).TotalMilliseconds)));
+            string id = handoff.Id.ToString();
+            try
+            {
+                string workflowId = this._workspaceWorkflow?.IsActive == true ? this._workspaceWorkflow.Id.ToString() : this._workspaceUpload?.Visible == true ? this._workspaceUpload.Id.ToString() : "";
+                if (this._jsModule == null || !await this._jsModule.InvokeAsync<bool>("beginWorkspaceHandoff", cancellation.Token, id, Math.Max(1, (handoff.DeadlineUtc - DateTime.UtcNow).TotalMilliseconds), workflowId))
+                    throw new InvalidOperationException("The active desktop could not be frozen safely. Retry activation.");
+                this.StateHasChanged();
+                if (!await this._jsModule.InvokeAsync<bool>("flushDesktopPublications", cancellation.Token, id))
+                    throw new InvalidOperationException("The active desktop publishers did not confirm their state. Retry activation.");
+                if (this.HasNonTransferableHandoffWork())
+                    throw new InvalidOperationException("The active browser started a workflow that is not transferable yet. Finish it, then retry activation.");
+                if (this._workspaceUpload?.Visible == true && (this._uploadDialog == null || !await this._uploadDialog.FlushForHandoffAsync(cancellation.Token)))
+                    throw new InvalidOperationException("The upload checkpoint was not confirmed. Retry activation.");
+                if (!this._workspaceService.TryConfirmHandoffFreeze(token, handoff.Id))
+                    return;
+                if (this._workspaceWorkflow?.Phase is WorkspaceWorkflowPhase.AwaitingInput or WorkspaceWorkflowPhase.AwaitingConfirmation or WorkspaceWorkflowPhase.AwaitingOverwrite or WorkspaceWorkflowPhase.Failed or WorkspaceWorkflowPhase.Cancelled || (this._workspaceWorkflow?.Kind == WorkspaceWorkflowKind.Properties && this._workspaceWorkflow.Phase == WorkspaceWorkflowPhase.Running))
+                {
+                    bool workflowAcknowledged = this._workspaceWorkflow.Kind switch
+                    {
+                        _ when BiviumWorkspaceService.IsFormKind(this._workspaceWorkflow.Kind) && (this._workspaceWorkflow.Phase == WorkspaceWorkflowPhase.Cancelled || (this._workspaceWorkflow.Phase == WorkspaceWorkflowPhase.Failed && !BiviumWorkspaceService.IsEditableFormKind(this._workspaceWorkflow.Kind))) => this._formFailureDialog != null && await this._formFailureDialog.FlushForHandoffAsync(cancellation.Token),
+                        WorkspaceWorkflowKind.EditorExtensions => this._settingsDialog != null && await this._settingsDialog.FlushForHandoffAsync(cancellation.Token),
+                        WorkspaceWorkflowKind.CreationPermissions => this._creationPermissionsDialog != null && await this._creationPermissionsDialog.FlushForHandoffAsync(cancellation.Token),
+                        WorkspaceWorkflowKind.Permissions => this._permissionsDialog != null && await this._permissionsDialog.FlushForHandoffAsync(cancellation.Token),
+                        WorkspaceWorkflowKind.Compress => this._compressDialog != null && await this._compressDialog.FlushForHandoffAsync(cancellation.Token),
+                        WorkspaceWorkflowKind.Properties => this._propertiesDialog != null && await this._propertiesDialog.FlushForHandoffAsync(cancellation.Token),
+                        WorkspaceWorkflowKind.About => this._aboutDialog != null && await this._aboutDialog.FlushForHandoffAsync(cancellation.Token),
+                        WorkspaceWorkflowKind.Authentication => this._authSettingsDialog != null && await this._authSettingsDialog.FlushForHandoffAsync(cancellation.Token),
+                        WorkspaceWorkflowKind.TerminalRename or WorkspaceWorkflowKind.TerminalClose or WorkspaceWorkflowKind.TerminalClipboard => this._terminalWorkflowDialog != null && await this._terminalWorkflowDialog.FlushForHandoffAsync(cancellation.Token),
+                        WorkspaceWorkflowKind.DeleteEntries or WorkspaceWorkflowKind.EditorAlert or WorkspaceWorkflowKind.ResetWorkspace => this._confirmDialog != null && await this._confirmDialog.FlushForHandoffAsync(cancellation.Token),
+                        WorkspaceWorkflowKind.EditorClose => this._editorCloseDialog != null && await this._editorCloseDialog.FlushForHandoffAsync(cancellation.Token),
+                        WorkspaceWorkflowKind.CopyEntries or WorkspaceWorkflowKind.MoveEntries or WorkspaceWorkflowKind.TransferEntries => this._overwriteDialog != null && await this._overwriteDialog.FlushForHandoffAsync(cancellation.Token),
+                        WorkspaceWorkflowKind.BatchRename => this._renamerDialog != null && await this._renamerDialog.FlushForHandoffAsync(cancellation.Token),
+                        _ => this._inputDialog != null && await this._inputDialog.FlushForHandoffAsync(cancellation.Token)
+                    };
+                    if (!workflowAcknowledged)
+                        throw new InvalidOperationException("The workflow state was not acknowledged. Retry activation.");
+                }
+                if (this._editorDialog == null || !await this._editorDialog.FlushForHandoffAsync(cancellation.Token)
+                    || this._renamerDialog == null || !await this._renamerDialog.FlushForHandoffAsync(cancellation.Token)
+                    || this._terminalPanel == null || !await this._terminalPanel.FlushForHandoffAsync(cancellation.Token))
+                    throw new InvalidOperationException("A desktop window is still initializing or has a non-transferable workflow. Retry activation.");
+                if (!await this._jsModule.InvokeAsync<bool>("flushDesktopPublications", cancellation.Token, id))
+                    throw new InvalidOperationException("The final desktop publications were not confirmed. Retry activation.");
+                cancellation.Token.ThrowIfCancellationRequested();
+                if (this.HasNonTransferableHandoffWork())
+                    throw new InvalidOperationException("A non-transferable workflow is pending. Finish it, then retry activation.");
+                WorkspacePanelsSnapshot panels = new WorkspacePanelsSnapshot(this.CreatePanelSnapshot(this._leftPanel), this.CreatePanelSnapshot(this._rightPanel), this._activePanel, this._singlePanelMode, this._outerPanelSizePercent, this._collapsedPanelIndex);
+                BiviumWorkspaceSnapshot observed = this._workspaceService.GetSnapshot();
+                if (!this._workspaceService.TryUpdatePanels(token, observed.Revision, panels, out _))
+                    throw new InvalidOperationException("Desktop state changed during the final checkpoint. Retry activation.");
+                // La clipboard è già server-owned: non ripubblicare la copia UI dopo il completamento di un move
+                WorkspaceHandoffStamp stamp = this._workspaceService.GetHandoffStamp(token, handoff.Id);
+                if (!this._workspaceService.TryCompleteHandoff(token, handoff.Id, stamp))
+                    throw new InvalidOperationException("Desktop revisions changed before activation. Retry activation.");
+            }
+            catch (Exception ex) when (ex is JSException || ex is OperationCanceledException || ex is ObjectDisposedException || ex is InvalidOperationException || ex is UnauthorizedAccessException)
+            {
+                this._workspaceService.RejectHandoff(token, handoff.Id, ex is InvalidOperationException ? ex.Message : "The active browser did not confirm the handoff. Retry activation.");
+            }
+            finally
+            {
+                // Il begin può aver congelato il DOM anche se il suo ack è arrivato dopo la cancellazione
+                if (this._jsModule != null)
+                {
+                    try
+                    {
+                        using CancellationTokenSource cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+                        await this._jsModule.InvokeVoidAsync("endWorkspaceHandoff", cleanup.Token, id, !this._isDisposed && this._workspaceService.ValidatePublication(token));
+                    }
+                    catch (Exception ex) when (ex is JSException || ex is OperationCanceledException || ex is ObjectDisposedException)
+                    {
+                    }
+                }
+                // Conserva l'ownership dell'adapter fino al cleanup JS: C non deve partire contro il freeze B
+                if (this._handoffDrainId == handoff.Id)
+                {
+                    this._handoffDrainId = Guid.Empty;
+                    this._handoffDrainCancellation = null;
+                }
+                // Un reset confermato prima del freeze può annullare il tentativo mentre il drain è occupato.
+                // Solo dopo il cleanup, l'owner ancora valido inizializza i pannelli già svuotati dal server.
+                if (!this._isDisposed && !this._panelsInitialized && this._hasActiveLease && this._workspaceService.GetSnapshot().Panels == null && this.CanMutateWorkspace())
+                {
+                    try { this.InitializePanels(); }
+                    catch (UnauthorizedAccessException) { /* Il nuovo owner inizializzerà lo snapshot reset */ }
+                }
+                if (!this._isDisposed)
+                    this.StateHasChanged();
+                // Una richiesta C può essere stata notificata mentre il drain B occupava l'adapter
+                if (!this._isDisposed && this._handoffDrainId == Guid.Empty)
+                {
+                    BiviumWorkspaceSnapshot current = this._workspaceService.GetSnapshot();
+                    WorkspaceHandoffSnapshot next = current.Handoff;
+                    if (next != null && next.Id != handoff.Id && next.OwnerAttachmentId == this._attachmentId && current.ActiveClientLease?.AttachmentId == this._attachmentId && next.Generation == this._leaseGeneration && next.DeadlineUtc > DateTime.UtcNow)
+                        _ = this.InvokeAsync(() => this.ProcessWorkspaceHandoffAsync(next));
+                }
+            }
+        }
+
+        /// <summary>Guardie tecniche da rimuovere singolarmente dopo la migrazione dei workflow</summary>
+        /// <returns>True quando il tentativo deve preservare A senza revoca</returns>
+        private bool HasNonTransferableHandoffWork()
+        {
+            bool migratedQuestion = this._workspaceWorkflow?.IsActive == true || this._workspaceUpload?.Visible == true;
+            return this._workspaceConfirmationLifetime != null || (this._keyboardModal && !migratedQuestion)
+                || this._editorDialog?.HasNonTransferableWork == true || this._terminalPanel?.HasNonTransferableWork == true || this._authSettingsDialog?.HasNonTransferableWork == true || this._terminalWorkflowDialog?.HasNonTransferableWork == true;
         }
 
         /// <summary>
@@ -701,7 +839,6 @@ namespace Bivium.Components.Pages
             WorkspaceClientToken token = this.GetClientToken();
             this._workspaceService.MarkClientDisconnected(token);
             this._hasActiveLease = false;
-            this._commandDialogOpen = false;
             this._leaseGeneration = 0;
             this._panelsInitialized = false;
         }
@@ -737,16 +874,21 @@ namespace Bivium.Components.Pages
         /// <returns>True if the circuit still owns the workspace</returns>
         private bool CanMutateWorkspace()
         {
+            if (this._handoffDrainId != Guid.Empty && this._workspaceService.ValidatePublication(this.GetClientToken()))
+                return false;
             bool result = this._hasActiveLease && this._workspaceService.ValidateMutation(this.GetClientToken());
-            if (!result)
+            if (!result && !this._workspaceService.ValidatePublication(this.GetClientToken()))
             {
                 this._hasActiveLease = false;
-                this._commandDialogOpen = false;
                 this._leaseGeneration = 0;
             }
 
             return result;
         }
+
+        /// <summary>Permette soltanto i callback di persistenza durante il freeze, non nuovi comandi</summary>
+        /// <returns>Autorità del publisher corrente</returns>
+        private bool CanPublishWorkspace() => !this._isDisposed && this._hasActiveLease && this._workspaceService.ValidatePublication(this.GetClientToken());
 
         /// <summary>
         /// Initializes the panels when the lease grants access
@@ -784,8 +926,11 @@ namespace Bivium.Components.Pages
             this._activePanel = this._singlePanelMode ? 0 : Math.Clamp(workspace.Panels.ActivePanel, 0, 1);
             if (!this._singlePanelMode && this._collapsedPanelIndex == this._activePanel)
                 this._activePanel = this._activePanel == 0 ? 1 : 0;
-            this._panelsAreaClass = this._singlePanelMode ? "panels-area single-panel" : "panels-area";
             this._workspaceRevision = workspace.Revision;
+            this._desktopWorkspace = workspace;
+            this._clipboard = new ClipboardState { Paths = new List<string>(workspace.Desktop.ClipboardPaths), IsCut = workspace.Desktop.ClipboardIsCut };
+            this.RefreshWorkspaceWorkflow();
+            this.HydrateContextMenu();
 
             if (leftFallback || rightFallback)
             {
@@ -1021,16 +1166,6 @@ namespace Bivium.Components.Pages
         }
 
         /// <summary>
-        /// Returns the inactive panel state
-        /// </summary>
-        /// <returns>Inactive panel state</returns>
-        private PanelState GetInactivePanel()
-        {
-            PanelState result = this._activePanel == 0 ? this._rightPanel : this._leftPanel;
-            return result;
-        }
-
-        /// <summary>
         /// Sets the active panel
         /// </summary>
         /// <param name="index">Panel index (0=left, 1=right)</param>
@@ -1038,6 +1173,15 @@ namespace Bivium.Components.Pages
         {
             if (this.IsCommandWorkflowAvailable() && this.CanMutateWorkspace())
                 this._activePanel = Math.Clamp(index, 0, 1);
+        }
+
+        /// <summary>
+        /// Aggiorna la proiezione responsive al cambio del media query Radzen
+        /// </summary>
+        /// <param name="matches">True quando il viewport è stretto</param>
+        private void HandleCompactLayoutChanged(bool matches)
+        {
+            this._compactLayout = matches;
         }
 
         /// <summary>
@@ -1152,23 +1296,7 @@ namespace Bivium.Components.Pages
                 history.RemoveRange(0, history.Count - MAX_HISTORY_COUNT);
         }
 
-        /// <summary>
-        /// Handles selection change in the left panel
-        /// </summary>
-        /// <param name="paths">New selection</param>
-        private void HandleLeftSelectionChanged(List<string> paths)
-        {
-            this._leftPanel.SelectedPaths = paths;
-        }
 
-        /// <summary>
-        /// Handles selection change in the right panel
-        /// </summary>
-        /// <param name="paths">New selection</param>
-        private void HandleRightSelectionChanged(List<string> paths)
-        {
-            this._rightPanel.SelectedPaths = paths;
-        }
 
         /// <summary>
         /// Handles sort change in the left panel
@@ -1194,23 +1322,7 @@ namespace Bivium.Components.Pages
             this.SortEntries(this._rightPanel);
         }
 
-        /// <summary>
-        /// Handles cursor change in the left panel
-        /// </summary>
-        /// <param name="index">New cursor index</param>
-        private void HandleLeftCursorChanged(int index)
-        {
-            this.SetPanelFocusFromIndex(this._leftPanel, index);
-        }
 
-        /// <summary>
-        /// Handles cursor change in the right panel
-        /// </summary>
-        /// <param name="index">New cursor index</param>
-        private void HandleRightCursorChanged(int index)
-        {
-            this.SetPanelFocusFromIndex(this._rightPanel, index);
-        }
 
         /// <summary>
         /// Updates semantic focus from a compatibility cursor index
@@ -1221,73 +1333,9 @@ namespace Bivium.Components.Pages
             panel.FocusedPath = index >= 0 && index < panel.Entries.Count ? panel.Entries[index].FullPath : "";
         }
 
-        /// <summary>
-        /// Stores the semantic selection anchor of the left panel
-        /// </summary>
-        /// <param name="path">Anchor full path</param>
-        private void HandleLeftSelectionAnchorChanged(string path)
-        {
-            this._leftPanel.SelectionAnchorPath = path ?? "";
-        }
 
-        /// <summary>
-        /// Stores the semantic selection anchor of the right panel
-        /// </summary>
-        /// <param name="path">Anchor full path</param>
-        private void HandleRightSelectionAnchorChanged(string path)
-        {
-            this._rightPanel.SelectionAnchorPath = path ?? "";
-        }
 
-        /// <summary>
-        /// Accepts a completed left-panel column resize while this circuit owns the lease
-        /// </summary>
-        /// <param name="ratios">Five normalized column widths</param>
-        private void HandleLeftColumnRatiosChanged(double[] ratios)
-        {
-            if (this.CanMutateWorkspace())
-                this.ApplyColumnRatios(this._leftPanel, ratios);
-        }
 
-        /// <summary>
-        /// Accepts a completed right-panel column resize while this circuit owns the lease
-        /// </summary>
-        /// <param name="ratios">Five normalized column widths</param>
-        private void HandleRightColumnRatiosChanged(double[] ratios)
-        {
-            if (this.CanMutateWorkspace())
-                this.ApplyColumnRatios(this._rightPanel, ratios);
-        }
-
-        /// <summary>
-        /// Validates and stores one complete normalized column configuration
-        /// </summary>
-        /// <param name="panel">Target panel</param>
-        /// <param name="ratios">Five positive finite widths</param>
-        private void ApplyColumnRatios(PanelState panel, double[] ratios)
-        {
-            if (panel.Columns.Count > 0)
-                return;
-            if (ratios == null || ratios.Length != 5)
-                return;
-
-            double total = 0;
-            for (int i = 0; i < ratios.Length; i++)
-            {
-                if (!double.IsFinite(ratios[i]) || ratios[i] <= 0)
-                    return;
-                total += ratios[i];
-            }
-
-            if (!double.IsFinite(total) || total <= 0)
-                return;
-
-            panel.NameColumnRatio = ratios[0] / total;
-            panel.SizeColumnRatio = ratios[1] / total;
-            panel.DateColumnRatio = ratios[2] / total;
-            panel.AttributesColumnRatio = ratios[3] / total;
-            panel.OwnerColumnRatio = ratios[4] / total;
-        }
 
         /// <summary>
         /// Accepts only a complete measured layout while this circuit owns workspace mutation
@@ -1296,7 +1344,7 @@ namespace Bivium.Components.Pages
         /// <param name="columns">Ordered complete column layout</param>
         private void HandleColumnLayoutRequested(PanelState panel, IEnumerable<FileListColumnState> columns)
         {
-            if (!this.CanMutateWorkspace())
+            if (!this.CanPublishWorkspace())
                 return;
 
             List<FileListColumnState> source = columns == null ? new List<FileListColumnState>() : new List<FileListColumnState>(columns);
@@ -1321,7 +1369,7 @@ namespace Bivium.Components.Pages
         /// <param name="path">First visible entry path</param>
         private void HandleLeftScrollAnchorChanged(string path)
         {
-            if (this.CanMutateWorkspace())
+            if (this.CanPublishWorkspace())
                 this._leftPanel.ScrollAnchorPath = path;
         }
 
@@ -1331,7 +1379,7 @@ namespace Bivium.Components.Pages
         /// <param name="path">First visible entry path</param>
         private void HandleRightScrollAnchorChanged(string path)
         {
-            if (this.CanMutateWorkspace())
+            if (this.CanPublishWorkspace())
                 this._rightPanel.ScrollAnchorPath = path;
         }
 
@@ -1362,13 +1410,6 @@ namespace Bivium.Components.Pages
             return this._activePanel == 0 ? this._leftPageSize : this._rightPageSize;
         }
 
-        /// <summary>
-        /// Marks a semantic directory-tree expansion change for workspace persistence
-        /// </summary>
-        private void HandlePanelTreeExpansionChanged()
-        {
-            // EventCallback triggers the render that persists the updated expanded-directory snapshot
-        }
 
         /// <summary>
         /// Applica una modifica semantica all'albero sinistro dopo la rivalidazione del lease
@@ -1428,7 +1469,7 @@ namespace Bivium.Components.Pages
         /// <param name="change">Geometria richiesta</param>
         private void HandleTreeLayoutChanged(PanelState panel, PanelTreeLayoutChange change)
         {
-            if (change == null || !this.CanMutateWorkspace())
+            if (change == null || !this.CanPublishWorkspace())
                 return;
             panel.TreeSizePercent = this.ClampTreeSize(change.SizePercent);
             panel.TreeCollapsed = change.Collapsed;
@@ -1440,7 +1481,7 @@ namespace Bivium.Components.Pages
         /// <param name="args">Dati conclusivi del resize Radzen</param>
         private void HandleOuterSplitterResize(RadzenSplitterResizeEventArgs args)
         {
-            if (!this.CanMutateWorkspace())
+            if (!this.CanPublishWorkspace())
                 return;
             double leftSize = args.PaneIndex == 0 ? args.NewSize : 100 - args.NewSize;
             this._outerPanelSizePercent = this.ClampOuterPanelSize(leftSize);
@@ -1542,40 +1583,6 @@ namespace Bivium.Components.Pages
                 this.LoadPanelContents(this._leftPanel);
                 this.LoadPanelContents(this._rightPanel);
             }
-        }
-
-        /// <summary>
-        /// Creates a progress callback that throttles UI renders during high-volume file operations
-        /// </summary>
-        /// <param name="operationName">Operation label</param>
-        /// <returns>Progress callback</returns>
-        private Action<int, int, string> CreateThrottledProgressCallback(string operationName)
-        {
-            DateTime lastUpdate = DateTime.MinValue;
-            object updateLock = new object();
-
-            Action<int, int, string> result = (current, total, fileName) =>
-            {
-                DateTime now = DateTime.UtcNow;
-                bool shouldUpdate = false;
-
-                lock (updateLock)
-                {
-                    if ((now - lastUpdate).TotalMilliseconds >= PROGRESS_UPDATE_INTERVAL_MS || current >= total)
-                    {
-                        lastUpdate = now;
-                        shouldUpdate = true;
-                    }
-                }
-
-                if (shouldUpdate)
-                {
-                    this._progressText = operationName + " " + current + "/" + total + ": " + fileName;
-                    _ = this.InvokeAsync(() => this.StateHasChanged());
-                }
-            };
-
-            return result;
         }
 
         /// <summary>
@@ -1835,6 +1842,52 @@ namespace Bivium.Components.Pages
 
         #region Context Menu
 
+        /// <summary>Apertura visuale con identità e sorgenti catturate</summary>
+        private WorkspaceContextMenuDraft _contextDraft;
+
+        /// <summary>Hydration dell'apertura, senza reinvocare richiesta o ricalcolare flag</summary>
+        private void HydrateContextMenu()
+        {
+            this._contextDraft = this._workspaceService.GetContextMenuDraft(this.GetClientToken());
+            WorkspaceContextMenuDraft draft = this._contextDraft;
+            this._contextMenuVisible = draft?.Visible == true;
+            if (draft == null)
+                return;
+            this._contextMenuX = draft.X;
+            this._contextMenuY = draft.Y;
+            this._contextMenuIsDirectory = draft.IsDirectory;
+            this._contextMenuIsArchive = draft.IsArchive;
+            this._contextMenuIsEditable = draft.IsEditable;
+            this._contextMenuHasSelection = draft.HasSelection;
+            this._contextMenuIsMultiSelection = draft.IsMultiSelection;
+            this._contextMenuArchiveBaseName = draft.ArchiveBaseName;
+        }
+
+        /// <summary>CAS della posizione della stessa apertura; non ammette entry o flag sostitutivi</summary>
+        /// <param name="draft">Posizione catturata dal portal</param>
+        /// <returns>Nuova revisione oppure -1</returns>
+        private long PublishContextVisual(WorkspaceContextMenuDraft draft)
+        {
+            if (this._isDisposed || this._contextDraft == null || draft.Id != this._contextDraft.Id || draft.Revision != this._contextDraft.Revision)
+                return -1;
+            WorkspaceContextMenuDraft current = this._contextDraft with { X = draft.X, Y = draft.Y, ViewportWidth = draft.ViewportWidth, ViewportHeight = draft.ViewportHeight, ActiveItem = draft.ActiveItem, Focused = draft.Focused };
+            WorkspaceContextMenuDraft acknowledged = this._workspaceService.PublishContextMenuDraft(this.GetClientToken(), current);
+            if (acknowledged == null)
+                return -1;
+            this._contextDraft = acknowledged;
+            return acknowledged.Revision;
+        }
+
+        /// <summary>I comandi esistenti operano solo se il contesto catturato è ancora lo stesso</summary>
+        /// <returns>False se pannelli o selezione sono cambiati, senza retarget implicito</returns>
+        private bool CanInvokeCapturedContext()
+        {
+            WorkspaceContextMenuDraft draft = this._contextDraft;
+            PanelState panel = this.GetActivePanel();
+            string focusedPath = this.CreatePanelSnapshot(panel).FocusedPath;
+            return this.CanMutateWorkspace() && draft != null && this._activePanel == draft.PanelIndex && panel.CurrentPath == draft.BasePath && focusedPath == draft.FocusedPath && panel.SelectedPaths.SequenceEqual(draft.SelectedPaths);
+        }
+
         /// <summary>
         /// Handles context menu request from a panel
         /// </summary>
@@ -1902,20 +1955,13 @@ namespace Bivium.Components.Pages
                 }
             }
 
-            // Adjust menu position after render to keep it within viewport
-            _ = this.AdjustContextMenuAsync();
-        }
-
-        /// <summary>
-        /// Adjusts context menu position after render
-        /// </summary>
-        private async System.Threading.Tasks.Task AdjustContextMenuAsync()
-        {
-            await System.Threading.Tasks.Task.Delay(50);
-            if (this._jsModule != null)
-            {
-                await this._jsModule.InvokeVoidAsync("adjustContextMenuPosition");
-            }
+            this.PersistWorkspacePanels();
+            WorkspaceContextMenuDraft previous = this._workspaceService.GetContextMenuDraft(this.GetClientToken());
+            string focusedPath = this.CreatePanelSnapshot(active).FocusedPath;
+            ImmutableArray<WorkspaceContextEntry> entries = active.Entries.Where(entry => active.SelectedPaths.Contains(entry.FullPath) || entry.FullPath == focusedPath).Select(entry => new WorkspaceContextEntry(entry.FullPath, entry.Name, entry.IsDirectory)).ToImmutableArray();
+            WorkspaceContextMenuDraft draft = new WorkspaceContextMenuDraft(previous?.Revision ?? 0, Guid.NewGuid(), true, panelIndex, active.CurrentPath, focusedPath, active.SelectedPaths.ToImmutableArray(), entries, args.X, args.Y, this._contextMenuIsDirectory, this._contextMenuIsArchive, this._contextMenuIsEditable, this._contextMenuHasSelection, this._contextMenuIsMultiSelection, this._contextMenuArchiveBaseName);
+            this._contextDraft = this._workspaceService.PublishContextMenuDraft(this.GetClientToken(), draft);
+            this._contextMenuVisible = this._contextDraft != null;
         }
 
         /// <summary>
@@ -1923,6 +1969,16 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void CloseContextMenu()
         {
+            // La chiusura sintetica del freeze non deve cancellare l'apertura catturata
+            if (!this.CanMutateWorkspace())
+                return;
+            if (this._contextDraft != null)
+            {
+                WorkspaceContextMenuDraft closed = this._workspaceService.PublishContextMenuDraft(this.GetClientToken(), this._contextDraft with { Visible = false });
+                if (closed == null)
+                    return;
+                this._contextDraft = closed;
+            }
             this._contextMenuVisible = false;
         }
 
@@ -1930,12 +1986,89 @@ namespace Bivium.Components.Pages
 
         #region File Operations
 
+        /// <summary>Proietta solo finestre UI aperte, incluse quelle minimizzate</summary>
+        /// <returns>Stato transitorio della taskbar</returns>
+        private IReadOnlyList<DesktopWindowState> GetOpenWindows()
+        {
+            List<DesktopWindowState> result = new List<DesktopWindowState>();
+            BiviumWorkspaceSnapshot workspace = this._desktopWorkspace ?? this._workspaceService.GetSnapshot();
+            FloatingWindowsSnapshot windows = workspace.FloatingWindows;
+            string activeWindowId = this.GetActiveDesktopWindowId();
+            if (windows.Terminal.Visible || windows.Terminal.Minimized)
+                result.Add(new DesktopWindowState("terminal-window", this._terminalPanel?.GetTitle() ?? "Terminal", "terminal", windows.Terminal.Minimized, windows.Terminal.Visible && activeWindowId == "terminal-window", this._terminalPanel?.NeedsAttention() ?? false));
+            if (workspace.Desktop.EditorId != Guid.Empty)
+                result.Add(new DesktopWindowState("editor-window", workspace.Desktop.EditorTitle, "edit", windows.Editor.Minimized, windows.Editor.Visible && activeWindowId == "editor-window", false));
+            if (workspace.Desktop.RenamerId != Guid.Empty)
+                result.Add(new DesktopWindowState("renamer-window", "Advanced Rename", "drive_file_rename_outline", windows.Renamer.Minimized, windows.Renamer.Visible && activeWindowId == "renamer-window", false));
+            return result;
+        }
+
+        /// <summary>Proietta lo stacking salvato, senza dipendere dall'ordine di mount dei componenti</summary>
+        /// <returns>Finestra visibile con ordine MRU più recente</returns>
+        private string GetActiveDesktopWindowId()
+        {
+            FloatingWindowsSnapshot windows = (this._desktopWorkspace ?? this._workspaceService.GetSnapshot()).FloatingWindows;
+            string id = "";
+            long order = -1;
+            if (windows.Terminal.Visible)
+            {
+                id = "terminal-window";
+                order = windows.Terminal.MruOrder;
+            }
+            if (windows.Editor.Visible && windows.Editor.MruOrder >= order)
+            {
+                id = "editor-window";
+                order = windows.Editor.MruOrder;
+            }
+            if (windows.Renamer.Visible && windows.Renamer.MruOrder >= order)
+                id = "renamer-window";
+            return id;
+        }
+
+        /// <summary>Disponibilità pura dell'attivazione, anche durante operazioni file</summary>
+        /// <returns>True senza accessi al servizio workspace</returns>
+        private bool CanActivateWindows()
+        {
+            return this._canAccess && this._hasActiveLease && this._panelsInitialized && !this._isDisposed
+                && !this._keyboardModal && this._workspaceConfirmationLifetime == null;
+        }
+
+        /// <summary>Rivalida la lease e attiva una sessione UI esistente</summary>
+        /// <param name="id">Identità stabile della finestra</param>
+        private async Task RestoreWindowAsync(string id)
+        {
+            if (!this.CanActivateWindows() || !this.CanMutateWorkspace())
+                return;
+            switch (id)
+            {
+                case "terminal-window":
+                    if (this._terminalPanel != null)
+                        await this._terminalPanel.RestoreAsync();
+                    break;
+                case "editor-window":
+                    if (this._editorDialog != null)
+                        await this._editorDialog.RestoreAsync();
+                    break;
+                case "renamer-window":
+                    if (this._renamerDialog != null)
+                        await this._renamerDialog.RestoreAsync();
+                    break;
+            }
+        }
+
+        /// <summary>Aggiorna la taskbar senza introdurre uno stack C# parallelo</summary>
+        private void HandleDesktopWindowStateChanged()
+        {
+            if (!this._isDisposed)
+                this.StateHasChanged();
+        }
+
         /// <summary>Disponibilità pura del workflow, indipendente dal focus modeless</summary>
         /// <returns>True se un nuovo workflow può iniziare</returns>
         private bool IsCommandWorkflowAvailable()
         {
             return this._canAccess && this._hasActiveLease && this._panelsInitialized && !this._isDisposed
-                && this._operationCancellation == null && !this._commandDialogOpen && this._workspaceConfirmationLifetime == null && !this._keyboardModal;
+                && this._workspaceWorkflow?.IsActive != true && this._workspaceUpload?.Visible != true && this._desktopWorkspace?.Operation?.IsRunning != true && this._workspaceConfirmationLifetime == null && !this._keyboardModal;
         }
 
         /// <summary>Costruisce l'unica proiezione condivisa usando soltanto stato in memoria</summary>
@@ -1964,11 +2097,12 @@ namespace Bivium.Components.Pages
             }
             bool ready = this._canAccess && this._hasActiveLease && this._panelsInitialized && !this._isDisposed;
             bool idle = this.IsCommandWorkflowAvailable();
+            bool blockingConfirmation = this._workspaceWorkflow?.IsActive == true && this._workspaceWorkflow.Kind is WorkspaceWorkflowKind.EditorAlert or WorkspaceWorkflowKind.ResetWorkspace;
             bool target = paths.Count > 0 && paths.All(availablePaths.Contains);
             bool editable = this.IsEditableEntry(single);
             bool renameTargets = single != null || (paths.Count > 1 && hasSelectedFile);
-            bool editorVisible = this._editorDialog?.IsVisible() == true;
-            bool renamerVisible = this._renamerDialog?.IsVisible() == true;
+            bool editorVisible = this._editorDialog?.IsOpen() == true;
+            bool renamerVisible = this._renamerDialog?.IsOpen() == true;
             List<CommanderCommandState> result = new List<CommanderCommandState>();
 
             void Add(string id, string label, string shortcut, bool enabled)
@@ -1981,8 +2115,8 @@ namespace Bivium.Components.Pages
                 result.Add(new CommanderCommandState(id, label, shortcut, enabled, enabled && context && !string.IsNullOrEmpty(shortcut)));
             }
 
-            Add("new-file", "New File", "Ctrl+N", idle && !string.IsNullOrEmpty(active.CurrentPath));
-            Add("new-folder", "New Folder", "Ctrl+Shift+N", idle && !string.IsNullOrEmpty(active.CurrentPath));
+            Add("new-file", "New File", "Shift+F4", idle && !string.IsNullOrEmpty(active.CurrentPath));
+            Add("new-folder", "New Folder", "F7", idle && !string.IsNullOrEmpty(active.CurrentPath));
             Add("copy", "Copy", "Ctrl+C", idle && target);
             Add("cut", "Cut", "Ctrl+X", idle && target);
             Add("paste", "Paste", "Ctrl+V", idle && this._clipboard.HasEntries() && !string.IsNullOrEmpty(active.CurrentPath));
@@ -2003,14 +2137,13 @@ namespace Bivium.Components.Pages
             Add("open", "Open", "Enter", idle && focused != null && (focused.IsDirectory || (!editorVisible && this.IsEditableEntry(focused))));
             Add("parent", "Parent folder", "Backspace", idle && !string.IsNullOrEmpty(active.CurrentPath) && Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(active.CurrentPath)) != null);
             Add("context-menu", "Context menu", "Shift+F10", idle && focused != null);
-            Add("terminal", "Terminal", "F12", ready && !this._commandDialogOpen && this._workspaceConfirmationLifetime == null && !this._keyboardModal);
+            Add("terminal", "Terminal", "F12", ready && !blockingConfirmation && this._workspaceConfirmationLifetime == null && !this._keyboardModal);
             Add("theme", "Theme", "", idle);
             Add("editor-extensions", "Editor Extensions...", "", idle);
             Add("creation-permissions", "Default Permissions...", "", idle);
             Add("authentication", "Authentication...", "", idle && this._authStatus.CanManageSettings);
             Add("logout", "Logout", "", idle && this._authStatus.Authenticated);
             Add("reset", "Reset Workspace...", "", idle);
-            Add("exit", "Exit", "", idle);
             Add("about", "About", "Ctrl+?", idle);
             return result;
         }
@@ -2037,8 +2170,10 @@ namespace Bivium.Components.Pages
         {
             if (!this.CanExecuteCommand("about"))
                 return;
-            this._commandDialogOpen = true;
-            this._aboutDialog.Show();
+            System.Reflection.Assembly assembly = System.Reflection.Assembly.GetExecutingAssembly();
+            string version = assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false).OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? assembly.GetName().Version?.ToString() ?? "";
+            WorkspaceAboutDraft draft = new WorkspaceAboutDraft(version, System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription, System.Runtime.InteropServices.RuntimeInformation.OSDescription);
+            this._workspaceWorkflow = this._workspaceService.BeginFormWorkflow(this.GetClientToken(), WorkspaceWorkflowKind.About, new WorkspaceWorkflowInvocation("", "", this._activePanel, "About", "", -1), JsonSerializer.Serialize(draft));
         }
 
         /// <summary>
@@ -2082,7 +2217,7 @@ namespace Bivium.Components.Pages
         /// <param name="silentPolicyRejection">Whether unsupported and oversized files silently no-op</param>
         private void OpenEditor(FileSystemEntry entry, bool silentPolicyRejection)
         {
-            if (this._editorDialog?.IsVisible() == true || !this.IsCommandWorkflowAvailable() || !this.CanMutateWorkspace())
+            if (this._editorDialog?.IsOpen() == true || !this.IsCommandWorkflowAvailable() || !this.CanMutateWorkspace())
                 return;
             if (entry == null || entry.IsDirectory)
                 return;
@@ -2103,8 +2238,7 @@ namespace Bivium.Components.Pages
             {
                 if (!silentPolicyRejection)
                 {
-                    this._commandDialogOpen = true;
-                    this._confirmDialog.Show("Edit", "Extension '" + extension + "' is not in the editable extensions list.", "OK", "");
+                    this.BeginWorkspaceConfirmation(WorkspaceWorkflowKind.EditorAlert, "Edit", "Extension '" + extension + "' is not in the editable extensions list.");
                 }
                 return;
             }
@@ -2112,8 +2246,7 @@ namespace Bivium.Components.Pages
             {
                 if (!silentPolicyRejection)
                 {
-                    this._commandDialogOpen = true;
-                    this._confirmDialog.Show("Edit", "File is too large to edit (max 5 MB).", "OK", "");
+                    this.BeginWorkspaceConfirmation(WorkspaceWorkflowKind.EditorAlert, "Edit", "File is too large to edit (max 5 MB).");
                 }
                 return;
             }
@@ -2125,8 +2258,7 @@ namespace Bivium.Components.Pages
             }
             else
             {
-                this._commandDialogOpen = true;
-                this._confirmDialog.Show("Edit", readResult.ErrorMessage, "OK", "");
+                this.BeginWorkspaceConfirmation(WorkspaceWorkflowKind.EditorAlert, "Edit", readResult.ErrorMessage);
             }
         }
 
@@ -2140,6 +2272,7 @@ namespace Bivium.Components.Pages
             PanelState active = this.GetActivePanel();
             this._clipboard.Paths = this.GetSelectedOrCursorPaths(active);
             this._clipboard.IsCut = false;
+            this.PersistWorkspaceClipboard();
         }
 
         /// <summary>
@@ -2152,6 +2285,19 @@ namespace Bivium.Components.Pages
             PanelState active = this.GetActivePanel();
             this._clipboard.Paths = this.GetSelectedOrCursorPaths(active);
             this._clipboard.IsCut = true;
+            this.PersistWorkspaceClipboard();
+        }
+
+        /// <summary>Commit clipboard interna; un rifiuto ripristina lo stato autorevole senza retry</summary>
+        private void PersistWorkspaceClipboard()
+        {
+            BiviumWorkspaceSnapshot workspace = this._workspaceService.GetSnapshot();
+            if (!this._workspaceService.TryUpdateClipboard(this.GetClientToken(), workspace.Revision, this._clipboard.Paths, this._clipboard.IsCut))
+            {
+                workspace = this._workspaceService.GetSnapshot();
+                this._clipboard = new ClipboardState { Paths = new List<string>(workspace.Desktop.ClipboardPaths), IsCut = workspace.Desktop.ClipboardIsCut };
+            }
+            this._desktopWorkspace = this._workspaceService.GetSnapshot();
         }
 
         /// <summary>
@@ -2163,45 +2309,10 @@ namespace Bivium.Components.Pages
                 return;
             if (this._clipboard.HasEntries())
             {
-                PanelState active = this.GetActivePanel();
-                string destinationDir = active.CurrentPath;
-                List<string> paths = new List<string>(this._clipboard.Paths);
-                bool isCut = this._clipboard.IsCut;
-
-                List<string> conflictPaths = this.GetPasteConflicts(paths, destinationDir);
-                if (conflictPaths.Count > 0)
-                {
-                    this.PreparePendingPaste(paths, conflictPaths, destinationDir, isCut);
-                    this.ShowNextPasteOverwritePrompt();
-                    return;
-                }
-
-                this.StartPasteOperation(paths, destinationDir, isCut, new List<string>());
+                this._workspaceWorkflow = this._workspaceService.BeginPasteWorkflow(this.GetClientToken(), this.GetActivePanel().CurrentPath, this._activePanel);
+                this._desktopWorkspace = this._workspaceService.GetSnapshot();
+                this.StateHasChanged();
             }
-        }
-
-        /// <summary>
-        /// Creates the cancellation source of a long file operation, linked to lease revocation
-        /// </summary>
-        /// <param name="revocationToken">Lease revocation token of the current client</param>
-        /// <returns>Cancellation source owned by the running operation</returns>
-        private CancellationTokenSource BeginCancellableOperation(CancellationToken revocationToken)
-        {
-            CancellationTokenSource source = CancellationTokenSource.CreateLinkedTokenSource(revocationToken);
-            this._operationCancellation = source;
-            return source;
-        }
-
-        /// <summary>
-        /// Releases the cancellation source of a finished file operation
-        /// </summary>
-        /// <param name="source">Cancellation source created for the operation</param>
-        private void EndCancellableOperation(CancellationTokenSource source)
-        {
-            if (this._operationCancellation == source)
-                this._operationCancellation = null;
-
-            source.Dispose();
         }
 
         /// <summary>
@@ -2209,236 +2320,13 @@ namespace Bivium.Components.Pages
         /// </summary>
         private void CancelActiveOperation()
         {
-            if (this._operationCancellation == null)
-                return;
-
-            this._operationCancellation.Cancel();
-            this._progressText = "Cancelling...";
-        }
-
-        /// <summary>
-        /// Starts a paste operation after overwrite decisions have been resolved
-        /// </summary>
-        /// <param name="paths">Source paths to process</param>
-        /// <param name="destinationDir">Destination directory</param>
-        /// <param name="isCut">True when moving, false when copying</param>
-        /// <param name="overwritePaths">Source paths approved for overwrite</param>
-        private void StartPasteOperation(List<string> paths, string destinationDir, bool isCut, List<string> overwritePaths)
-        {
-            if (paths.Count == 0 || !this.CanMutateWorkspace())
+            WorkspaceOperationSnapshot operation = this._workspaceService.GetSnapshot().Operation;
+            if (operation?.IsRunning == true)
             {
+                if (!this._workspaceService.TryCancelWorkspaceOperation(this.GetClientToken(), operation.Id, operation.Revision))
+                    this.ShowOperationWarning("Cancellation not accepted", "The operation or workspace ownership changed. Review the current state before retrying.");
                 return;
             }
-
-            List<string> operationPaths = new List<string>(paths);
-            List<string> operationOverwritePaths = new List<string>(overwritePaths);
-            CancellationToken revocationToken = this._workspaceService.GetRevocationToken(this.GetClientToken());
-            CancellationTokenSource operationCancellation = this.BeginCancellableOperation(revocationToken);
-            CancellationToken cancellationToken = operationCancellation.Token;
-
-            // Show initial progress
-            this._progressText = isCut ? "Moving..." : "Copying...";
-
-            Action<int, int, string> onProgress = this.CreateThrottledProgressCallback(isCut ? "Moving" : "Copying");
-
-            // Run file operation on background thread
-            Thread worker = new Thread(() =>
-            {
-                FileOperationResult result;
-
-                try
-                {
-                    if (isCut)
-                    {
-                        result = this._fileOperationService.MoveEntriesWithProgress(operationPaths, destinationDir, onProgress, operationOverwritePaths, cancellationToken);
-                    }
-                    else
-                    {
-                        result = this._fileOperationService.CopyEntriesWithProgress(operationPaths, destinationDir, onProgress, operationOverwritePaths, cancellationToken);
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    result = FileOperationResult.Fail("Operation cancelled.");
-                }
-
-                // Update UI on the render thread
-                _ = this.InvokeAsync(() =>
-                {
-                    this.EndCancellableOperation(operationCancellation);
-
-                    if (this._isDisposed || revocationToken.IsCancellationRequested)
-                    {
-                        this._progressText = "";
-                        return;
-                    }
-                    // Clear clipboard on successful cut
-                    if (isCut && result.Success)
-                    {
-                        this._clipboard.Clear();
-                    }
-
-                    // A cancelled operation keeps what it already wrote, so the panels still need a refresh
-                    this._progressText = cancellationToken.IsCancellationRequested ? "Operation cancelled, completed items kept." : "";
-
-                    this.RefreshVisiblePanels();
-
-                    if (cancellationToken.IsCancellationRequested)
-                    {
-                        this.NotifyWarning(isCut ? "Move cancelled" : "Copy cancelled", this._progressText);
-                    }
-                    else if (!result.Success)
-                    {
-                        this._pendingOperation = "";
-                        this.ShowOperationError(isCut ? "Move failed" : "Copy failed", result.ErrorMessage);
-                    }
-                    else
-                    {
-                        this.NotifySuccess(isCut ? "Move completed" : "Copy completed", operationPaths.Count + " item(s) processed.");
-                    }
-
-                    this.StateHasChanged();
-                });
-            });
-
-            worker.IsBackground = true;
-            worker.Start();
-        }
-
-        /// <summary>
-        /// Finds paste conflicts that need an overwrite decision
-        /// </summary>
-        /// <param name="paths">Source paths from clipboard</param>
-        /// <param name="destinationDir">Destination directory</param>
-        /// <returns>Source paths with destination conflicts</returns>
-        private List<string> GetPasteConflicts(List<string> paths, string destinationDir)
-        {
-            List<string> result = new List<string>();
-
-            for (int i = 0; i < paths.Count; i++)
-            {
-                string source = paths[i];
-                bool sourceIsFile = File.Exists(source);
-                bool sourceIsDirectory = Directory.Exists(source);
-                if (!sourceIsFile && !sourceIsDirectory)
-                {
-                    continue;
-                }
-
-                string destPath = Path.Combine(destinationDir, Path.GetFileName(source));
-                bool destinationExists = sourceIsFile ? File.Exists(destPath) : Directory.Exists(destPath);
-                if (!this.AreSamePath(source, destPath) && destinationExists)
-                {
-                    result.Add(source);
-                }
-            }
-
-            return result;
-        }
-
-        /// <summary>
-        /// Stores paste state while overwrite prompts are shown
-        /// </summary>
-        /// <param name="paths">Source paths to paste</param>
-        /// <param name="conflictPaths">Source paths with conflicts</param>
-        /// <param name="destinationDir">Destination directory</param>
-        /// <param name="isCut">True when moving, false when copying</param>
-        private void PreparePendingPaste(List<string> paths, List<string> conflictPaths, string destinationDir, bool isCut)
-        {
-            this._pendingPastePaths = new List<string>(paths);
-            this._pendingPasteConflictPaths = new List<string>(conflictPaths);
-            this._pendingPasteOverwritePaths = new List<string>();
-            this._pendingPasteSkippedPaths = new List<string>();
-            this._pendingPasteDestinationDir = destinationDir;
-            this._pendingPasteIsCut = isCut;
-            this._pendingPasteConflictIndex = 0;
-        }
-
-        /// <summary>
-        /// Shows the next overwrite prompt, or starts paste when all decisions are available
-        /// </summary>
-        private void ShowNextPasteOverwritePrompt()
-        {
-            if (this._pendingPasteConflictIndex >= this._pendingPasteConflictPaths.Count)
-            {
-                this.CompletePendingPaste();
-                return;
-            }
-
-            string sourcePath = this._pendingPasteConflictPaths[this._pendingPasteConflictIndex];
-            string destinationPath = Path.Combine(this._pendingPasteDestinationDir, Path.GetFileName(sourcePath));
-            bool isDirectory = Directory.Exists(sourcePath);
-            string entryType = isDirectory ? "directory" : "file";
-            string overwriteQuestion = isDirectory ? "Merge it and overwrite conflicting contents?" : "Overwrite it?";
-            string message = "A " + entryType + " named '" + Path.GetFileName(sourcePath) + "' already exists in the destination.\n\n"
-                + "Source: " + sourcePath + "\n"
-                + "Destination: " + destinationPath + "\n\n"
-                + overwriteQuestion;
-
-            this._commandDialogOpen = true;
-            this._overwriteDialog.Show("Overwrite " + entryType, message);
-        }
-
-        /// <summary>
-        /// Completes the pending paste after overwrite prompts
-        /// </summary>
-        private void CompletePendingPaste()
-        {
-            List<string> paths = new List<string>();
-            for (int i = 0; i < this._pendingPastePaths.Count; i++)
-            {
-                if (!this.ContainsPath(this._pendingPasteSkippedPaths, this._pendingPastePaths[i]))
-                {
-                    paths.Add(this._pendingPastePaths[i]);
-                }
-            }
-
-            List<string> overwritePaths = new List<string>(this._pendingPasteOverwritePaths);
-            string destinationDir = this._pendingPasteDestinationDir;
-            bool isCut = this._pendingPasteIsCut;
-
-            this.ClearPendingPaste();
-
-            if (paths.Count > 0)
-            {
-                this.StartPasteOperation(paths, destinationDir, isCut, overwritePaths);
-            }
-        }
-
-        /// <summary>
-        /// Clears pending paste state
-        /// </summary>
-        private void ClearPendingPaste()
-        {
-            this._pendingPastePaths = new List<string>();
-            this._pendingPasteConflictPaths = new List<string>();
-            this._pendingPasteOverwritePaths = new List<string>();
-            this._pendingPasteSkippedPaths = new List<string>();
-            this._pendingPasteDestinationDir = "";
-            this._pendingPasteIsCut = false;
-            this._pendingPasteConflictIndex = 0;
-        }
-
-        /// <summary>
-        /// Checks whether a path list contains a path using filesystem comparison rules
-        /// </summary>
-        /// <param name="paths">Path list</param>
-        /// <param name="path">Path to find</param>
-        /// <returns>True if the path is present</returns>
-        private bool ContainsPath(List<string> paths, string path)
-        {
-            bool result = false;
-
-            for (int i = 0; i < paths.Count; i++)
-            {
-                if (this.AreSamePath(paths[i], path))
-                {
-                    result = true;
-                    break;
-                }
-            }
-
-            return result;
         }
 
         /// <summary>
@@ -2481,9 +2369,7 @@ namespace Bivium.Components.Pages
         {
             if (!this.CanExecuteCommand("new-file"))
                 return;
-            this._commandDialogOpen = true;
-            this._pendingOperation = "newfile";
-            this._inputDialog.Show("New File", "File name:", "");
+            this.BeginWorkspaceInput(WorkspaceWorkflowKind.CreateFile, "", this.GetActivePanel().CurrentPath, "New File", "File name:", "", -1);
         }
 
         /// <summary>
@@ -2493,9 +2379,7 @@ namespace Bivium.Components.Pages
         {
             if (!this.CanExecuteCommand("new-folder"))
                 return;
-            this._commandDialogOpen = true;
-            this._pendingOperation = "mkdir";
-            this._inputDialog.Show("New Folder", "Folder name:", "");
+            this.BeginWorkspaceInput(WorkspaceWorkflowKind.CreateDirectory, "", this.GetActivePanel().CurrentPath, "New Folder", "Folder name:", "", -1);
         }
 
         /// <summary>
@@ -2517,9 +2401,81 @@ namespace Bivium.Components.Pages
                         selectionLength -= extension.Length;
                 }
 
-                this._pendingOperation = "rename";
-                this._commandDialogOpen = true;
-                this._inputDialog.Show("Rename", "New name:", entry.Name, selectionLength);
+                this.BeginWorkspaceInput(WorkspaceWorkflowKind.RenameEntry, entry.FullPath, Path.GetDirectoryName(entry.FullPath), "Rename", "New name:", entry.Name, selectionLength);
+            }
+        }
+
+        /// <summary>Invoca una volta il workflow server-owned con argomenti catturati</summary>
+        /// <param name="kind">Comando tipizzato</param>
+        /// <param name="sourcePath">Sorgente catturata</param>
+        /// <param name="parentPath">Destinazione catturata</param>
+        /// <param name="title">Titolo locale preesistente</param>
+        /// <param name="label">Etichetta locale preesistente</param>
+        /// <param name="draft">Draft iniziale</param>
+        /// <param name="selectionLength">Selezione iniziale</param>
+        private void BeginWorkspaceInput(WorkspaceWorkflowKind kind, string sourcePath, string parentPath, string title, string label, string draft, int selectionLength)
+        {
+            WorkspaceWorkflowInvocation invocation = new WorkspaceWorkflowInvocation(sourcePath, parentPath, this._activePanel, title, label, selectionLength);
+            this._workspaceWorkflow = this._workspaceService.BeginInputWorkflow(this.GetClientToken(), kind, invocation, draft);
+            this._desktopWorkspace = this._workspaceService.GetSnapshot();
+            this.StateHasChanged();
+        }
+
+        /// <summary>Hydrate e riconcilia risultati; non risponde a domande e non esegue filesystem mutante</summary>
+        private void RefreshWorkspaceWorkflow()
+        {
+            this._workspaceWorkflow = this._hasActiveLease ? this._workspaceService.GetWorkflow(this.GetClientToken()) : null;
+            this._workspaceUpload = this._hasActiveLease ? this._workspaceService.GetUpload(this.GetClientToken()) : null;
+            if (this._workspaceUpload?.Phase == WorkspaceUploadPhase.Succeeded && this._workspaceUpload.Id != this._observedCompletedUploadId && this._panelsInitialized && this._desktopWorkspace?.Handoff?.Frozen != true)
+            {
+                this._observedCompletedUploadId = this._workspaceUpload.Id;
+                this.RefreshVisiblePanels();
+                this.NotifySuccess("Upload completed", "Visible panels have been refreshed.");
+            }
+            WorkspaceOperationSnapshot operation = this._desktopWorkspace?.Operation;
+            if (operation?.IsRunning == true && BiviumWorkspaceService.IsFormKind(operation.Kind))
+                this._progressText = "";
+            if (!this._hasActiveLease || !this._panelsInitialized || operation == null || operation.IsRunning || operation.Id == this._observedCompletedOperationId || this._desktopWorkspace.Handoff?.Frozen == true)
+                return;
+            this._observedCompletedOperationId = operation.Id;
+            this.RefreshVisiblePanels();
+            if (operation.Kind == WorkspaceWorkflowKind.DeleteEntries && this._workspaceWorkflow?.OperationId == operation.Id)
+            {
+                WorkspaceWorkflowInvocation invocation = this._workspaceWorkflow.InvocationParameters;
+                PanelState panel = invocation.PanelIndex == 0 ? this._leftPanel : this._rightPanel;
+                if (this.AreSamePath(panel.CurrentPath, invocation.ParentPath))
+                {
+                    panel.SelectedPaths.Clear();
+                    if (panel.CursorIndex >= 0 && panel.CursorIndex < panel.Entries.Count)
+                        panel.SelectedPaths.Add(panel.Entries[panel.CursorIndex].FullPath);
+                }
+                if (operation.Phase == WorkspaceOperationPhase.Succeeded)
+                    this.NotifySuccess("Delete completed", operation.FilesProcessed + " item(s) deleted.");
+                return;
+            }
+            if (operation.Kind is WorkspaceWorkflowKind.CopyEntries or WorkspaceWorkflowKind.MoveEntries or WorkspaceWorkflowKind.TransferEntries or WorkspaceWorkflowKind.BatchRename || BiviumWorkspaceService.IsFormKind(operation.Kind))
+            {
+                if (operation.Phase == WorkspaceOperationPhase.Succeeded)
+                    this.NotifySuccess(operation.Kind + " completed", operation.FilesProcessed + " item(s) processed.");
+                return;
+            }
+            if (operation.Phase == WorkspaceOperationPhase.Succeeded && this._workspaceWorkflow?.OperationId == operation.Id)
+            {
+                WorkspaceWorkflowInvocation invocation = this._workspaceWorkflow.InvocationParameters;
+                PanelState panel = invocation.PanelIndex == 0 ? this._leftPanel : this._rightPanel;
+                if (this.AreSamePath(panel.CurrentPath, invocation.ParentPath))
+                {
+                    for (int i = 0; i < panel.Entries.Count; i++)
+                    {
+                        if (panel.Entries[i].Name != this._workspaceWorkflow.Draft)
+                            continue;
+                        this.SetPanelFocusFromIndex(panel, i);
+                        panel.SelectedPaths.Clear();
+                        panel.SelectedPaths.Add(panel.Entries[i].FullPath);
+                        this._scrollAfterRender = this._activePanel == invocation.PanelIndex;
+                        break;
+                    }
+                }
             }
         }
 
@@ -2535,9 +2491,10 @@ namespace Bivium.Components.Pages
             if (paths.Count > 0)
             {
                 active.SelectedPaths = paths;
-                this._pendingOperation = "delete";
-                this._commandDialogOpen = true;
-                this._confirmDialog.Show("Delete", "Delete " + active.SelectedPaths.Count + " item(s)?", "Delete", "Cancel");
+                WorkspaceWorkflowInvocation invocation = new WorkspaceWorkflowInvocation("", active.CurrentPath, this._activePanel, "Delete", "Delete " + paths.Count + " item(s)?", -1, paths.ToImmutableArray());
+                this._workspaceWorkflow = this._workspaceService.BeginDeleteWorkflow(this.GetClientToken(), invocation);
+                this._desktopWorkspace = this._workspaceService.GetSnapshot();
+                this.StateHasChanged();
             }
         }
 
@@ -2599,9 +2556,10 @@ namespace Bivium.Components.Pages
         {
             if (!this.CanExecuteCommand("upload"))
                 return;
-            this._commandDialogOpen = true;
             PanelState active = this.GetActivePanel();
-            this._uploadDialog.Show(active.CurrentPath);
+            this._workspaceUpload = this._workspaceService.BeginUpload(this.GetClientToken(), active.CurrentPath);
+            this._desktopWorkspace = this._workspaceService.GetSnapshot();
+            this.StateHasChanged();
         }
 
         /// <summary>
@@ -2626,14 +2584,7 @@ namespace Bivium.Components.Pages
 
             // In single panel mode, ensure active panel is always left
             if (this._singlePanelMode)
-            {
                 this._activePanel = 0;
-                this._panelsAreaClass = "panels-area single-panel";
-            }
-            else
-            {
-                this._panelsAreaClass = "panels-area";
-            }
         }
 
         /// <summary>
@@ -2647,8 +2598,7 @@ namespace Bivium.Components.Pages
             FileSystemEntry entry = this.GetSingleTargetEntry(active, "Properties");
             if (entry != null)
             {
-                this._commandDialogOpen = true;
-                this._propertiesDialog.Show(entry);
+                this._workspaceWorkflow = this._workspaceService.BeginEntryFormWorkflow(this.GetClientToken(), WorkspaceWorkflowKind.Properties, entry, this._activePanel);
             }
         }
 
@@ -2663,8 +2613,7 @@ namespace Bivium.Components.Pages
             FileSystemEntry entry = this.GetSingleTargetEntry(active, "Permissions");
             if (entry != null)
             {
-                this._commandDialogOpen = true;
-                this._permissionsDialog.Show(entry);
+                this._workspaceWorkflow = this._workspaceService.BeginEntryFormWorkflow(this.GetClientToken(), WorkspaceWorkflowKind.Permissions, entry, this._activePanel);
             }
         }
 
@@ -2714,9 +2663,11 @@ namespace Bivium.Components.Pages
 
             if (this._jsModule == null)
             {
-                this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260922-file-columns-v1");
+                this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js");
             }
 
+            // La scrittura di appsettings.json e le verifiche di autenticazione e lease vivono solo in SettingsController:
+            // non esiste un servizio settings da invocare direttamente, quindi il circuito passa dallo stesso endpoint HTTP.
             string json = JsonSerializer.Serialize(normalizedTheme);
             JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("putJsonResult", "/api/Settings/theme", json, this._attachmentId, this._leaseGeneration);
             if (!response.Ok)
@@ -2743,9 +2694,8 @@ namespace Bivium.Components.Pages
         {
             if (!this.CanExecuteCommand("editor-extensions"))
                 return;
-            this._commandDialogOpen = true;
             List<string> extensions = this._settings.CurrentValue.EditableExtensions;
-            this._settingsDialog.Show(extensions);
+            this._workspaceWorkflow = this._workspaceService.BeginFormWorkflow(this.GetClientToken(), WorkspaceWorkflowKind.EditorExtensions, new WorkspaceWorkflowInvocation("", "", this._activePanel, "Editor Extensions", "", -1), string.Join("\n", extensions));
         }
 
         /// <summary>
@@ -2755,8 +2705,7 @@ namespace Bivium.Components.Pages
         {
             if (!this.CanExecuteCommand("creation-permissions"))
                 return;
-            this._commandDialogOpen = true;
-            this._creationPermissionsDialog.Show(this._settings.CurrentValue.DefaultCreationPermissions);
+            this._workspaceWorkflow = this._workspaceService.BeginFormWorkflow(this.GetClientToken(), WorkspaceWorkflowKind.CreationPermissions, new WorkspaceWorkflowInvocation("", "", this._activePanel, "Default Creation Permissions", "", -1), JsonSerializer.Serialize(this._settings.CurrentValue.DefaultCreationPermissions ?? new DefaultCreationPermissionsSettings()));
         }
 
         /// <summary>
@@ -2766,7 +2715,6 @@ namespace Bivium.Components.Pages
         {
             if (!this.CanExecuteCommand("authentication"))
                 return;
-            this._commandDialogOpen = true;
             await this._authSettingsDialog.Show();
         }
 
@@ -2779,7 +2727,7 @@ namespace Bivium.Components.Pages
                 return;
             if (this._jsModule == null)
             {
-                this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260922-file-columns-v1");
+                this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js");
             }
 
             bool success = await this._jsModule.InvokeAsync<bool>("postJson", "/api/Auth/logout", "{}");
@@ -2790,39 +2738,39 @@ namespace Bivium.Components.Pages
         }
 
         /// <summary>
-        /// Exits the application (closes the browser tab via JS)
-        /// </summary>
-        private void DoExit()
-        {
-            if (!this.CanExecuteCommand("exit"))
-                return;
-            _ = this.JSRuntime.InvokeVoidAsync("close");
-        }
-
-        /// <summary>
         /// Terminates every PTY and restores the workspace defaults after explicit confirmation
         /// </summary>
-        private async System.Threading.Tasks.Task DoResetWorkspace()
+        private System.Threading.Tasks.Task DoResetWorkspace()
         {
             if (!this.CanExecuteCommand("reset"))
-                return;
+                return System.Threading.Tasks.Task.CompletedTask;
             const string message = "Reset workspace? This terminates every terminal process and clears saved panel and window state.";
-            bool confirmed = await this.ConfirmWorkspaceActionAsync("Reset workspace", message, "Reset");
-            if (!confirmed || this._isDisposed || !this.CanMutateWorkspace())
-                return;
+            this.BeginWorkspaceConfirmation(WorkspaceWorkflowKind.ResetWorkspace, "Reset workspace", message);
+            return System.Threading.Tasks.Task.CompletedTask;
+        }
 
-            WorkspaceClientToken token = this.GetClientToken();
-            this._terminalRuntimeService.CloseAllSessions(token);
-            BiviumWorkspaceSnapshot snapshot = this._workspaceService.ResetWorkspace(token);
-            this._workspaceRevision = snapshot.Revision;
-            this._panelsInitialized = false;
-            this.InitializePanels();
+        /// <summary>Apre soltanto il workflow chiuso; effetti e risposte appartengono al servizio workspace</summary>
+        /// <param name="kind">Alert editor oppure intento reset</param>
+        /// <param name="title">Titolo catturato</param>
+        /// <param name="message">Testo immutabile</param>
+        private void BeginWorkspaceConfirmation(WorkspaceWorkflowKind kind, string title, string message)
+        {
+            this._workspaceWorkflow = this._workspaceService.BeginConfirmationWorkflow(this.GetClientToken(), kind, title, message);
+            this._desktopWorkspace = this._workspaceService.GetSnapshot();
+            this.StateHasChanged();
+        }
+
+        /// <summary>Solo feedback del reset già consumato; non termina PTY e non reinvoca reset</summary>
+        private void HandleWorkspaceResetConfirmed()
+        {
+            if (this._isDisposed || !this.CanPublishWorkspace())
+                return;
             this._progressText = "Workspace reset completed.";
             this.NotifySuccess("Workspace reset", this._progressText);
             this.StateHasChanged();
         }
 
-        /// <summary>Attende una conferma nativa con ownership limitata all'apertura corrente</summary>
+        /// <summary>Attende solo la conferma locale takeover, con ownership limitata all'apertura corrente</summary>
         /// <param name="title">Titolo del dialog</param>
         /// <param name="message">Messaggio da confermare</param>
         /// <param name="confirmText">Etichetta dell'azione confermata</param>
@@ -2834,7 +2782,6 @@ namespace Bivium.Components.Pages
             ConfirmOptions options = new ConfirmOptions
             {
                 Width = "min(92vw, 48rem)",
-                WrapperCssClass = "bivium-modal-layer",
                 CloseDialogOnEsc = true,
                 CloseDialogOnOverlayClick = true,
                 AutoFocusFirstElement = true,
@@ -2875,62 +2822,7 @@ namespace Bivium.Components.Pages
             }
 
             string destinationDir = active.CurrentPath;
-            CancellationToken revocationToken = this._workspaceService.GetRevocationToken(this.GetClientToken());
-            CancellationTokenSource operationCancellation = this.BeginCancellableOperation(revocationToken);
-            CancellationToken cancellationToken = operationCancellation.Token;
-
-            // Show initial progress
-            this._progressText = "Extracting...";
-
-            Action<int, int, string> onProgress = this.CreateThrottledProgressCallback("Extracting");
-
-            // Run on background thread
-            Thread worker = new Thread(() =>
-            {
-                FileOperationResult result;
-                try
-                {
-                    result = this.ExtractArchives(archivePaths, destinationDir, false, onProgress, cancellationToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    result = FileOperationResult.Fail("Operation cancelled.");
-                }
-
-                _ = this.InvokeAsync(() =>
-                {
-                    this.EndCancellableOperation(operationCancellation);
-
-                    if (this._isDisposed || revocationToken.IsCancellationRequested)
-                    {
-                        this._progressText = "";
-                        return;
-                    }
-
-                    // A cancelled operation keeps what it already wrote, so the panels still need a refresh
-                    this._progressText = cancellationToken.IsCancellationRequested ? "Operation cancelled, completed items kept." : "";
-                    this.RefreshVisiblePanels();
-
-                    if (cancellationToken.IsCancellationRequested)
-                    {
-                        this.NotifyWarning("Extraction cancelled", this._progressText);
-                    }
-                    else if (!result.Success)
-                    {
-                        this._pendingOperation = "";
-                        this.ShowOperationError("Extraction failed", result.ErrorMessage);
-                    }
-                    else
-                    {
-                        this.NotifySuccess("Extraction completed", archivePaths.Count + " archive(s) processed.");
-                    }
-
-                    this.StateHasChanged();
-                });
-            });
-
-            worker.IsBackground = true;
-            worker.Start();
+            this.BeginWorkspaceExtraction(destinationDir, archivePaths, false);
         }
 
         /// <summary>
@@ -2950,62 +2842,14 @@ namespace Bivium.Components.Pages
             }
 
             string destinationDir = active.CurrentPath;
-            CancellationToken revocationToken = this._workspaceService.GetRevocationToken(this.GetClientToken());
-            CancellationTokenSource operationCancellation = this.BeginCancellableOperation(revocationToken);
-            CancellationToken cancellationToken = operationCancellation.Token;
+            this.BeginWorkspaceExtraction(destinationDir, archivePaths, true);
+        }
 
-            // Show initial progress
-            this._progressText = archivePaths.Count == 1 ? "Extracting to " + this.GetArchiveBaseName(Path.GetFileName(archivePaths[0])) + "/..." : "Extracting to */...";
-
-            Action<int, int, string> onProgress = this.CreateThrottledProgressCallback("Extracting");
-
-            // Run on background thread
-            Thread worker = new Thread(() =>
-            {
-                FileOperationResult result;
-                try
-                {
-                    result = this.ExtractArchives(archivePaths, destinationDir, true, onProgress, cancellationToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    result = FileOperationResult.Fail("Operation cancelled.");
-                }
-
-                _ = this.InvokeAsync(() =>
-                {
-                    this.EndCancellableOperation(operationCancellation);
-
-                    if (this._isDisposed || revocationToken.IsCancellationRequested)
-                    {
-                        this._progressText = "";
-                        return;
-                    }
-
-                    // A cancelled operation keeps what it already wrote, so the panels still need a refresh
-                    this._progressText = cancellationToken.IsCancellationRequested ? "Operation cancelled, completed items kept." : "";
-                    this.RefreshVisiblePanels();
-
-                    if (cancellationToken.IsCancellationRequested)
-                    {
-                        this.NotifyWarning("Extraction cancelled", this._progressText);
-                    }
-                    else if (!result.Success)
-                    {
-                        this._pendingOperation = "";
-                        this.ShowOperationError("Extraction failed", result.ErrorMessage);
-                    }
-                    else
-                    {
-                        this.NotifySuccess("Extraction completed", archivePaths.Count + " archive(s) processed.");
-                    }
-
-                    this.StateHasChanged();
-                });
-            });
-
-            worker.IsBackground = true;
-            worker.Start();
+        /// <summary>Il gesto comando ammette lo stesso runner senza nuove conferme</summary>
+        private void BeginWorkspaceExtraction(string destination, List<string> paths, bool ownFolder)
+        {
+            WorkspaceWorkflowInvocation invocation = new WorkspaceWorkflowInvocation("", destination, this._activePanel, "Extract", "", -1, paths.ToImmutableArray(), ExtractToOwnFolder: ownFolder);
+            this._workspaceWorkflow = this._workspaceService.BeginFormWorkflow(this.GetClientToken(), WorkspaceWorkflowKind.Extract, invocation, "");
         }
 
         /// <summary>
@@ -3149,56 +2993,6 @@ namespace Bivium.Components.Pages
         }
 
         /// <summary>
-        /// Extracts one or more archives
-        /// </summary>
-        /// <param name="archivePaths">Archive paths to extract</param>
-        /// <param name="destinationDir">Destination directory</param>
-        /// <param name="extractToOwnFolder">If true, each archive is extracted to its own folder</param>
-        /// <param name="onProgress">Progress callback</param>
-        /// <param name="cancellationToken">Cancellation token for lease revocation</param>
-        /// <returns>Operation result</returns>
-        private FileOperationResult ExtractArchives(List<string> archivePaths, string destinationDir, bool extractToOwnFolder, Action<int, int, string> onProgress, CancellationToken cancellationToken)
-        {
-            int processed = 0;
-
-            for (int i = 0; i < archivePaths.Count; i++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                string archivePath = archivePaths[i];
-                string currentDestination = destinationDir;
-
-                if (extractToOwnFolder)
-                {
-                    string folderName = this.GetArchiveBaseName(Path.GetFileName(archivePath));
-                    currentDestination = Path.Combine(destinationDir, folderName);
-
-                    try
-                    {
-                        Directory.CreateDirectory(currentDestination);
-                    }
-                    catch (UnauthorizedAccessException ex)
-                    {
-                        return FileOperationResult.Fail("Access denied: " + ex.Message);
-                    }
-                    catch (IOException ex)
-                    {
-                        return FileOperationResult.Fail("I/O error: " + ex.Message);
-                    }
-                }
-
-                FileOperationResult result = this._archiveService.ExtractArchive(archivePath, currentDestination, onProgress, cancellationToken);
-                if (!result.Success)
-                {
-                    return result;
-                }
-
-                processed++;
-            }
-
-            return FileOperationResult.Ok(processed);
-        }
-
-        /// <summary>
         /// Returns archive file name without single or compound archive extension
         /// </summary>
         /// <param name="fileName">Archive file name</param>
@@ -3253,8 +3047,8 @@ namespace Bivium.Components.Pages
                 }
             }
 
-            this._commandDialogOpen = true;
-            this._compressDialog.Show(baseName);
+            WorkspaceWorkflowInvocation invocation = new WorkspaceWorkflowInvocation("", active.CurrentPath, this._activePanel, "Compress", "", -1, paths.ToImmutableArray());
+            this._workspaceWorkflow = this._workspaceService.BeginFormWorkflow(this.GetClientToken(), WorkspaceWorkflowKind.Compress, invocation, JsonSerializer.Serialize(new WorkspaceCompressDraft(ArchiveFormat.Zip, baseName + ".zip", baseName)));
         }
 
         /// <summary>
@@ -3359,198 +3153,6 @@ namespace Bivium.Components.Pages
         #region Dialog Callbacks
 
         /// <summary>
-        /// Handles confirm dialog result
-        /// </summary>
-        /// <param name="confirmed">True if confirmed</param>
-        private void HandleConfirmDialogClose(bool confirmed)
-        {
-            this._commandDialogOpen = false;
-            if (confirmed && this._pendingOperation == "delete" && this.CanMutateWorkspace())
-            {
-                PanelState active = this.GetActivePanel();
-                int deleteCount = active.SelectedPaths.Count;
-                CancellationToken cancellationToken = this._workspaceService.GetRevocationToken(this.GetClientToken());
-                FileOperationResult result;
-                try
-                {
-                    result = this._fileOperationService.DeleteEntries(active.SelectedPaths, cancellationToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    this._pendingOperation = "";
-                    return;
-                }
-
-                active.SelectedPaths.Clear();
-                this.LoadPanelContents(active);
-
-                // Clamp cursor to valid range after deletion
-                if (active.CursorIndex >= active.Entries.Count && active.Entries.Count > 0)
-                {
-                    active.CursorIndex = active.Entries.Count - 1;
-                }
-
-                // Select the entry at cursor position
-                if (active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count)
-                {
-                    active.SelectedPaths.Add(active.Entries[active.CursorIndex].FullPath);
-                }
-
-                if (!result.Success)
-                {
-                    this._pendingOperation = "";
-                    this.ShowOperationError("Delete failed", result.ErrorMessage);
-                }
-                else
-                {
-                    this.NotifySuccess("Delete completed", deleteCount + " item(s) deleted.");
-                }
-            }
-
-            this._pendingOperation = "";
-        }
-
-        /// <summary>
-        /// Handles overwrite dialog result during paste
-        /// </summary>
-        /// <param name="choice">Overwrite choice</param>
-        private void HandleOverwriteDialogClose(OverwriteChoice choice)
-        {
-            this._commandDialogOpen = false;
-            if (!this.CanMutateWorkspace())
-            {
-                this.ClearPendingPaste();
-                return;
-            }
-
-            if (this._pendingPasteConflictPaths.Count == 0 || this._pendingPasteConflictIndex >= this._pendingPasteConflictPaths.Count)
-            {
-                this.ClearPendingPaste();
-                return;
-            }
-
-            string currentPath = this._pendingPasteConflictPaths[this._pendingPasteConflictIndex];
-
-            if (choice == OverwriteChoice.Yes)
-            {
-                this._pendingPasteOverwritePaths.Add(currentPath);
-                this._pendingPasteConflictIndex++;
-            }
-            else if (choice == OverwriteChoice.YesToAll)
-            {
-                for (int i = this._pendingPasteConflictIndex; i < this._pendingPasteConflictPaths.Count; i++)
-                {
-                    this._pendingPasteOverwritePaths.Add(this._pendingPasteConflictPaths[i]);
-                }
-
-                this._pendingPasteConflictIndex = this._pendingPasteConflictPaths.Count;
-            }
-            else
-            {
-                this._pendingPasteSkippedPaths.Add(currentPath);
-                this._pendingPasteConflictIndex++;
-            }
-
-            this.ShowNextPasteOverwritePrompt();
-        }
-
-        /// <summary>
-        /// Handles input dialog result
-        /// </summary>
-        /// <param name="value">Input value (empty if cancelled)</param>
-        private void HandleInputDialogClose(string value)
-        {
-            this._commandDialogOpen = false;
-            if (!string.IsNullOrEmpty(value) && this.CanMutateWorkspace())
-            {
-                string pendingOperation = this._pendingOperation;
-                PanelState active = this.GetActivePanel();
-                FileOperationResult result = new FileOperationResult();
-
-                if (this._pendingOperation == "rename")
-                {
-                    if (active.CursorIndex >= 0 && active.CursorIndex < active.Entries.Count)
-                    {
-                        string path = active.Entries[active.CursorIndex].FullPath;
-                        result = this._fileOperationService.RenameEntry(path, value);
-                    }
-                }
-                else if (this._pendingOperation == "mkdir")
-                {
-                    result = this._fileOperationService.CreateDirectory(active.CurrentPath, value);
-                }
-                else if (this._pendingOperation == "newfile")
-                {
-                    result = this._fileOperationService.CreateFile(active.CurrentPath, value);
-                }
-
-                this.LoadPanelContents(active);
-
-                // Move cursor to the created/renamed entry and scroll to it
-                if (result.Success)
-                {
-                    for (int i = 0; i < active.Entries.Count; i++)
-                    {
-                        if (active.Entries[i].Name == value)
-                        {
-                            this.SetPanelFocusFromIndex(active, i);
-                            active.SelectedPaths.Clear();
-                            active.SelectedPaths.Add(active.Entries[i].FullPath);
-                            this._scrollAfterRender = true;
-                            break;
-                        }
-                    }
-                }
-
-                if (!result.Success && !string.IsNullOrEmpty(result.ErrorMessage))
-                {
-                    this._pendingOperation = "";
-                    this.ShowOperationError("File operation failed", result.ErrorMessage);
-                }
-                else if (result.Success)
-                {
-                    string summary = pendingOperation == "rename" ? "Rename completed" : pendingOperation == "mkdir" ? "Folder created" : "File created";
-                    this.NotifySuccess(summary, value);
-                }
-            }
-
-            this._pendingOperation = "";
-        }
-
-        /// <summary>
-        /// Handles properties dialog close
-        /// </summary>
-        private void HandlePropertiesDialogClose()
-        {
-            this._commandDialogOpen = false;
-            // Properties is read-only, nothing to do
-        }
-
-        /// <summary>
-        /// Handles permissions dialog close
-        /// </summary>
-        /// <param name="saved">True if permissions were saved</param>
-        private void HandlePermissionsDialogClose(bool saved)
-        {
-            this._commandDialogOpen = false;
-            // Refresh active panel to reflect permission changes
-            if (saved && this.CanMutateWorkspace())
-            {
-                PanelState active = this.GetActivePanel();
-                this.LoadPanelContents(active);
-                this.NotifySuccess("Permissions updated", active.Entries.Count + " item(s) reloaded.");
-            }
-        }
-
-        /// <summary>
-        /// Handles about dialog close
-        /// </summary>
-        private void HandleAboutDialogClose()
-        {
-            this._commandDialogOpen = false;
-        }
-
-        /// <summary>
         /// Handles editor dialog close
         /// </summary>
         /// <param name="saved">True if file was saved</param>
@@ -3565,118 +3167,12 @@ namespace Bivium.Components.Pages
             }
         }
 
-        /// <summary>
-        /// Handles upload dialog close
-        /// </summary>
-        /// <param name="uploaded">True if file was uploaded</param>
-        private void HandleUploadDialogClose(bool uploaded)
+        /// <summary>Esegue sull'editor locale la scelta consumata dalla domanda di chiusura</summary>
+        /// <param name="choice">Save oppure discard</param>
+        private async System.Threading.Tasks.Task HandleEditorCloseResolved(string choice)
         {
-            this._commandDialogOpen = false;
-            // Refresh both panels after upload
-            if (uploaded && this.CanMutateWorkspace())
-            {
-                this.RefreshVisiblePanels();
-                this.NotifySuccess("Upload completed", "Visible panels have been refreshed.");
-                this.StateHasChanged();
-            }
-        }
-
-        /// <summary>
-        /// Handles compress dialog close and starts compression
-        /// </summary>
-        /// <param name="result">Tuple of selected format and output file name</param>
-        private void HandleCompressDialogClose((ArchiveFormat Format, string OutputName) result)
-        {
-            this._commandDialogOpen = false;
-            // Empty name means cancelled
-            if (string.IsNullOrEmpty(result.OutputName))
-            {
-                return;
-            }
-            if (!this.CanMutateWorkspace())
-                return;
-
-            PanelState active = this.GetActivePanel();
-            List<string> paths = new List<string>(active.SelectedPaths);
-
-            string outputName = result.OutputName.Trim();
-            if (!this.IsValidOutputFileName(outputName))
-            {
-                this.ShowOperationWarning("Compression not started", "Archive name must be a file name, not a path.");
-                return;
-            }
-
-            string outputPath = Path.Combine(active.CurrentPath, outputName);
-            ArchiveFormat format = result.Format;
-            CancellationToken revocationToken = this._workspaceService.GetRevocationToken(this.GetClientToken());
-            CancellationTokenSource operationCancellation = this.BeginCancellableOperation(revocationToken);
-            CancellationToken cancellationToken = operationCancellation.Token;
-
-            // Show initial progress
-            this._progressText = "Compressing...";
-
-            Action<int, int, string> onProgress = this.CreateThrottledProgressCallback("Compressing");
-
-            // Run on background thread
-            Thread worker = new Thread(() =>
-            {
-                FileOperationResult opResult;
-                try
-                {
-                    opResult = this._archiveService.CreateArchive(outputPath, paths, format, onProgress, cancellationToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    opResult = FileOperationResult.Fail("Operation cancelled.");
-                }
-
-                _ = this.InvokeAsync(() =>
-                {
-                    this.EndCancellableOperation(operationCancellation);
-
-                    if (this._isDisposed || revocationToken.IsCancellationRequested)
-                    {
-                        this._progressText = "";
-                        return;
-                    }
-
-                    // A cancelled operation keeps the partial archive, so the panels still need a refresh
-                    this._progressText = cancellationToken.IsCancellationRequested ? "Operation cancelled, incomplete archive kept." : "";
-                    this.RefreshVisiblePanels();
-
-                    if (cancellationToken.IsCancellationRequested)
-                    {
-                        this.NotifyWarning("Compression cancelled", this._progressText);
-                    }
-                    else if (!opResult.Success)
-                    {
-                        this._pendingOperation = "";
-                        this.ShowOperationError("Compression failed", opResult.ErrorMessage);
-                    }
-                    else
-                    {
-                        this.NotifySuccess("Compression completed", outputName);
-                    }
-
-                    this.StateHasChanged();
-                });
-            });
-
-            worker.IsBackground = true;
-            worker.Start();
-        }
-
-        /// <summary>
-        /// Validates a user-entered output file name
-        /// </summary>
-        /// <param name="fileName">File name to validate</param>
-        /// <returns>True if the value is a plain file name</returns>
-        private bool IsValidOutputFileName(string fileName)
-        {
-            bool result = !string.IsNullOrWhiteSpace(fileName)
-                && fileName == Path.GetFileName(fileName)
-                && fileName.IndexOfAny(Path.GetInvalidFileNameChars()) < 0;
-            return result;
+            if (this._editorDialog != null)
+                await this._editorDialog.CompleteCloseAsync(choice == BiviumWorkspaceService.EDITOR_CLOSE_SAVE);
         }
 
         /// <summary>
@@ -3684,7 +3180,6 @@ namespace Bivium.Components.Pages
         /// </summary>
         private async System.Threading.Tasks.Task HandleSettingsDialogClose()
         {
-            this._commandDialogOpen = false;
             await this.RefreshAuthenticationState();
             this.StateHasChanged();
         }
@@ -3719,13 +3214,6 @@ namespace Bivium.Components.Pages
             this.StateHasChanged();
         }
 
-        /// <summary>
-        /// Handles terminal state changes
-        /// </summary>
-        private void HandleTerminalStateChanged()
-        {
-            this.StateHasChanged();
-        }
 
         #endregion
 
@@ -3738,13 +3226,14 @@ namespace Bivium.Components.Pages
         /// <param name="panelSwitch">Tab inoltrabile</param>
         /// <param name="terminal">F12 inoltrabile con la precedenza esistente</param>
         /// <param name="modal">Modal bloccante visibile</param>
+        /// <param name="activeWindowId">Finestra modeless visibile più alta nello stack JS</param>
         [JSInvokable]
-        public void OnKeyboardContextChanged(bool general, bool control, bool navigation, bool panelSwitch, bool terminal, bool modal)
+        public void OnKeyboardContextChanged(bool general, bool control, bool navigation, bool panelSwitch, bool terminal, bool modal, string activeWindowId)
         {
             if (this._isDisposed)
                 return;
             if (this._keyboardGeneral == general && this._keyboardControl == control && this._keyboardNavigation == navigation
-                && this._keyboardPanelSwitch == panelSwitch && this._keyboardTerminal == terminal && this._keyboardModal == modal)
+                && this._keyboardPanelSwitch == panelSwitch && this._keyboardTerminal == terminal && this._keyboardModal == modal && this._activeWindowId == activeWindowId)
                 return;
             this._keyboardGeneral = general;
             this._keyboardControl = control;
@@ -3752,6 +3241,7 @@ namespace Bivium.Components.Pages
             this._keyboardPanelSwitch = panelSwitch;
             this._keyboardTerminal = terminal;
             this._keyboardModal = modal;
+            this._activeWindowId = activeWindowId ?? "";
             this.StateHasChanged();
         }
 
@@ -3760,7 +3250,7 @@ namespace Bivium.Components.Pages
         /// </summary>
         private async System.Threading.Tasks.Task InitializeClientInteropAsync()
         {
-            this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260922-file-columns-v1");
+            this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js");
             if (this._isDisposed)
             {
                 await this._jsModule.DisposeAsync();
@@ -3865,8 +3355,8 @@ namespace Bivium.Components.Pages
                 return;
             }
 
-            // Ctrl+N: new file
-            if (key == "n" && ctrl && !shift && !alt)
+            // Shift+F4: new file
+            if (key == "F4" && !ctrl && shift && !alt)
             {
                 this.DoNewFile();
                 this.StateHasChanged();
@@ -3913,8 +3403,8 @@ namespace Bivium.Components.Pages
                 return;
             }
 
-            // Ctrl+Shift+N: new folder
-            if (key == "N" && ctrl && shift && !alt)
+            // F7: new folder
+            if (key == "F7" && !ctrl && !shift && !alt)
             {
                 this.DoNewFolder();
                 this.StateHasChanged();
@@ -3999,7 +3489,7 @@ namespace Bivium.Components.Pages
             // Escape: deselect all, close context menu
             if (key == "Escape")
             {
-                this._contextMenuVisible = false;
+                this.CloseContextMenu();
                 PanelState active = this.GetActivePanel();
                 active.SelectedPaths.Clear();
                 this.StateHasChanged();
@@ -4139,6 +3629,21 @@ namespace Bivium.Components.Pages
             if (!string.IsNullOrEmpty(this._typeSearchPrefix))
                 return "Search: " + this._typeSearchPrefix;
 
+            if (!string.IsNullOrEmpty(this._progressText))
+                return this._progressText;
+
+            WorkspaceOperationSnapshot operation = this._desktopWorkspace?.Operation;
+            if (operation != null)
+            {
+                if (operation.IsRunning)
+                    return operation.Phase == WorkspaceOperationPhase.CancellationRequested ? "Cancelling..." : !string.IsNullOrEmpty(operation.Stage) ? operation.Stage + " " + operation.ProgressCurrent + (operation.ProgressTotal > 0 ? "/" + operation.ProgressTotal : "") : operation.Kind == WorkspaceWorkflowKind.DeleteEntries ? "Deleting... " + operation.FilesProcessed + " completed, " + operation.FilesFailed + " failed" : operation.Kind + "...";
+                if (!string.IsNullOrEmpty(operation.ErrorMessage))
+                    return operation.ErrorMessage;
+                if (operation.Phase == WorkspaceOperationPhase.Succeeded)
+                    return operation.Kind + " completed";
+            }
+            if (!string.IsNullOrEmpty(this._workspaceWorkflow?.ErrorMessage))
+                return this._workspaceWorkflow.ErrorMessage;
             return this._progressText;
         }
 
@@ -4226,16 +3731,6 @@ namespace Bivium.Components.Pages
             this.NotifyWarning(summary, detail);
         }
 
-        /// <summary>
-        /// Presenta un errore conclusivo con il canale previsto dalla variante UI
-        /// </summary>
-        /// <param name="summary">Titolo sintetico</param>
-        /// <param name="detail">Dettaglio dell'errore</param>
-        private void ShowOperationError(string summary, string detail)
-        {
-            this.NotifyError(summary, detail);
-        }
-
         #endregion
 
         #region IAsyncDisposable
@@ -4248,6 +3743,9 @@ namespace Bivium.Components.Pages
             if (this._isDisposed)
                 return;
             this._isDisposed = true;
+            this._handoffLifetimeCancellation.Cancel();
+            this._handoffDrainCancellation?.Cancel();
+            this._handoffLifetimeCancellation.Dispose();
             this._workspaceConfirmationLifetime?.Dispose();
 
             try

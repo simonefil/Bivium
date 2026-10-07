@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.Components.Web;
 using Bivium.Models;
 using System.Collections.Generic;
 
@@ -13,16 +12,45 @@ namespace Bivium.Components.Shared
         #region Parameters
 
         /// <summary>
-        /// Callback when dialog is closed (returns format and output name, or empty name on cancel)
-        /// </summary>
-        [Parameter]
-        public EventCallback<(ArchiveFormat Format, string OutputName)> OnClose { get; set; }
-
-        /// <summary>
         /// Rivalida l'autorità del browser prima di confermare la compressione
         /// </summary>
         [Parameter]
         public Func<bool> CanInvoke { get; set; }
+
+        /// <summary>Proiezione del workflow, senza reinvocare Show</summary>
+        [Parameter] public WorkspaceWorkflowSnapshot Workflow { get; set; }
+        [Parameter] public string AttachmentId { get; set; } = "";
+        [Parameter] public long LeaseGeneration { get; set; }
+        [Inject] private Bivium.Services.BiviumWorkspaceService WorkspaceService { get; set; }
+        private readonly WorkspaceFormBinding _binding = new WorkspaceFormBinding();
+
+        /// <summary>Hydration della sola form catturata</summary>
+        protected override void OnParametersSet()
+        {
+            if (this.Workflow == null)
+            {
+                this._isVisible = false;
+                return;
+            }
+            if (!this._binding.Adopt(this.Workflow, this.LeaseGeneration))
+                return;
+            WorkspaceCompressDraft draft = System.Text.Json.JsonSerializer.Deserialize<WorkspaceCompressDraft>(this.Workflow.Draft);
+            this._selectedFormat = draft.Format;
+            this._outputName = draft.OutputName;
+            this._baseName = draft.BaseName;
+            this._isVisible = this.Workflow.Phase is WorkspaceWorkflowPhase.AwaitingInput or WorkspaceWorkflowPhase.Failed;
+        }
+
+        /// <summary>Checkpoint Immediate di formato e nome</summary>
+        private void PublishDraft()
+        {
+            this._binding.Publish(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this.GetDraft());
+        }
+
+        private string GetDraft() => System.Text.Json.JsonSerializer.Serialize(new WorkspaceCompressDraft(this._selectedFormat, this._outputName, this._baseName));
+
+        /// <summary>Barriera semantica, senza avviare compressione</summary>
+        internal System.Threading.Tasks.Task<bool> FlushForHandoffAsync(CancellationToken cancellationToken) => this._binding.FlushAsync(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this.GetDraft(), cancellationToken);
 
         #endregion
 
@@ -64,23 +92,20 @@ namespace Bivium.Components.Shared
             { ArchiveFormat.Tar, "TAR (.tar)" }
         };
 
+        /// <summary>Estensione di ciascun formato; i suffissi composti precedono .tar nel riconoscimento</summary>
+        private static readonly (ArchiveFormat Format, string Extension)[] _extensions =
+        {
+            (ArchiveFormat.TarGz, ".tar.gz"),
+            (ArchiveFormat.TarBz2, ".tar.bz2"),
+            (ArchiveFormat.TarXz, ".tar.xz"),
+            (ArchiveFormat.TarZst, ".tar.zst"),
+            (ArchiveFormat.Zip, ".zip"),
+            (ArchiveFormat.Tar, ".tar")
+        };
+
         #endregion
 
-        #region Public Methods
-
-        /// <summary>
-        /// Shows the dialog with a suggested base name
-        /// </summary>
-        /// <param name="baseName">Suggested archive base name (without extension)</param>
-        public void Show(string baseName)
-        {
-            this._baseName = baseName;
-            this._selectedFormat = ArchiveFormat.Zip;
-            this._outputName = baseName + ".zip";
-            this._isVisible = true;
-            this.StateHasChanged();
-
-        }
+        #region Private Methods
 
         /// <summary>
         /// Focuses the output name input after render
@@ -93,121 +118,41 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Hides the dialog
+        /// Sostituisce soltanto l'estensione del nome digitato con quella del formato già aggiornato dal binding
         /// </summary>
-        public void Hide()
-        {
-            this._isVisible = false;
-            this.StateHasChanged();
-        }
-
-        #endregion
-
-        #region Private Methods
-
-        /// <summary>
-        /// Handles format dropdown change and updates the file extension
-        /// </summary>
-        /// <param name="args">Change event args</param>
+        /// <param name="args">Valore selezionato, già applicato da @bind-Value</param>
         private void HandleFormatChange(object args)
         {
-            string value = args.ToString();
-
-            if (value == "Zip")
+            string name = (this._outputName ?? "").Trim();
+            foreach ((ArchiveFormat _, string extension) in _extensions)
             {
-                this._selectedFormat = ArchiveFormat.Zip;
+                if (name.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+                {
+                    name = name.Substring(0, name.Length - extension.Length);
+                    break;
+                }
             }
-            else if (value == "Tar")
-            {
-                this._selectedFormat = ArchiveFormat.Tar;
-            }
-            else if (value == "TarGz")
-            {
-                this._selectedFormat = ArchiveFormat.TarGz;
-            }
-            else if (value == "TarBz2")
-            {
-                this._selectedFormat = ArchiveFormat.TarBz2;
-            }
-            else if (value == "TarXz")
-            {
-                this._selectedFormat = ArchiveFormat.TarXz;
-            }
-            else if (value == "TarZst")
-            {
-                this._selectedFormat = ArchiveFormat.TarZst;
-            }
-
-            // Update output name extension
-            this.UpdateOutputExtension();
-        }
-
-        /// <summary>
-        /// Updates the output file name extension based on selected format
-        /// </summary>
-        private void UpdateOutputExtension()
-        {
-            string ext = ".zip";
-
-            if (this._selectedFormat == ArchiveFormat.Tar)
-            {
-                ext = ".tar";
-            }
-            else if (this._selectedFormat == ArchiveFormat.TarGz)
-            {
-                ext = ".tar.gz";
-            }
-            else if (this._selectedFormat == ArchiveFormat.TarBz2)
-            {
-                ext = ".tar.bz2";
-            }
-            else if (this._selectedFormat == ArchiveFormat.TarXz)
-            {
-                ext = ".tar.xz";
-            }
-            else if (this._selectedFormat == ArchiveFormat.TarZst)
-            {
-                ext = ".tar.zst";
-            }
-
-            this._outputName = this._baseName + ext;
+            this._outputName = (string.IsNullOrEmpty(name) ? this._baseName : name) + Array.Find(_extensions, item => item.Format == this._selectedFormat).Extension;
+            this.PublishDraft();
         }
 
         /// <summary>
         /// Handles confirm button
         /// </summary>
-        private async System.Threading.Tasks.Task HandleConfirm()
+        private void HandleConfirm()
         {
             if (this.CanInvoke != null && !this.CanInvoke())
                 return;
 
-            this._isVisible = false;
-            await this.OnClose.InvokeAsync((this._selectedFormat, this._outputName));
+            this._binding.Respond(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), false);
         }
 
         /// <summary>
         /// Handles cancel button
         /// </summary>
-        private async System.Threading.Tasks.Task HandleCancel()
+        private void HandleCancel()
         {
-            this._isVisible = false;
-            await this.OnClose.InvokeAsync((this._selectedFormat, ""));
-        }
-
-        /// <summary>
-        /// Handles keyboard input in the output name field
-        /// </summary>
-        /// <param name="args">Keyboard event args</param>
-        private void HandleKeyDown(KeyboardEventArgs args)
-        {
-            if (args.Key == "Enter")
-            {
-                _ = this.HandleConfirm();
-            }
-            else if (args.Key == "Escape")
-            {
-                _ = this.HandleCancel();
-            }
+            this._binding.Respond(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), true);
         }
 
         #endregion

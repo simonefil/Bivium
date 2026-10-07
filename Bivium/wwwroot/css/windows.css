@@ -1,0 +1,30 @@
+/* Titlebar condivisa delle finestre modeless (editor, renamer, terminale). */
+.bivium-native-window-titlebar {
+    display: flex;
+    min-width: 0;
+    border-block-end: var(--rz-border-normal);
+}
+
+.bivium-native-window-titlebar:not(.rz-background-color-primary) {
+    background-color: var(--rz-card-background-color);
+}
+
+.bivium-native-window-titlebar-actions {
+    flex-shrink: 0;
+}
+
+.bivium-native-window-titlebar-content {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.bivium-native-window-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.bivium-native-window-titlebar-actions .rz-button {
+    flex-shrink: 0;
+}

@@ -9,6 +9,15 @@
 @import 'editor.css';
 @import 'renamer.css';
 @import 'upload.css';
+@import 'windows.css';
+
+/*
+ * Stack: finestre modeless (100 + MRU) < header/footer (900) < dialog Radzen (1000/1001)
+ * < notifiche (1002) < popup Radzen portati nel body (2000, inline da openPopup).
+ */
+:root {
+    --bivium-floating-window-zindex: 100;
+}
 
 html, body {
     height: 100%;
@@ -30,47 +39,10 @@ body:has(.bivium-radzen) {
     min-height: 100%;
 }
 
-body:has(.bivium-radzen) .rz-context-menu,
-body:has(.bivium-radzen) .rz-menu-popup {
-    z-index: 4000;
-}
-
-.rz-dialog-wrapper.bivium-modal-layer {
-    z-index: 5000;
-}
-
-body:has(.bivium-radzen) .rz-tooltip,
-body:has(.bivium-radzen) .rz-notification {
-    z-index: 6000;
-}
-
-.bivium-radzen-modal {
-    width: min(94vw, 78ch);
-    max-height: 92vh;
+/* Larghezza e altezza arrivano inline dai dialog; lo stack scorre al proprio interno */
+.bivium-radzen-modal,
+.bivium-radzen-upload-dialog {
     overflow: auto;
-}
-
-.bivium-radzen-dialog-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 0.75rem;
-    margin-top: 1rem;
-}
-
-.bivium-radzen-status-bar {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    min-width: 0;
-}
-
-.bivium-radzen-status-bar {
-    justify-content: space-between;
-}
-
-.bivium-radzen-status-progress {
-    flex: 1;
-    text-align: center;
 }
 
 .workspace-takeover-overlay {
@@ -157,9 +129,23 @@ body:has(.bivium-radzen) .rz-notification {
     height: 100%;
 }
 
-.radzen-file-grid-host tr.bivium-focused {
+/* Il cursore è visibile solo nel pannello che riceve i comandi */
+.radzen-file-panel.active .radzen-file-grid-host tr.bivium-focused {
     outline: var(--rz-outline-focus);
     outline-offset: calc(-1 * var(--rz-outline-width));
+}
+
+/* Pannello attivo riconoscibile anche senza cursore: bordo primario sul RadzenCard Outlined */
+.radzen-file-panel.active {
+    border-color: var(--rz-primary);
+    box-shadow: inset 0 2px 0 var(--rz-primary);
+}
+
+/* Lista file: niente selezione testo né callout iOS durante click, long-press e selezione multipla */
+.radzen-panel-filelist {
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
 }
 
 .radzen-file-grid-host td > span {
@@ -169,22 +155,8 @@ body:has(.bivium-radzen) .rz-notification {
     white-space: nowrap;
 }
 
-.bivium-radzen-upload-dialog {
-    width: min(92vw, 58rem);
-    max-height: 92vh;
-    overflow: auto;
-}
-
-.bivium-radzen-upload-overlay {
-    place-items: center;
-}
-
 .bivium-radzen-renamer-window:not(.visible) {
     display: none;
-    pointer-events: none;
-}
-
-body:has(.bivium-radzen-service-dialog) .bivium-radzen-renamer-window {
     pointer-events: none;
 }
 
@@ -234,6 +206,13 @@ body:has(.bivium-radzen-service-dialog) .bivium-radzen-renamer-window {
     overflow: hidden;
 }
 
+/* La variante Outlined è trasparente e il tema Radzen è caricato dopo app.css: le finestre sovrapposte ai pannelli devono essere opache */
+.bivium-radzen-terminal-window.rz-card.rz-variant-outlined,
+.bivium-radzen-editor-window.rz-card.rz-variant-outlined,
+.bivium-radzen-renamer-window.rz-card.rz-variant-outlined {
+    background-color: var(--rz-card-background-color);
+}
+
 .terminal-titlebar,
 .editor-titlebar,
 .renamer-titlebar {
@@ -248,53 +227,6 @@ body:has(.bivium-radzen-service-dialog) .bivium-radzen-renamer-window {
 .renamer-resize-handle .resize-grip-icon {
     display: block;
     pointer-events: none;
-}
-
-.bivium-radzen .radzen-panels-area .responsive-panel-switch {
-    display: none;
-}
-
-@media (max-width: 1023px) {
-    .bivium-radzen-menu-bar {
-        min-width: 0;
-        overflow-x: auto;
-        touch-action: pan-x;
-    }
-
-    .bivium-radzen .radzen-panels-area .responsive-panel-switch {
-        position: absolute;
-        top: 0.25rem;
-        right: 0.5rem;
-        z-index: 5;
-        display: inline-flex;
-    }
-
-    .radzen-outer-splitter-host > .rz-splitter > .rz-splitter-bar {
-        display: none;
-    }
-
-    .radzen-outer-splitter-host > .rz-splitter {
-        display: block;
-    }
-
-    .radzen-outer-splitter-host > .rz-splitter > .rz-splitter-pane {
-        width: 100% !important;
-        height: 100% !important;
-    }
-
-    .radzen-outer-splitter-host > .rz-splitter > .rz-splitter-pane:has(.radzen-file-panel:not(.active)) {
-        display: none;
-    }
-
-    .radzen-outer-splitter-host > .rz-splitter > .rz-splitter-pane:has(.radzen-file-panel.active) {
-        display: block !important;
-        flex-basis: 100% !important;
-        max-width: 100% !important;
-    }
-
-    .radzen-panel-toolbar {
-        padding-right: 10rem;
-    }
 }
 
 @media (pointer: coarse) {

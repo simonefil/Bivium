@@ -1,4 +1,6 @@
 using Bivium.Models;
+using System;
+using System.IO;
 using System.Runtime.InteropServices;
 
 namespace Bivium.Services
@@ -62,6 +64,26 @@ namespace Bivium.Services
         #endregion
 
         #region Public Methods
+
+        /// <summary>Riusa le regole path/nome dei comandi esistenti prima di ammettere il task</summary>
+        /// <param name="kind">Comando chiuso</param>
+        /// <param name="sourcePath">Sorgente rename</param>
+        /// <param name="parentPath">Directory di creazione</param>
+        /// <param name="name">Nome confermato</param>
+        /// <returns>Validazione priva di effetti filesystem</returns>
+        public FileOperationResult ValidateNameOperation(WorkspaceWorkflowKind kind, string sourcePath, string parentPath, string name)
+        {
+            if (!Enum.IsDefined(kind))
+                return FileOperationResult.Fail("Unsupported file operation");
+            string path = kind == WorkspaceWorkflowKind.RenameEntry ? sourcePath : parentPath;
+            if (!this._securityService.IsPathSafe(path))
+                return FileOperationResult.Fail("Invalid path: " + path);
+            if (string.IsNullOrWhiteSpace(name))
+                return FileOperationResult.Fail("Name cannot be empty");
+            if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+                return FileOperationResult.Fail("Name contains invalid characters");
+            return FileOperationResult.Ok(0);
+        }
 
         /// <summary>
         /// Copies files and directories to a destination
@@ -542,6 +564,16 @@ namespace Bivium.Services
         /// <returns>Operation result</returns>
         public FileOperationResult DeleteEntries(List<string> paths, CancellationToken cancellationToken = default)
         {
+            return this.DeleteEntriesWithProgress(paths, null, cancellationToken);
+        }
+
+        /// <summary>Conserva controlli e cancellazione delete, pubblicando solo conteggi delle radici</summary>
+        /// <param name="paths">Percorsi da eliminare</param>
+        /// <param name="onProgress">Conteggi completati e falliti</param>
+        /// <param name="cancellationToken">Lifetime del chiamante, non necessariamente del browser</param>
+        /// <returns>Risultato aggregato delle radici</returns>
+        public FileOperationResult DeleteEntriesWithProgress(List<string> paths, Action<int, int> onProgress, CancellationToken cancellationToken = default)
+        {
             int processed = 0;
             int failed = 0;
             string lastError = "";
@@ -555,6 +587,7 @@ namespace Bivium.Services
                 {
                     failed++;
                     lastError = "Invalid path: " + path;
+                    onProgress?.Invoke(processed, failed);
                     continue;
                 }
 
@@ -586,6 +619,7 @@ namespace Bivium.Services
                     failed++;
                     lastError = "I/O error: " + ex.Message;
                 }
+                onProgress?.Invoke(processed, failed);
             }
 
             FileOperationResult result = new FileOperationResult();

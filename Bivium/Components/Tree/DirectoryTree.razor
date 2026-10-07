@@ -17,12 +17,6 @@
 
 @code {
     /// <summary>
-    /// Percorso usato per individuare le radici disponibili
-    /// </summary>
-    [Parameter]
-    public string RootPath { get; set; } = "";
-
-    /// <summary>
     /// Percorso attualmente aperto nel pannello
     /// </summary>
     [Parameter]
@@ -33,6 +27,12 @@
     /// </summary>
     [Parameter]
     public HashSet<string> ExpandedDirectoryPaths { get; set; } = new HashSet<string>();
+
+    /// <summary>
+    /// Contenuto già caricato della directory corrente: un nuovo elenco segue navigazione, refresh e operazioni
+    /// </summary>
+    [Parameter]
+    public List<FileSystemEntry> Entries { get; set; }
 
     /// <summary>
     /// Notifica una richiesta di navigazione
@@ -70,6 +70,11 @@
     /// Nodo selezionato nella gerarchia della radice filesystem
     /// </summary>
     private DirectoryTreeItem _selectedNode;
+
+    /// <summary>
+    /// Ultimo elenco del pannello proiettato sui figli del nodo corrente
+    /// </summary>
+    private List<FileSystemEntry> _projectedEntries;
 
     /// <summary>
     /// Stato transitorio del caricamento e dello scroll
@@ -129,6 +134,11 @@
             this._currentPath = path;
             this.RevealCurrentPath();
             this._scrollPending = true;
+        }
+        if (!ReferenceEquals(this.Entries, this._projectedEntries))
+        {
+            this._projectedEntries = this.Entries;
+            this.RefreshCurrentChildren();
         }
         this.LoadExpandedBranches(this._roots);
     }
@@ -296,6 +306,31 @@
     }
 
     /// <summary>
+    /// Allinea i figli del nodo corrente all'elenco già caricato dal pannello, senza letture filesystem aggiuntive
+    /// </summary>
+    private void RefreshCurrentChildren()
+    {
+        if (this.Entries == null || string.IsNullOrEmpty(this._currentPath))
+            return;
+        DirectoryTreeItem node = this.FindNode(this._roots, this._currentPath);
+        if (node == null)
+            return;
+        if (this.Entries.Count == 0)
+        {
+            // Elenco vuoto ambiguo (directory vuota o non ancora caricata): rilegge solo un ramo che mostrava figli
+            if (node.Children != null && node.Children.Count > 0)
+                this.LoadChildren(node, true);
+            return;
+        }
+        // L'elenco deve appartenere alla directory corrente, non a quella appena lasciata
+        string parent = this.NormalizePath(Path.GetDirectoryName(this.Entries[0].FullPath));
+        if (!string.Equals(parent, this._currentPath, this.GetPathComparison()))
+            return;
+        // Stesso ordinamento di IFileSystemService.GetSubDirectories, indipendente dal sort del pannello
+        this.ProjectChildren(node, this.Entries.Where(entry => entry.IsDirectory).OrderBy(entry => entry.Name, StringComparer.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
     /// Carica o aggiorna un solo livello, conservando i nodi e i rami ancora presenti
     /// </summary>
     /// <param name="node">Nodo da materializzare</param>
@@ -304,11 +339,20 @@
     {
         if (node.Children != null && !reload)
             return;
+        this.ProjectChildren(node, this.FileSystemService.GetSubDirectories(node.FullPath));
+    }
 
+    /// <summary>
+    /// Sostituisce i figli di un nodo conservando le istanze, e quindi i rami, ancora presenti
+    /// </summary>
+    /// <param name="node">Nodo da aggiornare</param>
+    /// <param name="directories">Sottodirectory già ordinate</param>
+    private void ProjectChildren(DirectoryTreeItem node, IEnumerable<FileSystemEntry> directories)
+    {
         StringComparer comparer = this.GetPathComparison() == StringComparison.Ordinal ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
         Dictionary<string, DirectoryTreeItem> previous = node.Children == null ? new Dictionary<string, DirectoryTreeItem>(comparer) : node.Children.ToDictionary(child => child.FullPath, comparer);
         List<DirectoryTreeItem> children = new List<DirectoryTreeItem>();
-        foreach (FileSystemEntry entry in this.FileSystemService.GetSubDirectories(node.FullPath))
+        foreach (FileSystemEntry entry in directories)
         {
             string path = this.NormalizePath(entry.FullPath);
             if (previous.TryGetValue(path, out DirectoryTreeItem child))

@@ -1,5 +1,10 @@
+using System.Collections.Immutable;
+
 namespace Bivium.Models
 {
+    /// <summary>Stato visuale del path editor; nessuna navigazione o callback nel draft</summary>
+    public sealed record WorkspacePanelPathDraft(long Revision, string BasePath, bool Editing, string Text, ImmutableArray<string> Candidates, ImmutableArray<string> Matches, int MatchIndex, string ParentDirectory, string CycleValue, int SelectionStart = 0, int SelectionEnd = 0, bool Focused = true);
+
     /// <summary>
     /// Identifies one known Details-view column
     /// </summary>

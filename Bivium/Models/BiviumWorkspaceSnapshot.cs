@@ -18,12 +18,22 @@ namespace Bivium.Models
         /// <param name="panels">Persistent panel state or null when not initialized yet</param>
         /// <param name="floatingWindows">Persistent floating-window state</param>
         /// <param name="activeClientLease">Active client lease or null</param>
-        public BiviumWorkspaceSnapshot(long revision, WorkspacePanelsSnapshot panels, FloatingWindowsSnapshot floatingWindows, ActiveClientLeaseSnapshot activeClientLease)
+        /// <param name="desktop">Metadati desktop senza contenuti dei draft</param>
+        /// <param name="handoff">Tentativo live oppure null quando non pendente</param>
+        /// <param name="workflow">Riferimento leggero al workflow</param>
+        /// <param name="operation">Progresso del task ammesso, senza piano o percorsi</param>
+        /// <param name="upload">Riferimento leggero al trasferimento, senza manifest o percorsi</param>
+        public BiviumWorkspaceSnapshot(long revision, WorkspacePanelsSnapshot panels, FloatingWindowsSnapshot floatingWindows, ActiveClientLeaseSnapshot activeClientLease, DesktopSessionsSnapshot desktop = null, WorkspaceHandoffSnapshot handoff = null, WorkspaceWorkflowReference workflow = null, WorkspaceOperationSnapshot operation = null, WorkspaceUploadReference upload = null)
         {
             this.Revision = revision;
             this.Panels = panels;
             this.FloatingWindows = floatingWindows ?? new FloatingWindowsSnapshot();
             this.ActiveClientLease = activeClientLease;
+            this.Desktop = desktop ?? new DesktopSessionsSnapshot();
+            this.Handoff = handoff;
+            this.Workflow = workflow;
+            this.Operation = operation;
+            this.Upload = upload;
         }
 
         #endregion
@@ -49,6 +59,20 @@ namespace Bivium.Models
         /// Active client lease or null
         /// </summary>
         public ActiveClientLeaseSnapshot ActiveClientLease { get; }
+
+        /// <summary>Metadati desktop, senza contenuti dei documenti e delle preview</summary>
+        public DesktopSessionsSnapshot Desktop { get; }
+
+        /// <summary>Tentativo live pendente; congela i nuovi comandi, non i publisher dedicati</summary>
+        public WorkspaceHandoffSnapshot Handoff { get; }
+
+        /// <summary>Riferimento runtime senza draft o parametri</summary>
+        public WorkspaceWorkflowReference Workflow { get; }
+        /// <summary>Task corrente; nessun callback del circuito o piano nel payload globale</summary>
+        public WorkspaceOperationSnapshot Operation { get; }
+
+        /// <summary>Riferimento Upload; manifest e ricevute richiedono la lease autorizzata</summary>
+        public WorkspaceUploadReference Upload { get; }
 
         #endregion
     }
@@ -177,6 +201,9 @@ namespace Bivium.Models
         /// Workspace revision observed during the operation
         /// </summary>
         public long WorkspaceRevision { get; set; }
+
+        /// <summary>Errore riprovabile del takeover, senza revoca implicita</summary>
+        public string ErrorMessage { get; set; } = "";
     }
 
     /// <summary>
@@ -196,15 +223,23 @@ namespace Bivium.Models
         /// Creates the window state
         /// </summary>
         /// <param name="terminal">Terminal window state</param>
-        public FloatingWindowsSnapshot(FloatingWindowSnapshot terminal)
+        public FloatingWindowsSnapshot(FloatingWindowSnapshot terminal, FloatingWindowSnapshot editor = null, FloatingWindowSnapshot renamer = null)
         {
             this.Terminal = terminal ?? throw new System.ArgumentNullException(nameof(terminal));
+            this.Editor = editor ?? new FloatingWindowSnapshot(false, false, 0, 0, 0, 0, 0, 0, 0, "editor-text");
+            this.Renamer = renamer ?? new FloatingWindowSnapshot(false, false, 0, 0, 0, 0, 0, 0, 0, "renamer-method");
         }
 
         /// <summary>
         /// Terminal window state
         /// </summary>
         public FloatingWindowSnapshot Terminal { get; }
+
+        /// <summary>Finestra editor; geometria zero lascia applicare il layout CSS iniziale</summary>
+        public FloatingWindowSnapshot Editor { get; }
+
+        /// <summary>Finestra renamer; geometria zero lascia applicare il layout CSS iniziale</summary>
+        public FloatingWindowSnapshot Renamer { get; }
     }
 
     /// <summary>
@@ -242,52 +277,52 @@ namespace Bivium.Models
         /// <summary>
         /// Whether the window is visible
         /// </summary>
-        public bool Visible { get; }
+        public bool Visible { get; init; }
 
         /// <summary>
         /// Whether the window is minimized
         /// </summary>
-        public bool Minimized { get; }
+        public bool Minimized { get; init; }
 
         /// <summary>
         /// Horizontal coordinate
         /// </summary>
-        public double Left { get; }
+        public double Left { get; init; }
 
         /// <summary>
         /// Vertical coordinate
         /// </summary>
-        public double Top { get; }
+        public double Top { get; init; }
 
         /// <summary>
         /// Window width
         /// </summary>
-        public double Width { get; }
+        public double Width { get; init; }
 
         /// <summary>
         /// Window height
         /// </summary>
-        public double Height { get; }
+        public double Height { get; init; }
 
         /// <summary>
         /// Source viewport width
         /// </summary>
-        public double ViewportWidth { get; }
+        public double ViewportWidth { get; init; }
 
         /// <summary>
         /// Source viewport height
         /// </summary>
-        public double ViewportHeight { get; }
+        public double ViewportHeight { get; init; }
 
         /// <summary>
         /// Logical MRU order
         /// </summary>
-        public long MruOrder { get; }
+        public long MruOrder { get; init; }
 
         /// <summary>
         /// Semantic focus target
         /// </summary>
-        public string FocusTarget { get; }
+        public string FocusTarget { get; init; }
     }
 
     /// <summary>

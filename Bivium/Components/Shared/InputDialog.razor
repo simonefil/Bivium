@@ -1,142 +1,158 @@
 @namespace Bivium.Components.Shared
 @implements IDisposable
-@inject DialogService DialogService
-@inject ILogger<InputDialog> Logger
+@inject Bivium.Services.BiviumWorkspaceService WorkspaceService
+
+@if (this.Workflow?.Kind is Bivium.Models.WorkspaceWorkflowKind.CreateFile or Bivium.Models.WorkspaceWorkflowKind.CreateDirectory or Bivium.Models.WorkspaceWorkflowKind.RenameEntry && this.Workflow.Phase is Bivium.Models.WorkspaceWorkflowPhase.AwaitingInput or Bivium.Models.WorkspaceWorkflowPhase.Failed)
+{
+    <PersistentModalShell Surface="input" @key="this.Workflow.QuestionId" Label="@(this.Workflow.Phase == Bivium.Models.WorkspaceWorkflowPhase.Failed ? "File operation failed" : this.Workflow.InvocationParameters.Title)" Width="min(92vw, 36rem)" CloseOnOverlayClick="@(this.Workflow.Phase == Bivium.Models.WorkspaceWorkflowPhase.Failed)" CanClose="@(!this._draftRejected)" OnCancel="@(() => this.RespondWorkspaceAsync(true))" OnContentRendered="this.HandleContentRenderedAsync">
+        <div data-workspace-workflow-id="@this.Workflow.Id">
+            @if (this.Workflow.Phase == Bivium.Models.WorkspaceWorkflowPhase.AwaitingInput)
+            {
+                <RadzenTemplateForm TItem="InputDialog" Data="this" Submit="@(_ => this.RespondWorkspaceAsync(false))">
+                    <RadzenStack Gap="1rem">
+                        <RadzenStack Gap="0.25rem">
+                            <RadzenLabel Text="@this.Workflow.InvocationParameters.Label" Component="bivium-workspace-input" />
+                            <RadzenTextBox @ref="this._inputElement" Name="bivium-workspace-input" @bind-Value="this._workspaceValue" @bind-Value:after="this.HandleWorkspaceValueChanged" Immediate="true" data-bivium-selection-length="@this.Workflow.InvocationParameters.SelectionLength" Style="width:100%" />
+                            <RadzenRequiredValidator Component="bivium-workspace-input" Text="Enter a name" />
+                            @if (!string.IsNullOrEmpty(this._workspaceSnapshot?.ErrorMessage))
+                            {
+                                <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat" Shade="Shade.Lighter" Size="AlertSize.ExtraSmall" AllowClose="false" class="rz-m-0">@this._workspaceSnapshot.ErrorMessage</RadzenAlert>
+                            }
+                        </RadzenStack>
+                        @if (!string.IsNullOrEmpty(this._workspaceError))
+                        {
+                            <RadzenAlert AlertStyle="AlertStyle.Warning" AllowClose="false" class="rz-m-0">@this._workspaceError</RadzenAlert>
+                        }
+                        <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" AlignItems="AlignItems.Center" Gap="0.75rem">
+                            <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="@(() => this.RespondWorkspaceAsync(true))" />
+                            <RadzenButton Text="OK" ButtonType="ButtonType.Submit" ButtonStyle="ButtonStyle.Primary" Disabled="@(this._draftRejected || this.IsUnchangedRename())" />
+                        </RadzenStack>
+                    </RadzenStack>
+                </RadzenTemplateForm>
+            }
+            else
+            {
+                <RadzenStack Gap="1rem">
+                    <RadzenAlert AlertStyle="AlertStyle.Danger" AllowClose="false" class="rz-m-0">@this.Workflow.ErrorMessage</RadzenAlert>
+                    @if (!string.IsNullOrEmpty(this._workspaceError))
+                    {
+                        <RadzenAlert AlertStyle="AlertStyle.Warning" AllowClose="false" class="rz-m-0">@this._workspaceError</RadzenAlert>
+                    }
+                    <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" AlignItems="AlignItems.Center" Gap="0.75rem">
+                        <RadzenButton Text="Close" ButtonStyle="ButtonStyle.Primary" Click="@(() => this.RespondWorkspaceAsync(true))" />
+                    </RadzenStack>
+                </RadzenStack>
+            }
+        </div>
+    </PersistentModalShell>
+}
 
 @code {
-    /// <summary>
-    /// Callback che riceve il testo oppure stringa vuota in annullamento
-    /// </summary>
-    [Parameter]
-    public EventCallback<string> OnClose { get; set; }
+    /// <summary>Snapshot runtime da proiettare, senza reinvocare il comando</summary>
+    [Parameter] public Bivium.Models.WorkspaceWorkflowSnapshot Workflow { get; set; }
+    /// <summary>Attachment dell'adapter corrente</summary>
+    [Parameter] public string AttachmentId { get; set; } = "";
+    /// <summary>Generazione dell'adapter corrente</summary>
+    [Parameter] public long LeaseGeneration { get; set; }
+    /// <summary>Ultimo checkpoint acknowledged del draft</summary>
+    private Bivium.Models.WorkspaceWorkflowSnapshot _workspaceSnapshot;
+    /// <summary>Valore locale; un checkpoint rifiutato non lo sovrascrive silenziosamente</summary>
+    private string _workspaceValue = "";
+    /// <summary>Risposta catturata una volta, riutilizzabile soltanto con la stessa identità</summary>
+    private Bivium.Models.WorkspaceWorkflowResponse _workspaceResponse;
+    /// <summary>Errore del publisher o della risposta</summary>
+    private string _workspaceError = "";
+    /// <summary>Ferma il publisher rifiutato, senza retry cieco</summary>
+    private bool _draftRejected;
+    /// <summary>Dispose rilascia l'adapter senza rispondere al workflow</summary>
+    private bool _workspaceDisposed;
+    /// <summary>Campo del nome, focalizzato dall'owner al mount</summary>
+    private Radzen.Blazor.RadzenTextBox _inputElement;
 
-    /// <summary>
-    /// Versione dell'apertura corrente
-    /// </summary>
-    private int _generation;
-
-    /// <summary>
-    /// Valore modificato nel campo di input
-    /// </summary>
-    private string _inputValue = "";
-
-    /// <summary>
-    /// Tracker dell'apertura posseduta
-    /// </summary>
-    private RadzenDialogLifetime _lifetime;
-
-    /// <summary>
-    /// Inizializza il tracker del dialog
-    /// </summary>
-    protected override void OnInitialized()
+    /// <summary>Hydration del solo stato; non conclude la domanda e non esegue filesystem</summary>
+    protected override void OnParametersSet()
     {
-        this._lifetime = new RadzenDialogLifetime(this.DialogService);
-    }
-
-    /// <summary>
-    /// Apre il dialog di input mantenendo il contratto sincrono legacy
-    /// </summary>
-    /// <param name="title">Titolo del dialog</param>
-    /// <param name="label">Etichetta del campo</param>
-    /// <param name="defaultValue">Valore iniziale</param>
-    /// <param name="selectionLength">Numero di caratteri iniziali da selezionare</param>
-    public void Show(string title, string label, string defaultValue, int selectionLength = -1)
-    {
-        if (this._lifetime.IsDisposed || this._lifetime.IsOpen())
+        if (this.Workflow == null || this._workspaceDisposed)
             return;
-
-        int generation = ++this._generation;
-        this._inputValue = defaultValue ?? "";
-        _ = this.ObserveTaskAsync(this.ShowAsync(generation, title, label, selectionLength), "apertura input");
+        if (this._workspaceSnapshot?.Id != this.Workflow.Id || this._workspaceSnapshot.QuestionId != this.Workflow.QuestionId)
+        {
+            this._workspaceResponse = null;
+            this._draftRejected = false;
+            this._workspaceError = "";
+        }
+        if (!this._draftRejected && (this._workspaceSnapshot == null || this.Workflow.Revision >= this._workspaceSnapshot.Revision))
+        {
+            this._workspaceSnapshot = this.Workflow;
+            this._workspaceValue = this.Workflow.Draft;
+            // Una validazione rifiutata avanza la revisione della stessa domanda: la prossima conferma è una nuova risposta
+            if (this._workspaceResponse != null && this._workspaceResponse.Revision != this.Workflow.Revision)
+                this._workspaceResponse = null;
+        }
     }
 
-    /// <summary>
-    /// Nasconde soltanto l'apertura posseduta quando è in cima allo stack
-    /// </summary>
-    public void Hide()
+    /// <summary>Focus sul campo al primo mount; la selezione iniziale segue data-bivium-selection-length</summary>
+    /// <param name="firstRender">True soltanto al primo DOM mount</param>
+    /// <returns>Completamento del focus</returns>
+    private async System.Threading.Tasks.Task HandleContentRenderedAsync(bool firstRender)
     {
-        this._generation++;
-        this._lifetime.RequestClose();
+        if (firstRender && !this._workspaceDisposed && this._inputElement != null && this.Workflow?.Phase == Bivium.Models.WorkspaceWorkflowPhase.AwaitingInput)
+            await this._inputElement.Element.FocusAsync();
     }
 
-    /// <summary>
-    /// Apre e attende il risultato del dialog Radzen
-    /// </summary>
-    /// <param name="generation">Versione dell'apertura</param>
-    /// <param name="title">Titolo del dialog</param>
-    /// <param name="label">Etichetta del campo</param>
-    /// <param name="selectionLength">Numero di caratteri da selezionare</param>
-    private async System.Threading.Tasks.Task ShowAsync(int generation, string title, string label, int selectionLength)
+    /// <summary>Pubblica un valore tipizzato, senza delegate o comando circuito</summary>
+    private void HandleWorkspaceValueChanged()
     {
-        DialogOptions options = new DialogOptions
-        {
-            Width = "min(92vw, 36rem)",
-            ShowClose = false,
-            CloseDialogOnEsc = true,
-            CloseDialogOnOverlayClick = true,
-            AutoFocusFirstElement = true,
-            CssClass = "bivium-radzen-service-dialog",
-            WrapperCssClass = "bivium-modal-layer"
-        };
-        this._lifetime.Begin(options);
-        object result;
-        try
-        {
-            result = await this.DialogService.OpenAsync(title, service => @<div>
-                <RadzenStack Gap="0.75rem">
-                    <RadzenLabel Text="@label" Component="bivium-dialog-input" />
-                    <RadzenTextBox Name="bivium-dialog-input" @bind-Value="this._inputValue" Immediate="true" autofocus="autofocus" data-bivium-selection-length="@selectionLength" Style="width: 100%;" @onkeydown="@(args => this.HandleInputKey(args, service))" />
-                    <div class="bivium-radzen-dialog-actions">
-                        <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="@(() => service.Close(""))" />
-                        <RadzenButton Text="OK" ButtonStyle="ButtonStyle.Primary" Click="@(() => service.Close(this._inputValue))" />
-                    </div>
-                </RadzenStack>
-            </div>, options);
-        }
-        finally
-        {
-            this._lifetime.Complete(options);
-        }
-        if (generation != this._generation)
+        this._workspaceValue ??= "";
+        this._workspaceResponse = null;
+        if (this._workspaceDisposed || this._draftRejected || this._workspaceSnapshot == null)
             return;
-
-        await this.OnClose.InvokeAsync(result as string ?? "");
-    }
-
-    /// <summary>
-    /// Conferma il valore con Invio
-    /// </summary>
-    /// <param name="args">Evento tastiera</param>
-    /// <param name="service">Servizio associato al dialog aperto</param>
-    private void HandleInputKey(KeyboardEventArgs args, DialogService service)
-    {
-        if (args.Key == "Enter" && this._lifetime.CanClose())
-            service.Close(this._inputValue);
-    }
-
-    /// <summary>
-    /// Osserva e registra le eccezioni del task avviato da <see cref="Show"/>
-    /// </summary>
-    /// <param name="task">Task da osservare</param>
-    /// <param name="operation">Descrizione usata nel log</param>
-    private async System.Threading.Tasks.Task ObserveTaskAsync(System.Threading.Tasks.Task task, string operation)
-    {
-        try
+        Bivium.Models.WorkspaceClientToken token = new Bivium.Models.WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration);
+        if (this.WorkspaceService.TryUpdateWorkflowDraft(token, this._workspaceSnapshot.Id, this._workspaceSnapshot.Revision, this._workspaceValue, out Bivium.Models.WorkspaceWorkflowSnapshot acknowledged))
+            this._workspaceSnapshot = acknowledged;
+        else
         {
-            await task;
-        }
-        catch (Exception ex)
-        {
-            this.Logger.LogError(ex, "Errore durante {Operation} Radzen", operation);
+            this._draftRejected = true;
+            this._workspaceError = "The draft was not acknowledged. This browser cannot confirm the workflow.";
         }
     }
 
-    /// <summary>
-    /// Rilascia il tracker senza chiudere dialog altrui
-    /// </summary>
+    /// <summary>Il rename con il nome originale non ha nulla da confermare</summary>
+    /// <returns>True se il valore coincide con il nome della sorgente</returns>
+    private bool IsUnchangedRename()
+    {
+        return this.Workflow.Kind == Bivium.Models.WorkspaceWorkflowKind.RenameEntry && this._workspaceValue == System.IO.Path.GetFileName(this.Workflow.InvocationParameters.SourcePath);
+    }
+
+    /// <summary>Risponde soltanto alla domanda/revisione catturate e con ResponseId stabile</summary>
+    /// <param name="cancelled">Annullamento esplicito dell'utente, mai dispose</param>
+    /// <returns>Completamento del callback adapter</returns>
+    private System.Threading.Tasks.Task RespondWorkspaceAsync(bool cancelled)
+    {
+        if (this._workspaceDisposed || this._workspaceSnapshot == null || (this._workspaceSnapshot.Phase != Bivium.Models.WorkspaceWorkflowPhase.AwaitingInput && this._workspaceSnapshot.Phase != Bivium.Models.WorkspaceWorkflowPhase.Failed) || (!cancelled && (this._draftRejected || this.IsUnchangedRename())))
+            return System.Threading.Tasks.Task.CompletedTask;
+        if (this._workspaceResponse != null && this._workspaceResponse.Cancelled != cancelled)
+            this._workspaceResponse = null;
+        this._workspaceResponse ??= new Bivium.Models.WorkspaceWorkflowResponse(this._workspaceSnapshot.Id, this._workspaceSnapshot.Revision, this._workspaceSnapshot.QuestionId, Guid.NewGuid(), cancelled, this._workspaceValue);
+        Bivium.Models.WorkspaceWorkflowResponseResult result = this.WorkspaceService.RespondToWorkflow(new Bivium.Models.WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this._workspaceResponse);
+        if (result is Bivium.Models.WorkspaceWorkflowResponseResult.Stale or Bivium.Models.WorkspaceWorkflowResponseResult.Denied)
+            this._workspaceError = "This response was not accepted. The authoritative workflow is unchanged.";
+        return System.Threading.Tasks.Task.CompletedTask;
+    }
+
+    /// <summary>Barriera semantica del draft; non attende il task filesystem</summary>
+    /// <param name="cancellationToken">Lifecycle del drain</param>
+    /// <returns>True solo per lo stesso valore acknowledged nel runtime</returns>
+    internal System.Threading.Tasks.Task<bool> FlushForHandoffAsync(System.Threading.CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Bivium.Models.WorkspaceWorkflowSnapshot current = this.WorkspaceService.GetWorkflow(new Bivium.Models.WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration));
+        bool accepted = !this._workspaceDisposed && !this._draftRejected && current != null && current.Id == this._workspaceSnapshot?.Id && current.Revision == this._workspaceSnapshot.Revision && current.Draft == this._workspaceValue;
+        return System.Threading.Tasks.Task.FromResult(accepted);
+    }
+
+    /// <summary>Detach del solo adapter; non risponde né cancella il workflow</summary>
     public void Dispose()
     {
-        this._generation++;
-        this._lifetime?.Dispose();
+        this._workspaceDisposed = true;
     }
 }

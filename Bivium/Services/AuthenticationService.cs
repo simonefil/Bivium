@@ -30,6 +30,9 @@ namespace Bivium.Services
 
         #region Class Variables
 
+        /// <summary>Autorità condivisa per tutti i read-modify-write delle impostazioni applicative</summary>
+        internal static readonly object SettingsWriteLock = new object();
+
         private readonly IOptionsMonitor<CommanderSettings> _settingsMonitor;
 
         private readonly IConfiguration _configuration;
@@ -45,6 +48,12 @@ namespace Bivium.Services
         private bool _permanentlyLockedInMemory = false;
 
         private string _pendingTwoFactorSecret = "";
+
+        /// <summary>Lock breve del challenge, senza I/O o callback della configurazione</summary>
+        private readonly object _twoFactorSetupLock = new object();
+
+        /// <summary>Una risposta tardiva del vecchio owner non può cancellare il challenge della nuova lease</summary>
+        private WorkspaceClientToken _pendingTwoFactorOwner;
 
         #endregion
 
@@ -220,7 +229,7 @@ namespace Bivium.Services
         /// Updates main authentication settings and local admin credentials
         /// </summary>
         /// <param name="request">Settings update request</param>
-        public async System.Threading.Tasks.Task UpdateAuthenticationAsync(AuthenticationSettingsRequest request, CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task UpdateAuthenticationAsync(AuthenticationSettingsRequest request, CancellationToken cancellationToken = default, WorkspaceClientToken owner = null)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (request == null)
@@ -341,10 +350,7 @@ namespace Bivium.Services
                 }
             }, cancellationToken);
 
-            lock (this._lock)
-            {
-                this._pendingTwoFactorSecret = "";
-            }
+            this.CancelPendingTwoFactorSetup(owner);
 
             this.ResetFailures();
         }
@@ -353,7 +359,7 @@ namespace Bivium.Services
         /// Changes the configured administrator password
         /// </summary>
         /// <param name="request">Password change request</param>
-        public async System.Threading.Tasks.Task ChangePasswordAsync(ChangePasswordRequest request, CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task ChangePasswordAsync(ChangePasswordRequest request, CancellationToken cancellationToken = default, WorkspaceClientToken owner = null)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (request == null)
@@ -393,16 +399,13 @@ namespace Bivium.Services
                 userNode["SecurityStamp"] = Guid.NewGuid().ToString("N");
             }, cancellationToken);
 
-            lock (this._lock)
-            {
-                this._pendingTwoFactorSecret = "";
-            }
+            this.CancelPendingTwoFactorSetup(owner);
 
             this.ResetFailures();
         }
 
         /// <summary>
-        /// Creates a pending two-factor setup and returns QR code data
+        /// Prepara il payload; soltanto il controller autorizzato dalla lease pubblica il challenge
         /// </summary>
         /// <returns>Two-factor setup data</returns>
         public async System.Threading.Tasks.Task<TwoFactorSetupResult> CreateTwoFactorSetupAsync(string currentPassword, CancellationToken cancellationToken = default)
@@ -440,11 +443,7 @@ namespace Bivium.Services
             PngByteQRCode qrCode = new PngByteQRCode(qrCodeData);
             byte[] qrBytes = qrCode.GetGraphic(8);
 
-            lock (this._lock)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                this._pendingTwoFactorSecret = secret;
-            }
+            cancellationToken.ThrowIfCancellationRequested();
 
             TwoFactorSetupResult result = new TwoFactorSetupResult();
             result.QrCodeDataUrl = "data:image/png;base64," + Convert.ToBase64String(qrBytes);
@@ -452,14 +451,44 @@ namespace Bivium.Services
             return result;
         }
 
+        /// <summary>Pubblica il challenge dentro il commit della lease, senza trasferirne il segreto</summary>
+        /// <param name="secret">Segreto appena generato</param>
+        /// <param name="owner">Lease autorizzata alla pubblicazione</param>
+        internal void SetPendingTwoFactorSetup(string secret, WorkspaceClientToken owner)
+        {
+            lock (this._twoFactorSetupLock)
+            {
+                this._pendingTwoFactorSecret = secret;
+                this._pendingTwoFactorOwner = owner;
+            }
+        }
+
+        /// <summary>Invalida anche setup completati sul backend la cui risposta è andata persa</summary>
+        /// <param name="owner">Lease da annullare, oppure null per l'invalidazione globale del takeover</param>
+        internal void CancelPendingTwoFactorSetup(WorkspaceClientToken owner = null)
+        {
+            lock (this._twoFactorSetupLock)
+            {
+                if (owner != null && this._pendingTwoFactorOwner != owner)
+                    return;
+                this._pendingTwoFactorSecret = "";
+                this._pendingTwoFactorOwner = null;
+            }
+        }
+
         /// <summary>
         /// Enables pending two-factor settings after verifying a TOTP code
         /// </summary>
         /// <param name="code">TOTP code</param>
         /// <param name="currentPassword">Current administrator password</param>
-        public async System.Threading.Tasks.Task EnableTwoFactorAsync(string code, string currentPassword, CancellationToken cancellationToken = default)
+        /// <param name="workspace">Autorità del commit finale</param>
+        /// <param name="token">Lease che possiede il challenge</param>
+        /// <param name="cancellationToken">Revoca della richiesta</param>
+        public async System.Threading.Tasks.Task EnableTwoFactorAsync(string code, string currentPassword, BiviumWorkspaceService workspace, WorkspaceClientToken token, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (!workspace.ValidateMutation(token))
+                throw new OperationCanceledException("Workspace lease revoked");
             AuthenticationSettings auth = this.GetAuthenticationSettings();
             if (!this.HasConfiguredUser(auth))
             {
@@ -479,30 +508,39 @@ namespace Bivium.Services
             }
 
             string secret;
-            lock (this._lock)
+            lock (this._twoFactorSetupLock)
             {
-                secret = this._pendingTwoFactorSecret;
+                secret = this._pendingTwoFactorOwner == token ? this._pendingTwoFactorSecret : "";
             }
 
             if (string.IsNullOrWhiteSpace(secret) || !this.ValidateTotp(secret, code))
             {
+                if (!workspace.ValidateMutation(token))
+                    throw new OperationCanceledException("Workspace lease revoked");
                 await this.RegisterFailureAsync();
                 throw new InvalidOperationException("Invalid two-factor code");
             }
 
-            this.UpdateAuthenticationNode(authNode =>
+            bool committed = workspace.TryExecuteMutation(token, () =>
             {
-                JsonObject userNode = this.GetOrCreateObject(authNode, "User");
-                JsonObject twoFactorNode = this.GetOrCreateObject(userNode, "TwoFactor");
-                twoFactorNode["Enabled"] = true;
-                twoFactorNode["Secret"] = secret;
-                userNode["SecurityStamp"] = Guid.NewGuid().ToString("N");
-            }, cancellationToken);
-
-            lock (this._lock)
-            {
-                this._pendingTwoFactorSecret = "";
-            }
+                this.UpdateAuthenticationNode(authNode =>
+                {
+                    lock (this._twoFactorSetupLock)
+                    {
+                        if (this._pendingTwoFactorOwner != token || this._pendingTwoFactorSecret != secret)
+                            throw new InvalidOperationException("The pending 2FA setup was cancelled. Generate a new QR code.");
+                    }
+                    JsonObject userNode = this.GetOrCreateObject(authNode, "User");
+                    JsonObject twoFactorNode = this.GetOrCreateObject(userNode, "TwoFactor");
+                    twoFactorNode["Enabled"] = true;
+                    twoFactorNode["Secret"] = secret;
+                    userNode["SecurityStamp"] = Guid.NewGuid().ToString("N");
+                }, cancellationToken, false);
+                this.CancelPendingTwoFactorSetup(token);
+            });
+            if (!committed)
+                throw new OperationCanceledException("Workspace lease revoked");
+            this.ReloadConfiguration();
 
             this.ResetFailures();
         }
@@ -511,7 +549,7 @@ namespace Bivium.Services
         /// Disables two-factor authentication
         /// </summary>
         /// <param name="currentPassword">Current administrator password</param>
-        public async System.Threading.Tasks.Task DisableTwoFactorAsync(string currentPassword, CancellationToken cancellationToken = default)
+        public async System.Threading.Tasks.Task DisableTwoFactorAsync(string currentPassword, CancellationToken cancellationToken = default, WorkspaceClientToken owner = null)
         {
             cancellationToken.ThrowIfCancellationRequested();
             AuthenticationSettings auth = this.GetAuthenticationSettings();
@@ -539,10 +577,7 @@ namespace Bivium.Services
                 userNode["SecurityStamp"] = Guid.NewGuid().ToString("N");
             }, cancellationToken);
 
-            lock (this._lock)
-            {
-                this._pendingTwoFactorSecret = "";
-            }
+            this.CancelPendingTwoFactorSetup(owner);
 
             this.ResetFailures();
         }
@@ -784,10 +819,7 @@ namespace Bivium.Services
                     userNode["Disabled"] = true;
                     userNode["SecurityStamp"] = Guid.NewGuid().ToString("N");
                 });
-                lock (this._lock)
-                {
-                    this._pendingTwoFactorSecret = "";
-                }
+                this.CancelPendingTwoFactorSetup();
             }
         }
 
@@ -829,40 +861,45 @@ namespace Bivium.Services
         /// Updates the Authentication node in appsettings.json
         /// </summary>
         /// <param name="update">Update action</param>
-        private void UpdateAuthenticationNode(Action<JsonObject> update, CancellationToken cancellationToken = default)
+        private void UpdateAuthenticationNode(Action<JsonObject> update, CancellationToken cancellationToken = default, bool reload = true)
         {
             cancellationToken.ThrowIfCancellationRequested();
             lock (this._lock)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                string settingsPath = Path.Combine(this._environment.ContentRootPath, "appsettings.json");
-                string json = File.ReadAllText(settingsPath);
-
-                JsonNode rootNode = JsonNode.Parse(json, new JsonNodeOptions(), new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip });
-                if (rootNode == null || rootNode.AsObject() == null)
+                lock (SettingsWriteLock)
                 {
-                    throw new InvalidOperationException("Invalid appsettings.json");
+                    string settingsPath = Path.Combine(this._environment.ContentRootPath, "appsettings.json");
+                    string json = File.ReadAllText(settingsPath);
+
+                    JsonNode rootNode = JsonNode.Parse(json, new JsonNodeOptions(), new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip });
+                    if (rootNode == null || rootNode.AsObject() == null)
+                        throw new InvalidOperationException("Invalid appsettings.json");
+
+                    JsonObject root = rootNode.AsObject();
+                    JsonObject commanderSettings = this.GetOrCreateObject(root, "CommanderSettings");
+                    JsonObject authNode = this.GetOrCreateObject(commanderSettings, "Authentication");
+
+                    update(authNode);
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    JsonSerializerOptions writeOptions = new JsonSerializerOptions();
+                    writeOptions.WriteIndented = true;
+                    string updatedJson = root.ToJsonString(writeOptions);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    File.WriteAllText(settingsPath, updatedJson);
                 }
 
-                JsonObject root = rootNode.AsObject();
-                JsonObject commanderSettings = this.GetOrCreateObject(root, "CommanderSettings");
-                JsonObject authNode = this.GetOrCreateObject(commanderSettings, "Authentication");
-
-                update(authNode);
-                cancellationToken.ThrowIfCancellationRequested();
-
-                JsonSerializerOptions writeOptions = new JsonSerializerOptions();
-                writeOptions.WriteIndented = true;
-                string updatedJson = root.ToJsonString(writeOptions);
-                cancellationToken.ThrowIfCancellationRequested();
-                File.WriteAllText(settingsPath, updatedJson);
-
-                IConfigurationRoot configurationRoot = this._configuration as IConfigurationRoot;
-                if (configurationRoot != null)
-                {
-                    configurationRoot.Reload();
-                }
             }
+            if (reload)
+                this.ReloadConfiguration();
+        }
+
+        /// <summary>Notifica i consumer fuori dai lock del workspace, del challenge e dei writer</summary>
+        private void ReloadConfiguration()
+        {
+            IConfigurationRoot configurationRoot = this._configuration as IConfigurationRoot;
+            configurationRoot?.Reload();
         }
 
         /// <summary>

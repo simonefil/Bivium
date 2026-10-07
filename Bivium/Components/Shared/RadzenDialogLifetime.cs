@@ -63,9 +63,6 @@ namespace Bivium.Components.Shared
 
         #region Metodi pubblici
 
-        /// <summary>Indica che l'owner non può aprire altre finestre</summary>
-        public bool IsDisposed => this._isDisposed;
-
         /// <summary>
         /// Registra le opzioni univoche della prossima apertura posseduta
         /// </summary>
@@ -99,15 +96,6 @@ namespace Bivium.Components.Shared
         public bool CanClose()
         {
             return this._isOpen && this._dialogsAbove == 0;
-        }
-
-        /// <summary>
-        /// Restituisce se l'apertura posseduta è ancora presente nello stack
-        /// </summary>
-        /// <returns><see langword="true"/> mentre il dialog posseduto è aperto</returns>
-        public bool IsOpen()
-        {
-            return this._isOpen;
         }
 
         /// <summary>

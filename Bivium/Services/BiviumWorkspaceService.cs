@@ -1,6 +1,8 @@
 using Bivium.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.DependencyInjection;
+using System.Text.Json;
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -11,7 +13,7 @@ namespace Bivium.Services
     /// <summary>
     /// Owns the global Bivium workspace runtime state
     /// </summary>
-    public sealed class BiviumWorkspaceService : SubscriptionServiceBase<BiviumWorkspaceSnapshot>, IDisposable
+    public sealed partial class BiviumWorkspaceService : SubscriptionServiceBase<BiviumWorkspaceSnapshot>, IDisposable
     {
         #region Class Variables
 
@@ -59,10 +61,24 @@ namespace Bivium.Services
         /// </summary>
         /// <param name="logger">Application logger</param>
         /// <param name="settings">Application settings</param>
-        public BiviumWorkspaceService(ILogger<BiviumWorkspaceService> logger, IOptionsMonitor<CommanderSettings> settings)
+        /// <param name="workflowFiles">Servizio file singleton già autorizzato</param>
+        /// <param name="workflowSecurity">Validazione path esistente</param>
+        /// <param name="workflowArchives">Servizio archive singleton esistente</param>
+        /// <param name="workflowPermissions">Servizio permission singleton esistente</param>
+        /// <param name="workflowFileSystem">Servizio letture e calcolo singleton esistente</param>
+        /// <param name="workflowEnvironment">Root usata dal commit delle impostazioni</param>
+        /// <param name="services">Risoluzione differita del singleton terminale</param>
+        public BiviumWorkspaceService(ILogger<BiviumWorkspaceService> logger, IOptionsMonitor<CommanderSettings> settings, IFileOperationService workflowFiles, SecurityService workflowSecurity, IArchiveService workflowArchives, IPermissionService workflowPermissions, IFileSystemService workflowFileSystem, IWebHostEnvironment workflowEnvironment, IServiceProvider services)
         {
             this._logger = logger ?? throw new ArgumentNullException(nameof(logger));
             this._settings = settings ?? throw new ArgumentNullException(nameof(settings));
+            this._workflowFiles = workflowFiles ?? throw new ArgumentNullException(nameof(workflowFiles));
+            this._workflowSecurity = workflowSecurity ?? throw new ArgumentNullException(nameof(workflowSecurity));
+            this._workflowArchives = workflowArchives ?? throw new ArgumentNullException(nameof(workflowArchives));
+            this._workflowPermissions = workflowPermissions ?? throw new ArgumentNullException(nameof(workflowPermissions));
+            this._workflowFileSystem = workflowFileSystem ?? throw new ArgumentNullException(nameof(workflowFileSystem));
+            this._workflowEnvironment = workflowEnvironment ?? throw new ArgumentNullException(nameof(workflowEnvironment));
+            this._workflowServices = services ?? throw new ArgumentNullException(nameof(services));
             this._maintenanceTask = Task.Run(() => this.RunMaintenanceAsync(this._maintenanceCancellation.Token));
         }
 
@@ -113,7 +129,7 @@ namespace Bivium.Services
         {
             lock (this._lock)
             {
-                if (!this.ValidateMutationLocked(token))
+                if (!this.ValidateLeaseLocked(token))
                     return new CancellationToken(true);
                 return this._attachments[token.AttachmentId].Revocation.Token;
             }
@@ -162,20 +178,24 @@ namespace Bivium.Services
         /// <returns>Reset authoritative snapshot</returns>
         public BiviumWorkspaceSnapshot ResetWorkspace(WorkspaceClientToken token)
         {
+            WorkspaceUploadRuntime upload;
             Action<BiviumWorkspaceSnapshot>[] subscribers;
             BiviumWorkspaceSnapshot snapshot;
             lock (this._lock)
             {
                 this.ThrowIfStopped();
-                if (!this.ValidateMutationLocked(token))
+                if (!this.ValidateLeaseLocked(token))
                     throw new UnauthorizedAccessException("The browser attachment no longer owns the workspace lease");
 
-                snapshot = new BiviumWorkspaceSnapshot(this._snapshot.Revision + 1, null, new FloatingWindowsSnapshot(), this._snapshot.ActiveClientLease);
-                this._snapshot = snapshot;
+                if (this._workflowRuntime.Current?.IsActive == true || this._operationRuntime?.Snapshot.IsRunning == true)
+                    throw new InvalidOperationException("Finish or explicitly cancel the active workspace workflow before resetting");
+                snapshot = this.ResetWorkspaceLocked(out upload);
                 subscribers = this.GetSubscribers();
             }
 
             this.NotifySubscribers(subscribers, snapshot);
+            if (upload != null)
+                this.CleanupUploadAsync(upload).GetAwaiter().GetResult();
             return snapshot;
         }
 
@@ -200,7 +220,7 @@ namespace Bivium.Services
                     throw new UnauthorizedAccessException("The browser attachment no longer owns the workspace lease");
                 if (this._snapshot.Panels == null)
                 {
-                    this._snapshot = new BiviumWorkspaceSnapshot(this._snapshot.Revision + 1, panels, this._snapshot.FloatingWindows, this._snapshot.ActiveClientLease);
+                    this._snapshot = new BiviumWorkspaceSnapshot(this._snapshot.Revision + 1, panels, this._snapshot.FloatingWindows, this._snapshot.ActiveClientLease, this._snapshot.Desktop, this._snapshot.Handoff, this._snapshot.Workflow, this._snapshot.Operation, this._snapshot.Upload);
                     subscribers = this.GetSubscribers();
                 }
 
@@ -230,14 +250,14 @@ namespace Bivium.Services
             lock (this._lock)
             {
                 this.ThrowIfStopped();
-                if (!this.ValidateMutationLocked(token))
+                if (!this.ValidateLeaseLocked(token))
                     throw new UnauthorizedAccessException("The browser attachment no longer owns the workspace lease");
                 if (expectedRevision == this._snapshot.Revision)
                 {
                     result = true;
                     if (this._snapshot.Panels != panels)
                     {
-                        this._snapshot = new BiviumWorkspaceSnapshot(this._snapshot.Revision + 1, panels, this._snapshot.FloatingWindows, this._snapshot.ActiveClientLease);
+                        this._snapshot = new BiviumWorkspaceSnapshot(this._snapshot.Revision + 1, panels, this._snapshot.FloatingWindows, this._snapshot.ActiveClientLease, this._snapshot.Desktop, this._snapshot.Handoff, this._snapshot.Workflow, this._snapshot.Operation, this._snapshot.Upload);
                         subscribers = this.GetSubscribers();
                     }
                 }
@@ -267,15 +287,15 @@ namespace Bivium.Services
             lock (this._lock)
             {
                 this.ThrowIfStopped();
-                if (!this.ValidateMutationLocked(token))
+                if (!this.ValidateLeaseLocked(token))
                     throw new UnauthorizedAccessException("The browser attachment no longer owns the workspace lease");
                 if (expectedRevision == this._snapshot.Revision)
                 {
                     result = true;
                     if (this._snapshot.FloatingWindows.Terminal != terminalWindow)
                     {
-                        FloatingWindowsSnapshot windows = new FloatingWindowsSnapshot(terminalWindow);
-                        this._snapshot = new BiviumWorkspaceSnapshot(this._snapshot.Revision + 1, this._snapshot.Panels, windows, this._snapshot.ActiveClientLease);
+                        FloatingWindowsSnapshot windows = new FloatingWindowsSnapshot(terminalWindow, this._snapshot.FloatingWindows.Editor, this._snapshot.FloatingWindows.Renamer);
+                        this._snapshot = new BiviumWorkspaceSnapshot(this._snapshot.Revision + 1, this._snapshot.Panels, windows, this._snapshot.ActiveClientLease, this._snapshot.Desktop, this._snapshot.Handoff, this._snapshot.Workflow, this._snapshot.Operation, this._snapshot.Upload);
                         subscribers = this.GetSubscribers();
                     }
                 }
@@ -343,53 +363,6 @@ namespace Bivium.Services
             // Cancellation, disposal and callbacks always remain outside the workspace lock
             this.CancelRevocations(revocations);
             this.ReleaseAttachments(expiredAttachments);
-            this.NotifySubscribers(subscribers, snapshot);
-            return result;
-        }
-
-        /// <summary>
-        /// Atomically transfers control to a waiting attachment
-        /// </summary>
-        /// <param name="attachmentId">Requesting attachment</param>
-        /// <param name="expectedGeneration">Generation observed during the challenge</param>
-        /// <returns>Updated result</returns>
-        public WorkspaceAttachResult TryTakeover(string attachmentId, long expectedGeneration)
-        {
-            Action<BiviumWorkspaceSnapshot>[] subscribers = Array.Empty<Action<BiviumWorkspaceSnapshot>>();
-            WorkspaceAttachResult result = new WorkspaceAttachResult();
-            BiviumWorkspaceSnapshot snapshot;
-            CancellationTokenSource previousRevocation = null;
-            DateTime now = DateTime.UtcNow;
-
-            lock (this._lock)
-            {
-                this.ThrowIfStopped();
-                ClientAttachment attachment;
-                if (!this._attachments.TryGetValue(attachmentId ?? "", out attachment))
-                    return result;
-
-                ActiveClientLeaseSnapshot activeLease = this._snapshot.ActiveClientLease;
-                bool canAcquire = activeLease == null || activeLease.Generation == expectedGeneration;
-                if (canAcquire)
-                {
-                    attachment.LastActivityUtc = now;
-                    previousRevocation = this.AcquireLeaseLocked(attachment, now);
-                    subscribers = this.GetSubscribers();
-                    result.HasControl = true;
-                }
-                else
-                {
-                    result.RequiresTakeover = true;
-                }
-
-                result.AttachmentId = attachment.AttachmentId;
-                result.ActiveLease = this._snapshot.ActiveClientLease;
-                result.WorkspaceRevision = this._snapshot.Revision;
-                snapshot = this._snapshot;
-            }
-
-            if (previousRevocation != null)
-                this.CancelAndDisposeTokenSource(previousRevocation);
             this.NotifySubscribers(subscribers, snapshot);
             return result;
         }
@@ -484,8 +457,9 @@ namespace Bivium.Services
 
                 // Replace the token under lock but invoke its callbacks only after committing the snapshot
                 revocation = this.RevokeAttachmentLocked(attachment);
+                this.CancelHandoffLocked("The active browser disconnected during handoff. Retry activation.");
                 ActiveClientLeaseSnapshot disconnected = new ActiveClientLeaseSnapshot(lease.AttachmentId, lease.Generation, lease.RemoteIp, lease.ClientLabel, lease.ConnectedAtUtc, DateTime.UtcNow, false);
-                this._snapshot = new BiviumWorkspaceSnapshot(this._snapshot.Revision + 1, this._snapshot.Panels, this._snapshot.FloatingWindows, disconnected);
+                this._snapshot = new BiviumWorkspaceSnapshot(this._snapshot.Revision + 1, this._snapshot.Panels, this._snapshot.FloatingWindows, disconnected, this._snapshot.Desktop, null, this._snapshot.Workflow, this._snapshot.Operation, this._snapshot.Upload);
                 subscribers = this.GetSubscribers();
                 snapshot = this._snapshot;
             }
@@ -503,7 +477,7 @@ namespace Bivium.Services
         {
             lock (this._lock)
             {
-                if (!this.ValidateMutationLocked(token))
+                if (!this.ValidateLeaseLocked(token))
                     return false;
 
                 ClientAttachment attachment = this._attachments[token.AttachmentId];
@@ -546,9 +520,15 @@ namespace Bivium.Services
                 if (!this._attachments.Remove(attachmentId ?? "", out attachment))
                     return;
 
+                if (this._snapshot.Handoff != null && (this._snapshot.Handoff.OwnerAttachmentId == attachmentId || this._snapshot.Handoff.RequesterAttachmentId == attachmentId))
+                {
+                    this.CancelHandoffLocked("A browser detached during handoff. Retry activation.");
+                    subscribers = this.GetSubscribers();
+                }
+
                 if (this._snapshot.ActiveClientLease != null && this._snapshot.ActiveClientLease.AttachmentId == attachment.AttachmentId)
                 {
-                    this._snapshot = new BiviumWorkspaceSnapshot(this._snapshot.Revision + 1, this._snapshot.Panels, this._snapshot.FloatingWindows, null);
+                    this._snapshot = new BiviumWorkspaceSnapshot(this._snapshot.Revision + 1, this._snapshot.Panels, this._snapshot.FloatingWindows, null, this._snapshot.Desktop, null, this._snapshot.Workflow, this._snapshot.Operation, this._snapshot.Upload);
                     subscribers = this.GetSubscribers();
                 }
 
@@ -607,19 +587,32 @@ namespace Bivium.Services
         /// </summary>
         public void Stop()
         {
+            WorkspaceUploadRuntime upload;
             List<ClientAttachment> attachments;
+            Action<BiviumWorkspaceSnapshot>[] subscribers;
+            BiviumWorkspaceSnapshot snapshot;
             lock (this._lock)
             {
+                subscribers = this.GetSubscribers();
                 if (!this.TryBeginStop())
                     return;
 
                 attachments = new List<ClientAttachment>(this._attachments.Values);
+                this.CancelHandoffLocked("Workspace stopped.");
                 this._attachments.Clear();
+                this._desktopRuntime.Clear();
+                upload = this._uploadRuntime;
+                this._uploadRuntime = null;
+                snapshot = this.CommitUploadStateLocked();
             }
 
+            this.NotifySubscribers(subscribers, snapshot);
+            this._operationLifetimeCancellation.Cancel();
             this._maintenanceCancellation.Cancel();
             this._maintenanceTask.GetAwaiter().GetResult();
             this.ReleaseAttachments(attachments);
+            if (upload != null)
+                this.CleanupUploadAsync(upload).GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -629,6 +622,7 @@ namespace Bivium.Services
         {
             this.Stop();
             this._maintenanceCancellation.Dispose();
+            this._operationLifetimeCancellation.Dispose();
             GC.SuppressFinalize(this);
         }
 
@@ -648,6 +642,24 @@ namespace Bivium.Services
         #endregion
 
         #region Private Methods
+
+        /// <summary>Stessa policy di pulizia del reset esplicito, sotto il lock dell'owner già validato</summary>
+        /// <param name="upload">Trasporto da ripulire fuori lock</param>
+        /// <returns>Snapshot reset con lease preservato</returns>
+        private BiviumWorkspaceSnapshot ResetWorkspaceLocked(out WorkspaceUploadRuntime upload)
+        {
+            this.CancelHandoffLocked("Workspace reset. Retry activation.");
+            this._workflowRuntime.Current = null;
+            this._workflowRuntime.Responses.Clear();
+            this._terminalClipboardRequests.Clear();
+            this._operationRuntime = null;
+            upload = this._uploadRuntime;
+            this._uploadRuntime = null;
+            BiviumWorkspaceSnapshot snapshot = new BiviumWorkspaceSnapshot(this._snapshot.Revision + 1, null, new FloatingWindowsSnapshot(), this._snapshot.ActiveClientLease);
+            this._desktopRuntime.Clear();
+            this._snapshot = snapshot;
+            return snapshot;
+        }
 
         /// <summary>
         /// Replaces the revocation token without invoking callbacks under the lock
@@ -723,6 +735,22 @@ namespace Bivium.Services
         /// <returns>Previous token to cancel outside the lock, when present</returns>
         private CancellationTokenSource AcquireLeaseLocked(ClientAttachment attachment, DateTime now)
         {
+            this.CancelHandoffLocked("Workspace ownership changed. Retry activation.");
+            // Sempre, anche quando l'owner precedente è stato rimosso o il setup non è stato acknowledged dalla UI
+            this._workflowServices.GetRequiredService<AuthenticationService>().CancelPendingTwoFactorSetup();
+            if (this._uploadRuntime?.Snapshot.Visible == true && (this._uploadRuntime.Snapshot.Phase == WorkspaceUploadPhase.Uploading || (this._uploadRuntime.Snapshot.Phase == WorkspaceUploadPhase.Selecting && (!this._uploadRuntime.Snapshot.Files.IsEmpty || !this._uploadRuntime.Snapshot.Directories.IsEmpty))))
+            {
+                WorkspaceUploadSnapshot upload = this._uploadRuntime.Snapshot;
+                this._uploadRuntime.Snapshot = upload with { Revision = upload.Revision + 1, Phase = WorkspaceUploadPhase.Paused };
+                this.CommitUploadStateLocked();
+            }
+            if (this._workflowRuntime.Current?.Kind == WorkspaceWorkflowKind.Authentication)
+            {
+                WorkspaceWorkflowSnapshot workflow = this._workflowRuntime.Current;
+                WorkspaceAuthenticationDraft draft = JsonSerializer.Deserialize<WorkspaceAuthenticationDraft>(workflow.Draft);
+                this._workflowRuntime.Current = workflow with { Revision = workflow.Revision + 1, Draft = JsonSerializer.Serialize(draft with { PendingMfaSetup = false }) };
+                this.CommitWorkflowStateLocked();
+            }
             CancellationTokenSource result = null;
 
             // When ownership changes, immediately replace the token authorizing the previous browser
@@ -739,7 +767,7 @@ namespace Bivium.Services
             // Generation, lease and revision advance in the same workspace-lock-protected commit
             this._leaseGeneration++;
             ActiveClientLeaseSnapshot lease = new ActiveClientLeaseSnapshot(attachment.AttachmentId, this._leaseGeneration, attachment.RemoteIp, attachment.ClientLabel, attachment.ConnectedAtUtc, now);
-            this._snapshot = new BiviumWorkspaceSnapshot(this._snapshot.Revision + 1, this._snapshot.Panels, this._snapshot.FloatingWindows, lease);
+            this._snapshot = new BiviumWorkspaceSnapshot(this._snapshot.Revision + 1, this._snapshot.Panels, this._snapshot.FloatingWindows, lease, this._snapshot.Desktop, null, this._snapshot.Workflow, this._snapshot.Operation, this._snapshot.Upload);
             return result;
         }
 
@@ -749,6 +777,14 @@ namespace Bivium.Services
         /// <param name="token">Mutation token to validate</param>
         /// <returns>True when attachment and generation are still authoritative</returns>
         private bool ValidateMutationLocked(WorkspaceClientToken token)
+        {
+            return this._snapshot.Handoff?.Frozen != true && !this.IsStopped && this.ValidateLeaseLocked(token);
+        }
+
+        /// <summary>Valida il lease anche durante il drain dei publisher dedicati</summary>
+        /// <param name="token">Lease da validare</param>
+        /// <returns>True quando owner e generazione sono ancora autorevoli</returns>
+        private bool ValidateLeaseLocked(WorkspaceClientToken token)
         {
             if (token == null || this._snapshot.ActiveClientLease == null)
                 return false;
@@ -772,7 +808,7 @@ namespace Bivium.Services
             if (lease == null)
                 return;
             ActiveClientLeaseSnapshot refreshed = new ActiveClientLeaseSnapshot(lease.AttachmentId, lease.Generation, lease.RemoteIp, lease.ClientLabel, lease.ConnectedAtUtc, now, true);
-            this._snapshot = new BiviumWorkspaceSnapshot(this._snapshot.Revision, this._snapshot.Panels, this._snapshot.FloatingWindows, refreshed);
+            this._snapshot = new BiviumWorkspaceSnapshot(this._snapshot.Revision, this._snapshot.Panels, this._snapshot.FloatingWindows, refreshed, this._snapshot.Desktop, this._snapshot.Handoff, this._snapshot.Workflow, this._snapshot.Operation, this._snapshot.Upload);
         }
 
         /// <summary>
@@ -791,11 +827,12 @@ namespace Bivium.Services
             // Revoke the expired owner first to prevent it from remaining authoritative during cleanup
             if (this.IsLeaseExpiredLocked(now) && this._snapshot.ActiveClientLease != null)
             {
+                this.CancelHandoffLocked("Workspace lease expired. Retry activation.");
                 ActiveClientLeaseSnapshot lease = this._snapshot.ActiveClientLease;
                 ClientAttachment activeAttachment;
                 if (this._attachments.TryGetValue(lease.AttachmentId, out activeAttachment))
                     revocations.Add(this.RevokeAttachmentLocked(activeAttachment));
-                this._snapshot = new BiviumWorkspaceSnapshot(this._snapshot.Revision + 1, this._snapshot.Panels, this._snapshot.FloatingWindows, null);
+                this._snapshot = new BiviumWorkspaceSnapshot(this._snapshot.Revision + 1, this._snapshot.Panels, this._snapshot.FloatingWindows, null, this._snapshot.Desktop, null, this._snapshot.Workflow, this._snapshot.Operation, this._snapshot.Upload);
                 changed = true;
             }
 
@@ -810,6 +847,8 @@ namespace Bivium.Services
             for (int i = 0; i < expired.Count; i++)
             {
                 ClientAttachment attachment = this._attachments[expired[i]];
+                if (this._snapshot.Handoff?.RequesterAttachmentId == attachment.AttachmentId)
+                    this.CancelHandoffLocked("Requesting browser expired. Retry activation.");
                 this._attachments.Remove(expired[i]);
                 expiredAttachments.Add(attachment);
                 changed = true;

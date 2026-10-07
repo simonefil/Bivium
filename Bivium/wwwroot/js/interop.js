@@ -1,9 +1,196 @@
 // Bivium JS Interop
-// Handles: resize drag, floating window stacking, keyboard capture, theme switching
+// Handles: workspace handoff, floating window stacking, keyboard capture, file panels, path editor
 
-import { invokeCircuitMethod, isCircuitConnected, registerCircuitParticipant } from './connection.js';
+import { invokeCircuitMethod as invokeConnectedCircuitMethod, isCircuitConnected, registerCircuitParticipant } from './connection.js';
 
-const FLOATING_WINDOW_BASE_Z_INDEX = 2000;
+// Condiviso anche fra import con query string diverse: nessun publisher del desktop sfugge al drain.
+const publicationKey = Symbol.for('bivium.desktopPublications');
+const desktopPublications = globalThis[publicationKey] ??= { pending: new Set(), panelTrackers: new Set(), windows: new Set(), freeze: null, failures: 0, composing: false };
+desktopPublications.pathTrackers ??= new Set();
+desktopPublications.surfaceTrackers ??= new Set();
+// Guardia per i test node, dove il modulo viene importato senza DOM
+if (typeof window !== 'undefined' && !desktopPublications.compositionRegistered) {
+    desktopPublications.compositionRegistered = true;
+    window.addEventListener('compositionstart', function () { desktopPublications.composing = true; }, true);
+    window.addEventListener('compositionend', function () { desktopPublications.composing = false; }, true);
+}
+
+/**
+ * Esegue la hydration visuale al frame successivo. Le schede in background sospendono requestAnimationFrame:
+ * il timeout garantisce che gli adapter escano da restoring e non blocchino il takeover.
+ * @param {Function} callback - Lavoro da eseguire una sola volta.
+ * @returns {Function} Annulla la richiesta se non è ancora partita.
+ */
+export function requestVisualFrame(callback) {
+    let done = false;
+    let frame = 0;
+    let timer = 0;
+    const cancel = function () {
+        done = true;
+        cancelAnimationFrame(frame);
+        window.clearTimeout(timer);
+    };
+    const run = function () {
+        if (done) return;
+        cancel();
+        callback();
+    };
+    frame = requestAnimationFrame(run);
+    timer = window.setTimeout(run, 100);
+    return cancel;
+}
+
+/** Proxy di trasporto per includere i callback terminali esistenti senza duplicarne la security. */
+export function createDesktopPublicationReference(reference) {
+    return { invokeMethodAsync: (...args) => {
+        const pending = reference.invokeMethodAsync(...args);
+        desktopPublications.pending.add(pending);
+        pending.then(function () { desktopPublications.pending.delete(pending); }, function () {
+            desktopPublications.pending.delete(pending);
+            desktopPublications.failures++;
+        });
+        return pending;
+    } };
+}
+
+function invokeCircuitMethod(...args) {
+    const pending = invokeConnectedCircuitMethod(...args);
+    desktopPublications.pending.add(pending);
+    pending.then(function () { desktopPublications.pending.delete(pending); }, function () {
+        desktopPublications.pending.delete(pending);
+        desktopPublications.failures++;
+    });
+    return pending;
+}
+
+/** Blocca ingressi browser, non heartbeat/disconnessione; il server blocca separatamente i nuovi comandi. */
+// Only called from an explicitly confirmed workspace clipboard request, never during hydration.
+export async function writeWorkspaceClipboardText(text) {
+    const pending = navigator.clipboard.writeText(text);
+    desktopPublications.pending.add(pending);
+    pending.then(function () { desktopPublications.pending.delete(pending); }, function () {
+        desktopPublications.pending.delete(pending);
+        desktopPublications.failures++;
+    });
+    await pending;
+}
+
+export function beginWorkspaceHandoff(id, remainingMilliseconds = 10000, workflowId = '') {
+    const modal = getTopBlockingModal();
+    const workflowModal = modal?.querySelector('[data-workspace-workflow-id]');
+    if (!isCircuitConnected() || (modal && (!workflowId || workflowModal?.dataset.workspaceWorkflowId !== workflowId)) || desktopPublications.freeze || desktopPublications.composing) return false;
+    const root = document.getElementById('workspace-desktop');
+    if (!root) return false;
+    // Le superfici dichiarate dall'app devono avere completato il mount dell'adapter
+    const surfaceKey = Symbol.for('bivium.surfaceAdapter');
+    for (const surface of document.querySelectorAll('[data-workspace-menu-surface], [data-workspace-context-surface], [data-workspace-format-surface], [data-workspace-dropdown-surface], [data-workspace-renamer-surface], [data-workspace-terminal-view], [data-workspace-terminal-strip], [data-workspace-surface]:not([data-workspace-surface=""])')) {
+        if (!surface[surfaceKey]?.ready()) return false;
+    }
+    const active = document.activeElement;
+    if (active?.classList.contains('terminal-ime-input') && active.value) return false;
+    for (const registration of desktopPublications.windows) registration.captureFocus();
+    for (const registration of desktopPublications.pathTrackers) registration.capture();
+    // Capture precede mouseup/inert e qualsiasi chiusura di popup causata dal freeze
+    for (const registration of desktopPublications.surfaceTrackers) {
+        if (!registration.ready()) return false;
+        registration.capture();
+    }
+    // I TextBox renamer sono Immediate: non reinviare onchange, che rigenererebbe preview Rand già materializzate.
+    // Solo i Numeric mantengono un valore fino al change; il loro normale commit precede il freeze.
+    if (active?.matches('input') && active.closest('.renamer-window .rz-numeric')) {
+        active.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    const controller = new AbortController();
+    const freeze = { id, root, controller, active, modal, workflowId, failures: desktopPublications.failures };
+    desktopPublications.freeze = freeze;
+    // Conclude drag/resize, ma i tracker visuali non pubblicano la chiusura sintetica
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    const block = function (event) {
+        if (!desktopPublications.freeze) return;
+        if (event.cancelable) event.preventDefault();
+        event.stopImmediatePropagation();
+    };
+    for (const name of ['keydown', 'keyup', 'pointerdown', 'pointerup', 'pointermove', 'mousedown', 'mouseup', 'mousemove', 'click', 'dblclick', 'contextmenu', 'wheel', 'touchstart', 'touchmove', 'touchend', 'beforeinput', 'input', 'change', 'paste', 'cut', 'drop', 'dragstart', 'compositionstart', 'compositionupdate', 'compositionend', 'resize']) {
+        window.addEventListener(name, block, { capture: true, passive: false, signal: controller.signal });
+    }
+    root.inert = true;
+    if (modal) modal.inert = true;
+    // Fallback browser-only: sblocca l'input, mai il lease, se il circuito non può più eseguire il cleanup
+    freeze.timer = window.setTimeout(function () { endWorkspaceHandoff(id, isCircuitConnected()); }, Math.max(1, Math.min(10000, remainingMilliseconds)));
+    return true;
+}
+
+/**
+ * Attende che un ripristino visuale in corso termini, entro la vita del freeze che lo richiede.
+ * @param {Function} isRestoring - Stato corrente del ripristino.
+ * @param {object} freeze - Freeze proprietario del tentativo.
+ * @returns {Promise<boolean>} False se il freeze è terminato o il circuito è caduto.
+ */
+async function waitForVisualRestore(isRestoring, freeze) {
+    while (isRestoring()) {
+        if (desktopPublications.freeze !== freeze || !isCircuitConnected()) return false;
+        await new Promise(function (resolve) { window.setTimeout(resolve, 50); });
+    }
+    return desktopPublications.freeze === freeze;
+}
+
+/** Flush esplicito dei timer scroll e di tutte le chiamate già in volo, senza un'attesa sotto lock server. */
+export async function flushDesktopPublications(id) {
+    const freeze = desktopPublications.freeze;
+    if (!freeze || freeze.id !== id || !isCircuitConnected()) return false;
+    try {
+        for (const registration of desktopPublications.surfaceTrackers) if (!registration.ready()) return false;
+        // Un ripristino appena avviato (reload recente) si attende: rifiutarlo farebbe fallire il takeover
+        for (const registration of desktopPublications.pathTrackers) {
+            if (!await waitForVisualRestore(function () { return registration.restoring; }, freeze)) return false;
+            registration.capture();
+        }
+        for (const tracker of desktopPublications.panelTrackers) {
+            if (!tracker.scroller.isConnected) continue;
+            if (!await waitForVisualRestore(function () { return tracker.restoring; }, freeze)) return false;
+            window.clearTimeout(tracker.timer);
+            tracker.timer = 0;
+            const top = tracker.scroller.getBoundingClientRect().top;
+            const row = Array.from(tracker.scroller.querySelectorAll('tr[data-entry-path]')).find(item => item.getBoundingClientRect().bottom > top + 1);
+            if (row) await invokeCircuitMethod(tracker.dotNetReference, 'OnRadzenFileListScrollAnchorChanged', row.dataset.entryPath || '');
+            tracker.measure();
+        }
+        while (desktopPublications.pending.size) {
+            await Promise.all(Array.from(desktopPublications.pending));
+            if (desktopPublications.freeze !== freeze || !isCircuitConnected()) return false;
+        }
+        // Dopo i commit Numeric ammessi prima del freeze: aggiorna solo il visuale Renamer,
+        // conservando focus/popup pre-freeze e senza reinviare valori o eventi di form.
+        for (const registration of desktopPublications.surfaceTrackers) registration.captureFinal?.();
+        while (desktopPublications.pending.size) {
+            await Promise.all(Array.from(desktopPublications.pending));
+            if (desktopPublications.freeze !== freeze || !isCircuitConnected()) return false;
+        }
+        const modal = getTopBlockingModal();
+        const compatibleModal = !modal || (freeze.workflowId && modal.querySelector('[data-workspace-workflow-id]')?.dataset.workspaceWorkflowId === freeze.workflowId);
+        return desktopPublications.freeze === freeze && freeze.failures === desktopPublications.failures && isCircuitConnected() && compatibleModal && Array.from(desktopPublications.surfaceTrackers).every(registration => registration.ready());
+    } catch {
+        return false;
+    }
+}
+
+/** Libera esclusivamente il freeze proprietario del tentativo; non sblocca una richiesta successiva. */
+export function endWorkspaceHandoff(id, restoreFocus = false) {
+    const freeze = desktopPublications.freeze;
+    if (!freeze || freeze.id !== id) return;
+    desktopPublications.freeze = null;
+    window.clearTimeout(freeze.timer);
+    freeze.controller.abort();
+    freeze.root.inert = false;
+    if (freeze.modal) freeze.modal.inert = false;
+    if (restoreFocus && freeze.active?.isConnected) freeze.active.focus({ preventScroll: true });
+}
+
+/** Base dello stack modeless: sotto header/footer, dialog e popup Radzen (vedi --bivium-floating-window-zindex in app.css). */
+function getFloatingWindowBaseZIndex() {
+    const value = Number.parseInt(getComputedStyle(document.documentElement).getPropertyValue('--bivium-floating-window-zindex'), 10);
+    return Number.isFinite(value) ? value : 100;
+}
 const FLOATING_WINDOW_FOCUS_SELECTOR = [
     '.terminal-ime-input',
     '.terminal-virtual-viewport',
@@ -26,11 +213,13 @@ if (!floatingWindowManager) {
 }
 
 const initializedWindowDragElements = floatingWindowManager.initializedDragElements;
+floatingWindowManager.activationSequence ??= 0;
+floatingWindowManager.pendingActivation ??= null;
+floatingWindowManager.interactionSequence ??= 0;
 const windowDragRegistrations = new Map();
 let workspacePresenceRegistration = null;
 let keyboardCaptureRegistration = null;
 let longPressRegistration = null;
-let popupLayerRegistration = null;
 
 function isVisibleElement(element) {
     if (!element?.isConnected) return false;
@@ -43,118 +232,6 @@ function getTopBlockingModal() {
     if (reconnect.length) return reconnect[reconnect.length - 1];
     const dialogs = Array.from(document.querySelectorAll('.rz-dialog-wrapper')).filter(isVisibleElement);
     return dialogs[dialogs.length - 1] || null;
-}
-
-/** Layout-owned adapter for native Radzen portals; never a global popup CSS override. */
-export function registerNativePopupLayers() {
-    disposeNativePopupLayers();
-    const layers = new Map();
-    const headerLayers = new Map();
-    let previousTop = getTopBlockingModal();
-
-    function ownerFor(popup, info, popups, depth = 0) {
-        if (depth > 4) return null;
-        const ariaOwner = Array.from(document.querySelectorAll('[aria-controls], [aria-owns]')).find(function (control) {
-            return [control.getAttribute('aria-controls'), control.getAttribute('aria-owns')]
-                .some(value => value?.split(/\s+/).includes(popup.id));
-        });
-        const control = ariaOwner || info?.parent;
-        if (!control?.isConnected) return null;
-        const owner = control.closest('.rz-dialog-wrapper, .terminal-window, .editor-window, .renamer-window');
-        if (owner) return owner;
-        const parentPopup = control.closest('.rz-popup, .rz-overlaypanel');
-        if (parentPopup && parentPopup !== popup) {
-            return ownerFor(parentPopup, popups.find(item => item.id === parentPopup.id), popups, depth + 1);
-        }
-        return null;
-    }
-
-    function restore(popup) {
-        const layer = layers.get(popup);
-        if (!layer) return;
-        if (popup.style.zIndex !== layer.originalZ) popup.style.zIndex = layer.originalZ;
-        layers.delete(popup);
-    }
-
-    function update() {
-        const radzen = globalThis.Radzen;
-        if (!radzen) return;
-        const top = getTopBlockingModal();
-        const topChanged = top !== previousTop;
-        previousTop = top;
-        const popups = (radzen.popups || []).slice();
-        const active = new Set();
-        const modelessTop = Math.max(FLOATING_WINDOW_BASE_Z_INDEX,
-            ...Array.from(document.querySelectorAll('.terminal-window.visible, .editor-window.visible, .renamer-window.visible'))
-                .map(element => Number(getComputedStyle(element).zIndex) || FLOATING_WINDOW_BASE_Z_INDEX));
-
-        for (const info of popups) {
-            const popup = document.getElementById(info.id);
-            if (!isVisibleElement(popup) || popup.classList.contains('rz-close')) continue;
-            const owner = ownerFor(popup, info, popups);
-            if ((top && owner !== top) || (owner && !isVisibleElement(owner))) {
-                restore(popup);
-                // Verified 11.4.2 API: preserve callback cleanup but not focus beneath the new modal.
-                radzen.closePopup(info.id, info.instance, info.callback, null, true);
-                continue;
-            }
-            active.add(popup);
-            if (!layers.has(popup)) layers.set(popup, { originalZ: popup.style.zIndex });
-            const ownerZ = owner ? Number(getComputedStyle(owner).zIndex) || modelessTop : Math.max(4000, modelessTop);
-            const zIndex = String(ownerZ + 1);
-            if (popup.style.zIndex !== zIndex) popup.style.zIndex = zIndex;
-        }
-        for (const popup of layers.keys()) {
-            if (!active.has(popup)) restore(popup);
-        }
-
-        // Inline navigation menus inherit the header stacking context, not a body portal.
-        for (const header of document.querySelectorAll('.commander-layout > .rz-header')) {
-            const menuOpen = Array.from(header.querySelectorAll('.rz-navigation-menu')).some(isVisibleElement);
-            if (top && topChanged) {
-                for (const item of header.querySelectorAll('.rz-navigation-item-active')) radzen.closeMenuItem(item);
-            }
-            if (menuOpen && !top) {
-                if (!headerLayers.has(header)) headerLayers.set(header, header.style.zIndex);
-                const zIndex = String(Math.max(4000, modelessTop + 1));
-                if (header.style.zIndex !== zIndex) header.style.zIndex = zIndex;
-            } else if (headerLayers.has(header)) {
-                header.style.zIndex = headerLayers.get(header);
-                headerLayers.delete(header);
-            }
-        }
-    }
-
-    const layerSelector = '.rz-popup, .rz-overlaypanel, .rz-dialog-wrapper, dialog, .terminal-window, .editor-window, .renamer-window, .rz-header';
-    const observer = new MutationObserver(function (records) {
-        // Terminal renderer churn does not change popup ownership or native layer geometry.
-        const relevant = records.some(function (record) {
-            if (record.type === 'attributes') {
-                return record.target.matches(layerSelector) || record.target.closest('.rz-header') ||
-                    (['aria-controls', 'aria-owns'].includes(record.attributeName));
-            }
-            return [...record.addedNodes, ...record.removedNodes].some(function (node) {
-                return node.nodeType === 1 && (node.matches(layerSelector) || node.querySelector(layerSelector));
-            });
-        });
-        if (relevant) update();
-    });
-    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'open', 'aria-controls', 'aria-owns'] });
-    update();
-    popupLayerRegistration = {
-        dispose: function () {
-            observer.disconnect();
-            for (const popup of layers.keys()) restore(popup);
-            for (const [header, originalZ] of headerLayers) header.style.zIndex = originalZ;
-            headerLayers.clear();
-        }
-    };
-}
-
-/** Releases only this layout's observer and restores native inline presentation. */
-export function disposeNativePopupLayers() {
-    popupLayerRegistration?.dispose();
-    popupLayerRegistration = null;
 }
 
 /**
@@ -272,9 +349,13 @@ function normalizeFloatingWindowStack() {
         return item && item.isConnected;
     });
 
+    const baseZIndex = getFloatingWindowBaseZIndex();
     for (let i = 0; i < floatingWindowManager.windows.length; i++) {
-        floatingWindowManager.windows[i].style.zIndex = String(FLOATING_WINDOW_BASE_Z_INDEX + i);
+        const zIndex = String(baseZIndex + i);
+        if (floatingWindowManager.windows[i].style.zIndex !== zIndex)
+            floatingWindowManager.windows[i].style.zIndex = zIndex;
     }
+    floatingWindowManager.scheduleContext?.();
 }
 
 function getTopVisibleFloatingWindow() {
@@ -288,17 +369,28 @@ function getTopVisibleFloatingWindow() {
 
 function restoreFloatingWindowFocus(win) {
     if (isBlockingModalOpen()) return;
+    const activationSequence = floatingWindowManager.activationSequence;
     let focusTarget = floatingWindowManager.lastFocusedElements.get(win);
-    if (!focusTarget || !focusTarget.isConnected || !win.contains(focusTarget)) {
+    if (!focusTarget || !isVisibleElement(focusTarget) || !win.contains(focusTarget)) {
         const semanticTarget = win.dataset.focusTarget || '';
         if (semanticTarget === 'terminal-tab-rename') focusTarget = win.querySelector('.terminal-tab-rename');
-        else if (semanticTarget === 'terminal-input') focusTarget = win.querySelector('.terminal-ime-input, .terminal-virtual-viewport');
+        else if (semanticTarget === 'terminal-input') focusTarget = win.querySelector('.terminal-session.active .terminal-ime-input, .terminal-session.active .terminal-virtual-viewport');
+        else if (semanticTarget === 'editor-text') {
+            focusTarget = win.querySelector('.monaco-editor textarea');
+            if (!focusTarget) return;
+        }
+        else if (semanticTarget.startsWith('control:')) {
+            const identity = semanticTarget.substring('control:'.length);
+            focusTarget = Array.from(win.querySelectorAll('[data-focus-key], [name], [id], [aria-label]')).find(function (element) {
+                return (element.dataset.focusKey || element.getAttribute('name') || element.getAttribute('aria-label') || element.id) === identity && isVisibleElement(element);
+            });
+        } else if (semanticTarget === 'renamer-method') focusTarget = win.querySelector('[name="renamer-method"], #renamer-method');
         if (!focusTarget) focusTarget = win.querySelector(FLOATING_WINDOW_FOCUS_SELECTOR);
     }
     if (!focusTarget || !focusTarget.isConnected || !win.contains(focusTarget)) return;
 
     requestAnimationFrame(function () {
-        if (isBlockingModalOpen() || !isFloatingWindowVisible(win) || getTopVisibleFloatingWindow() !== win || !focusTarget.isConnected) return;
+        if (activationSequence !== floatingWindowManager.activationSequence || isBlockingModalOpen() || !isFloatingWindowVisible(win) || getTopVisibleFloatingWindow() !== win || !isVisibleElement(focusTarget)) return;
 
         try {
             focusTarget.focus({ preventScroll: true });
@@ -309,6 +401,8 @@ function restoreFloatingWindowFocus(win) {
 }
 
 function bringFloatingWindowToFront(win, restoreFocus) {
+    if (!isFloatingWindowVisible(win) || isBlockingModalOpen()) return;
+    floatingWindowManager.interactionSequence++;
     floatingWindowManager.windows = floatingWindowManager.windows.filter(function (item) {
         return item !== win && item && item.isConnected;
     });
@@ -326,6 +420,7 @@ function activateTopVisibleFloatingWindow() {
 }
 
 function registerFloatingWindow(win) {
+    if (floatingWindowManager.windows.includes(win)) return;
     const savedMruOrder = Number(win.dataset.mruOrder || 0);
     if (!floatingWindowManager.windows.includes(win)) {
         floatingWindowManager.windows.push(win);
@@ -345,52 +440,58 @@ function registerFloatingWindow(win) {
     if (isFloatingWindowVisible(win)) {
         if (savedMruOrder > 0) {
             if (getTopVisibleFloatingWindow() === win) restoreFloatingWindowFocus(win);
-        } else {
+        } else if (!floatingWindowManager.pendingActivation) {
             bringFloatingWindowToFront(win, true);
         }
     }
 }
 
-/**
- * Initialize a resizable splitter element
- * @param {string} splitterId - DOM id of the splitter element
- * @param {string} direction - "vertical" or "horizontal"
- * @param {string} cssVarName - CSS custom property to update on the parent grid
- */
-export function initResizer(splitterId, direction, cssVarName) {
-    const splitter = document.getElementById(splitterId);
-    if (!splitter) return;
+/** Reserves the latest activation intent before Blazor makes the DOM visible. */
+export function requestFloatingWindowActivation(windowId) {
+    floatingWindowManager.interactionSequence++;
+    if (isBlockingModalOpen()) {
+        cancelFloatingWindowActivation(windowId);
+        return 0;
+    }
+    const sequence = ++floatingWindowManager.activationSequence;
+    floatingWindowManager.pendingActivation = { windowId, sequence };
+    return sequence;
+}
 
-    const parent = splitter.parentElement;
-    let isResizing = false;
+/** Invalidates only the activation still owned by the closing/minimizing window. */
+export function cancelFloatingWindowActivation(windowId, sequence = null) {
+    if (floatingWindowManager.pendingActivation?.windowId === windowId &&
+        (sequence === null || floatingWindowManager.pendingActivation.sequence === sequence)) {
+        floatingWindowManager.pendingActivation = null;
+        floatingWindowManager.activationSequence++;
+    }
+}
 
-    splitter.addEventListener('mousedown', function (e) {
-        isResizing = true;
-        e.preventDefault();
-    });
+/** Separates a modal rejection from an intent superseded by a newer activation. */
+export function activateFloatingWindowWithResult(windowId, sequence = null) {
+    if (isBlockingModalOpen()) {
+        cancelFloatingWindowActivation(windowId, sequence);
+        return 'blocked';
+    }
+    if (sequence !== null) {
+        const pending = floatingWindowManager.pendingActivation;
+        if (pending?.windowId !== windowId || pending.sequence !== sequence) return 'obsolete';
+        floatingWindowManager.pendingActivation = null;
+    } else {
+        floatingWindowManager.pendingActivation = null;
+        floatingWindowManager.activationSequence++;
+    }
+    const win = document.getElementById(windowId);
+    if (!isFloatingWindowVisible(win)) return 'unavailable';
+    bringFloatingWindowToFront(win, true);
+    return 'activated';
+}
 
-    document.addEventListener('mousemove', function (e) {
-        if (!isResizing) return;
-
-        const parentRect = parent.getBoundingClientRect();
-
-        if (direction === 'vertical') {
-            const offsetX = e.clientX - parentRect.left;
-            const percent = (offsetX / parentRect.width) * 100;
-            const clamped = Math.max(20, Math.min(80, percent));
-            parent.style.setProperty('--left-panel-width', clamped + '%');
-            parent.style.setProperty('--right-panel-width', (100 - clamped) + '%');
-        } else {
-            const offsetY = e.clientY - parentRect.top;
-            const percent = (offsetY / parentRect.height) * 100;
-            const clamped = Math.max(15, Math.min(85, percent));
-            parent.style.setProperty(cssVarName, clamped + '%');
-        }
-    });
-
-    document.addEventListener('mouseup', function () {
-        isResizing = false;
-    });
+/** Focus guards use the one shared stack, including deferred renderer frames. */
+export function isTopVisibleFloatingWindow(windowId, sequence = null) {
+    return (sequence === null || sequence === floatingWindowManager.activationSequence) &&
+        (!floatingWindowManager.pendingActivation || floatingWindowManager.pendingActivation.windowId === windowId) &&
+        !isBlockingModalOpen() && getTopVisibleFloatingWindow()?.id === windowId;
 }
 
 /**
@@ -405,8 +506,8 @@ export function captureKeyboard(dotNetRef) {
     let lastContext = '';
     let pendingContext = Promise.resolve();
     const semanticControlSelector = '[role="combobox"], [role="listbox"], [role="spinbutton"], [role="slider"], [role="tab"], .rz-column-picker';
-    const nativeOwnerSelector = 'button, a, input, textarea, select, [contenteditable], [role="button"], [role="menu"], [role="menuitem"], [role="tree"], [role="treeitem"], .rz-tree, .radzen-panel-tree, .rz-menu, .rz-menu-popup, .rz-navigation-item, ' + semanticControlSelector;
-    const dialogSelector = '[aria-modal="true"], .context-menu-overlay, .rz-dialog-wrapper, .rz-dialog-mask, .rz-context-menu, .rz-menu-popup';
+    const nativeOwnerSelector = 'button, a, input, textarea, select, [contenteditable], [role="button"], [role="menu"], [role="menuitem"], [role="tree"], [role="treeitem"], .rz-tree, .radzen-panel-tree, .rz-menu, .rz-navigation-item, ' + semanticControlSelector;
+    const dialogSelector = '[aria-modal="true"], .rz-dialog-wrapper, .rz-dialog-mask, .rz-context-menu';
 
     function reportContext() {
         contextFrame = 0;
@@ -422,16 +523,16 @@ export function captureKeyboard(dotNetRef) {
         const hasDialog = Array.from(document.querySelectorAll(dialogSelector)).some(isVisibleElement);
         const semanticOwner = activeEl?.closest?.(semanticControlSelector);
         const nativeOwner = activeEl?.closest?.(nativeOwnerSelector);
-        const fileSurface = activeEl?.closest?.('.radzen-panel-filelist, .panel-filelist, .radzen-file-grid-host');
-        const workspaceBody = (!activeEl || activeEl === document.body) && document.querySelector('.radzen-file-panel.active, .file-panel.active');
+        const fileSurface = activeEl?.closest?.('.radzen-panel-filelist, .radzen-file-grid-host');
+        const workspaceBody = (!activeEl || activeEl === document.body) && document.querySelector('.radzen-file-panel.active');
         const input = activeEl && ['INPUT', 'TEXTAREA'].includes(activeEl.tagName);
-        const inputInDialog = input && (activeEl.closest('.context-menu') || activeEl.closest('.renamer-window'));
+        const inputInDialog = input && activeEl.closest('.renamer-window');
         const available = !modal && !inTerminal && !inEditor && !hasDialog && !semanticOwner;
         const general = Boolean(available && !input);
         const control = Boolean(available && (!input || !inputInDialog));
         const navigation = Boolean(general && !nativeOwner && (fileSurface || workspaceBody));
-        const panelSwitch = Boolean(general && !nativeOwner && activeEl?.closest?.('.radzen-panel-filelist, .panel-filelist'));
-        const values = [general, control, navigation, panelSwitch, !modal, modal];
+        const panelSwitch = Boolean(general && !nativeOwner && activeEl?.closest?.('.radzen-panel-filelist'));
+        const values = [general, control, navigation, panelSwitch, !modal, modal, getTopVisibleFloatingWindow()?.id || ''];
         const signature = values.join('|');
         if (signature === lastContext) return;
         lastContext = signature;
@@ -445,6 +546,7 @@ export function captureKeyboard(dotNetRef) {
     function scheduleContext() {
         if (!disposed && !contextFrame) contextFrame = requestAnimationFrame(reportContext);
     }
+    floatingWindowManager.scheduleContext = scheduleContext;
 
     document.addEventListener('focusin', scheduleContext, { signal: eventController.signal });
     document.addEventListener('focusout', scheduleContext, { signal: eventController.signal });
@@ -528,19 +630,21 @@ export function captureKeyboard(dotNetRef) {
         const nativeOwner = activeEl?.closest?.(nativeOwnerSelector);
         // Semantic input widgets own their keys (including Ctrl chords), after reserved F12.
         if (activeEl?.closest?.(semanticControlSelector)) return;
+        // Typeahead appartiene al menu prima del dispatch Commander; chord espliciti e F12 restano invariati
+        if (!ctrl && !alt && !e.metaKey && /^[\p{L}\p{N}]$/u.test(key) && activeEl?.closest?.('[role="menubar"], [role="menu"], .rz-menu')) return;
 
         // Navigation belongs only to the file surface, never to native controls or trees.
         if (['Enter', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', 'Delete', ' ', 'Spacebar'].includes(key)) {
-            const fileSurface = activeEl?.closest?.('.radzen-panel-filelist, .panel-filelist, .radzen-file-grid-host');
-            const workspaceBody = (!activeEl || activeEl === document.body) && document.querySelector('.radzen-file-panel.active, .file-panel.active');
+            const fileSurface = activeEl?.closest?.('.radzen-panel-filelist, .radzen-file-grid-host');
+            const workspaceBody = (!activeEl || activeEl === document.body) && document.querySelector('.radzen-file-panel.active');
             if (nativeOwner || (!fileSurface && !workspaceBody)) return;
         }
 
         // If an input or textarea has focus, check context
         const tagName = activeEl ? activeEl.tagName : '';
         if (tagName === 'INPUT' || tagName === 'TEXTAREA') {
-            // Check if the input is inside a dialog (context menu, renamer, etc.)
-            const inDialog = activeEl.closest('.context-menu') || activeEl.closest('.renamer-window');
+            // Check if the input is inside a modeless window (renamer)
+            const inDialog = activeEl.closest('.renamer-window');
 
             if (ctrl && !inDialog) {
                 // Ctrl+key on path bar: blur and handle as file operation
@@ -580,13 +684,8 @@ export function captureKeyboard(dotNetRef) {
             e.preventDefault();
         }
 
-        // Intercept Ctrl+N to prevent browser new window
-        if (key === 'n' && e.ctrlKey && !shift) {
-            e.preventDefault();
-        }
-
-        // Intercept F4 to prevent browser address bar
-        if (key === 'F4' && !ctrl && !shift && !alt) {
+        // Intercept F4/Shift+F4 (edit, new file) and F7 (new folder) to prevent browser defaults
+        if ((key === 'F4' && !ctrl && !alt) || (key === 'F7' && !ctrl && !shift && !alt)) {
             e.preventDefault();
         }
 
@@ -597,7 +696,7 @@ export function captureKeyboard(dotNetRef) {
 
         // Commander switches panels only while focus is on the file-list surface
         if (key === 'Tab') {
-            const fileSurface = activeEl?.closest?.('.radzen-panel-filelist, .panel-filelist');
+            const fileSurface = activeEl?.closest?.('.radzen-panel-filelist');
             if (!fileSurface || nativeOwner) return;
             e.preventDefault();
         }
@@ -618,6 +717,8 @@ export function captureKeyboard(dotNetRef) {
             eventController.abort();
             contextObserver.disconnect();
             unregisterContext();
+            if (floatingWindowManager.scheduleContext === scheduleContext)
+                floatingWindowManager.scheduleContext = null;
         }
     };
 }
@@ -628,65 +729,99 @@ export function disposeKeyboardCapture() {
 }
 
 /**
- * Initialize long-press touch handler for context menu
- * Fires a synthetic contextmenu event after 500ms hold
+ * Initialize long-press touch handler for the file-list context menu
+ * Fires a synthetic contextmenu event after 500ms hold on a file-list panel
  */
 export function initLongPress() {
     disposeLongPress();
     const eventController = new AbortController();
     const eventSignal = eventController.signal;
+    const HOLD_DURATION = 500;
+    const MOVE_THRESHOLD = 10;
+    const CLICK_SUPPRESSION = 700;
     let timer = null;
     let startX = 0;
     let startY = 0;
-    const HOLD_DURATION = 500;
-    const MOVE_THRESHOLD = 10;
+    // True from the long-press (synthetic or native) until the finger is released
+    let handled = false;
+    let suppressUntil = 0;
+
+    function cancel() {
+        if (timer === null) return;
+        clearTimeout(timer);
+        timer = null;
+    }
 
     document.addEventListener('touchstart', function (e) {
+        cancel();
+        handled = false;
+        // Multi-touch is a pinch/zoom gesture, never a context request
+        if (e.touches.length !== 1) return;
         const touch = e.touches[0];
+        if (!(e.target instanceof Element) || !e.target.closest('.radzen-panel-filelist')) return;
         startX = touch.clientX;
         startY = touch.clientY;
 
         timer = setTimeout(function () {
             timer = null;
-
-            // Find the closest table row or panel-filelist
             const target = document.elementFromPoint(startX, startY);
-            if (!target) return;
-
-            // Dispatch synthetic contextmenu event
-            const contextEvent = new MouseEvent('contextmenu', {
+            if (!target?.closest('.radzen-panel-filelist')) return;
+            handled = true;
+            target.dispatchEvent(new MouseEvent('contextmenu', {
                 bubbles: true,
                 cancelable: true,
                 clientX: startX,
                 clientY: startY
-            });
-            target.dispatchEvent(contextEvent);
+            }));
         }, HOLD_DURATION);
     }, { passive: true, signal: eventSignal });
 
     document.addEventListener('touchmove', function (e) {
         if (timer === null) return;
-
-        const touch = e.touches[0];
-        const dx = Math.abs(touch.clientX - startX);
-        const dy = Math.abs(touch.clientY - startY);
-
-        // Cancel if finger moved too far (user is scrolling)
-        if (dx > MOVE_THRESHOLD || dy > MOVE_THRESHOLD) {
-            clearTimeout(timer);
-            timer = null;
+        if (e.touches.length !== 1) {
+            cancel();
+            return;
         }
+        const touch = e.touches[0];
+        // Cancel if finger moved too far (user is scrolling)
+        if (Math.abs(touch.clientX - startX) > MOVE_THRESHOLD || Math.abs(touch.clientY - startY) > MOVE_THRESHOLD) cancel();
     }, { passive: true, signal: eventSignal });
 
-    document.addEventListener('touchend', function () {
-        if (timer !== null) {
-            clearTimeout(timer);
-            timer = null;
+    document.addEventListener('touchend', function (e) {
+        cancel();
+        if (!handled) return;
+        handled = false;
+        // The release after a long-press must not also activate the row or reopen the menu
+        suppressUntil = performance.now() + CLICK_SUPPRESSION;
+        if (e.cancelable) e.preventDefault();
+    }, { passive: false, signal: eventSignal });
+    document.addEventListener('touchcancel', function () {
+        cancel();
+        handled = false;
+    }, { passive: true, signal: eventSignal });
+
+    // A browser long-press also raises a trusted contextmenu: only one of the two may open the menu
+    document.addEventListener('contextmenu', function (e) {
+        if (!e.isTrusted) return;
+        if (handled || performance.now() < suppressUntil) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+        } else if (timer !== null) {
+            cancel();
+            handled = true;
         }
-    }, { signal: eventSignal });
+    }, { capture: true, signal: eventSignal });
+
+    document.addEventListener('click', function (e) {
+        if (performance.now() >= suppressUntil) return;
+        suppressUntil = 0;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+    }, { capture: true, signal: eventSignal });
+
     longPressRegistration = {
         dispose: function () {
-            if (timer !== null) clearTimeout(timer);
+            cancel();
             eventController.abort();
         }
     };
@@ -697,57 +832,9 @@ export function disposeLongPress() {
     longPressRegistration = null;
 }
 
-/**
- * Focus a DOM element by id
- * @param {string} elementId - DOM id
- */
-export function focusElement(elementId) {
-    const el = document.getElementById(elementId);
-    if (el?.closest('.terminal-window, .editor-window, .renamer-window') && isBlockingModalOpen()) return;
-    if (el) el.focus();
-}
-
-/** Focuses a modeless control only while no blocking modal owns focus. */
-export function focusModelessElement(element) {
-    if (!element?.isConnected || isBlockingModalOpen()) return;
-    element.focus({ preventScroll: true });
-}
-
 /** Returns true only for a visible native blocking modal (including reconnect). */
 export function isBlockingModalOpen() {
     return getTopBlockingModal() !== null;
-}
-
-/**
- * Selects the leading portion of a text input.
- * @param {HTMLInputElement} input - Input element.
- * @param {number} selectionEnd - Exclusive end of the selection.
- */
-export function selectInputText(input, selectionEnd) {
-    if (!input || typeof input.setSelectionRange !== 'function') return;
-
-    const boundedEnd = Math.max(0, Math.min(Number(selectionEnd) || 0, input.value.length));
-    input.setSelectionRange(0, boundedEnd);
-}
-
-/**
- * Send a PUT request with JSON body and return success status
- * @param {string} url - Request URL
- * @param {string} jsonBody - JSON string to send as body
- * @returns {Promise<boolean>} True if response is OK
- */
-export async function putJson(url, jsonBody, attachmentId = '', leaseGeneration = 0) {
-    try {
-        const headers = createMutationHeaders(attachmentId, leaseGeneration);
-        const response = await fetch(url, {
-            method: 'PUT',
-            headers: headers,
-            body: jsonBody
-        });
-        return response.ok;
-    } catch (err) {
-        return false;
-    }
 }
 
 /**
@@ -887,35 +974,22 @@ async function sendJsonResult(url, method, jsonBody, attachmentId, leaseGenerati
 }
 
 /**
- * Adjust context menu position to keep it within viewport
- */
-export function adjustContextMenuPosition() {
-    const menu = document.querySelector('.context-menu-overlay + .context-menu');
-    if (!menu) return;
-
-    const rect = menu.getBoundingClientRect();
-    const viewportHeight = window.innerHeight;
-    const viewportWidth = window.innerWidth;
-
-    if (rect.bottom > viewportHeight) {
-        menu.style.top = Math.max(0, viewportHeight - rect.height) + 'px';
-    }
-    if (rect.right > viewportWidth) {
-        menu.style.left = Math.max(0, viewportWidth - rect.width) + 'px';
-    }
-}
-
-/**
  * Scrolls the active panel's cursor row into view
  */
 export function scrollCursorIntoView(cursorIndex = -1) {
-    const activePanel = document.querySelector('.file-panel.active');
     const radzenPanel = document.querySelector('.radzen-file-panel.active');
-    const scroller = radzenPanel?.querySelector('.rz-data-grid-data') || activePanel?.querySelector('.panel-filelist');
+    const scroller = radzenPanel?.querySelector('.rz-data-grid-data');
     if (!scroller) return;
-    const focusedRow = radzenPanel?.querySelector('tr.bivium-focused') || activePanel?.querySelector('tr.cursor');
+    const focusedRow = radzenPanel.querySelector('tr.bivium-focused');
     const index = cursorIndex >= 0 ? cursorIndex : Number(focusedRow?.dataset.entryIndex ?? -1);
-    scrollToFileListEntry(scroller, index, '', false);
+    scrollToFileListEntry(scroller, index, '', false, function () {
+        // Il focus DOM segue il cursore solo se è già sulla superficie file (o nel body): mai rubato a input, menu o finestre
+        const active = document.activeElement;
+        if (active && active !== document.body && !active.closest?.('.radzen-panel-filelist')) return;
+        if (isBlockingModalOpen() || desktopPublications.freeze) return;
+        const row = radzenPanel.querySelector('tr.bivium-focused');
+        if (row?.isConnected && row !== active) row.focus({ preventScroll: true });
+    });
 }
 
 const fileListScrollRequests = new WeakMap();
@@ -932,18 +1006,20 @@ function scrollToFileListEntry(scroller, index, path, alignStart, onComplete) {
     }
 
     const deadline = performance.now() + 2000;
-    const virtualized = Boolean(scroller.closest('.radzen-file-grid-host'));
     const quietPeriod = 160;
     let stableSince = 0;
     let stableGeometry = null;
     let stableRows = '';
     let finished = false;
     let frame = 0;
+    // Le schede in background sospendono requestAnimationFrame: la scadenza non può dipendere dai frame
+    let deadlineTimer = 0;
     const inputs = ['wheel', 'touchstart', 'pointerdown', 'keydown'];
     function finish() {
         if (finished) return;
         finished = true;
         cancelAnimationFrame(frame);
+        window.clearTimeout(deadlineTimer);
         for (const input of inputs) scroller.removeEventListener(input, finish);
         if (fileListScrollRequests.get(scroller) === finish) fileListScrollRequests.delete(scroller);
         onComplete?.();
@@ -967,11 +1043,6 @@ function scrollToFileListEntry(scroller, index, path, alignStart, onComplete) {
             const previousScrollTop = scroller.scrollTop;
             if ((alignStart && Math.abs(rect.top - top) > 0.5) || rect.top < top - 0.5) scroller.scrollTop += (rect.top - top) / scale;
             else if (!alignStart && rect.bottom > bottom + 0.5) scroller.scrollTop += (rect.bottom - bottom) / scale;
-            if (!virtualized) {
-                finish();
-                return;
-            }
-
             // Virtualize can adjust spacer heights after the target first materializes.
             // Keep ownership until real geometry and the rendered row identities stay quiet.
             const alignedRect = target.getBoundingClientRect();
@@ -1011,217 +1082,8 @@ function scrollToFileListEntry(scroller, index, path, alignStart, onComplete) {
 
     fileListScrollRequests.set(scroller, finish);
     for (const input of inputs) scroller.addEventListener(input, finish, { passive: true });
+    deadlineTimer = window.setTimeout(finish, deadline - performance.now());
     frame = requestAnimationFrame(position);
-}
-
-const filePanelScrollTrackers = new Map();
-const fileListColumnResizers = new Map();
-const MIN_FILE_COLUMN_WIDTH = 48;
-
-/**
- * Registers pointer-driven adjacent column resizing for one file table.
- * @param {string} tableId - Stable table DOM identifier.
- * @param {object} dotNetReference - FilePanel callback owner.
- */
-export function registerFileListColumnResizer(tableId, dotNetReference) {
-    unregisterFileListColumnResizer(tableId);
-    const table = document.getElementById(tableId);
-    if (!table || !dotNetReference) return;
-
-    const columns = Array.from(table.querySelectorAll(':scope > colgroup > col'));
-    const headers = Array.from(table.querySelectorAll(':scope > thead > tr > th'));
-    const handles = Array.from(table.querySelectorAll('[data-column-resizer]'));
-    if (columns.length !== 5 || headers.length !== 5 || handles.length !== 4) return;
-
-    const eventController = new AbortController();
-    const eventSignal = eventController.signal;
-    let drag = null;
-
-    function applyWidths(widths) {
-        const total = widths.reduce(function (sum, width) { return sum + width; }, 0);
-        if (!Number.isFinite(total) || total <= 0) return false;
-        if (!widths.every(function (width) { return Number.isFinite(width) && width > 0; })) return false;
-
-        table.classList.add('custom-columns');
-        for (let i = 0; i < columns.length; i++) {
-            columns[i].style.width = widths[i] / total * 100 + '%';
-        }
-        return true;
-    }
-
-    function finishDrag(event) {
-        if (!drag || event.pointerId !== drag.pointerId) return;
-        const completed = drag;
-        drag = null;
-        if (!completed.changed) return;
-
-        const total = completed.widths.reduce(function (sum, width) { return sum + width; }, 0);
-        if (!Number.isFinite(total) || total <= 0) return;
-        const ratios = completed.widths.map(function (width) { return width / total; });
-        if (!ratios.every(function (ratio) { return Number.isFinite(ratio) && ratio > 0; })) return;
-        invokeCircuitMethod(dotNetReference, 'OnFileListColumnRatiosChanged', ratios).catch(function () { });
-    }
-
-    for (const handle of handles) {
-        handle.addEventListener('click', function (event) {
-            event.preventDefault();
-            event.stopPropagation();
-        }, { signal: eventSignal });
-        handle.addEventListener('pointerdown', function (event) {
-            if (event.button !== 0) return;
-            const index = Number(handle.dataset.columnResizer);
-            if (!Number.isInteger(index) || index < 0 || index >= headers.length - 1) return;
-
-            const widths = headers.map(function (header) { return header.getBoundingClientRect().width; });
-            const pairWidth = widths[index] + widths[index + 1];
-            if (!widths.every(function (width) { return Number.isFinite(width) && width > 0; }) || pairWidth < MIN_FILE_COLUMN_WIDTH * 2) return;
-
-            drag = {
-                pointerId: event.pointerId,
-                index: index,
-                startX: event.clientX,
-                startLeftWidth: widths[index],
-                pairWidth: pairWidth,
-                widths: widths,
-                changed: false
-            };
-            handle.setPointerCapture?.(event.pointerId);
-            event.preventDefault();
-            event.stopPropagation();
-        }, { signal: eventSignal });
-    }
-
-    document.addEventListener('pointermove', function (event) {
-        if (!drag || event.pointerId !== drag.pointerId) return;
-        const leftWidth = Math.max(MIN_FILE_COLUMN_WIDTH, Math.min(drag.pairWidth - MIN_FILE_COLUMN_WIDTH, drag.startLeftWidth + event.clientX - drag.startX));
-        const rightWidth = drag.pairWidth - leftWidth;
-        if (Math.abs(leftWidth - drag.widths[drag.index]) < 0.01) return;
-
-        drag.widths[drag.index] = leftWidth;
-        drag.widths[drag.index + 1] = rightWidth;
-        drag.changed = true;
-        applyWidths(drag.widths);
-        event.preventDefault();
-    }, { signal: eventSignal });
-    document.addEventListener('pointerup', finishDrag, { signal: eventSignal });
-    document.addEventListener('pointercancel', finishDrag, { signal: eventSignal });
-
-    const registration = {
-        dispose: function () {
-            drag = null;
-            eventController.abort();
-            if (fileListColumnResizers.get(tableId) === registration) fileListColumnResizers.delete(tableId);
-        }
-    };
-    fileListColumnResizers.set(tableId, registration);
-}
-
-/**
- * Removes column-resize listeners owned by one file table.
- * @param {string} tableId - Stable table DOM identifier.
- */
-export function unregisterFileListColumnResizer(tableId) {
-    const registration = fileListColumnResizers.get(tableId);
-    if (registration) registration.dispose();
-}
-
-/**
- * Tracks the first visible semantic file row for workspace persistence.
- * @param {string} panelId - Stable panel identifier.
- * @param {object} dotNetReference - FilePanel callback owner.
- */
-export function registerFilePanelScroll(panelId, dotNetReference) {
-    unregisterFilePanelScroll(panelId);
-    const scroller = document.getElementById(panelId + '-filelist');
-    if (!scroller) return;
-
-    const tracker = { scroller, dotNetReference, timer: 0, restoring: false, pageSize: 0 };
-    tracker.measurePageSize = function () {
-        if (!isCircuitConnected()) return;
-        const pageSize = computeFileListPageSize(scroller);
-        if (pageSize < 1 || pageSize === tracker.pageSize) return;
-        invokeCircuitMethod(dotNetReference, 'OnFileListPageSizeChanged', pageSize).then(function () {
-            tracker.pageSize = pageSize;
-        }).catch(function () { });
-    };
-    tracker.listener = function () {
-        if (tracker.restoring) return;
-        window.clearTimeout(tracker.timer);
-        tracker.timer = window.setTimeout(function () {
-            const top = scroller.getBoundingClientRect().top + (scroller.querySelector('thead')?.getBoundingClientRect().height || 0);
-            const rows = scroller.querySelectorAll('tr[data-entry-path]');
-            for (const row of rows) {
-                if (row.getBoundingClientRect().bottom > top + 1) {
-                    invokeCircuitMethod(dotNetReference, 'OnFileListScrollAnchorChanged', row.dataset.entryPath || '').catch(function () { });
-                    break;
-                }
-            }
-            tracker.measurePageSize();
-        }, 120);
-    };
-    scroller.addEventListener('scroll', tracker.listener, { passive: true });
-
-    // The splitter resizes the list without resizing the window, so the viewport is observed directly
-    tracker.resizeObserver = new ResizeObserver(tracker.measurePageSize);
-    tracker.resizeObserver.observe(scroller);
-
-    const body = scroller.querySelector('tbody');
-    if (body) tracker.resizeObserver.observe(body);
-
-    filePanelScrollTrackers.set(panelId, tracker);
-}
-
-/**
- * Counts the whole file rows that fit in a file list viewport.
- * @param {HTMLElement} scroller - File list scroll container.
- * @returns {number} Number of rows a page jump should cover.
- */
-function computeFileListPageSize(scroller) {
-    if (!scroller) return 0;
-
-    const header = scroller.querySelector('thead');
-    const row = scroller.querySelector('tr[data-entry-path]');
-    const headerHeight = header ? header.getBoundingClientRect().height : 0;
-
-    // Before the first row exists the height used by scrollCursorIntoView is the best estimate
-    const rowHeight = row && row.getBoundingClientRect().height >= 1 ? row.getBoundingClientRect().height : 20;
-
-    return Math.max(1, Math.floor((scroller.clientHeight - headerHeight) / rowHeight));
-}
-
-/**
- * Stops semantic scroll tracking for a file panel.
- * @param {string} panelId - Stable panel identifier.
- */
-export function unregisterFilePanelScroll(panelId) {
-    const tracker = filePanelScrollTrackers.get(panelId);
-    if (!tracker) return;
-    fileListScrollRequests.get(tracker.scroller)?.();
-    window.clearTimeout(tracker.timer);
-    tracker.scroller.removeEventListener('scroll', tracker.listener);
-    tracker.resizeObserver?.disconnect();
-    filePanelScrollTrackers.delete(panelId);
-}
-
-/**
- * Restores a file list by semantic path, using its index only to materialize a virtual row.
- * @param {string} panelId - Stable panel identifier.
- * @param {string} anchorPath - Full path of the saved first visible row.
- * @param {number} anchorIndex - Current index of that path after sorting and validation.
- */
-export function restoreFilePanelScrollAnchor(panelId, anchorPath, anchorIndex) {
-    const tracker = filePanelScrollTrackers.get(panelId);
-    const scroller = tracker?.scroller || document.getElementById(panelId + '-filelist');
-    if (!scroller || anchorIndex < 0) return;
-
-    fileListScrollRequests.get(scroller)?.();
-    if (tracker) {
-        window.clearTimeout(tracker.timer);
-        tracker.restoring = true;
-    }
-    scrollToFileListEntry(scroller, anchorIndex, anchorPath, true, function () {
-        if (tracker) tracker.restoring = false;
-    });
 }
 
 const radzenFilePanelTrackers = new Map();
@@ -1241,6 +1103,7 @@ export function registerRadzenFilePanel(panelId, dotNetReference) {
     if (!host || !scroller || !dotNetReference) return;
 
     const tracker = { host, scroller, dotNetReference, timer: 0, restoring: false, pageSize: 0 };
+    desktopPublications.panelTrackers.add(tracker);
     tracker.measure = function () {
         if (!isCircuitConnected()) return;
         const rows = Array.from(scroller.querySelectorAll('tr[data-entry-path]'));
@@ -1283,6 +1146,7 @@ export function unregisterRadzenFilePanel(panelId) {
     fileListScrollRequests.get(tracker.scroller)?.();
     window.clearTimeout(tracker.timer);
     tracker.scroller.removeEventListener('scroll', tracker.listener);
+    desktopPublications.panelTrackers.delete(tracker);
     tracker.resizeObserver.disconnect();
     radzenFilePanelTrackers.delete(panelId);
 }
@@ -1322,7 +1186,7 @@ export async function measureRadzenFileColumns(hostId) {
 }
 
 /**
- * Registra un resize immediato sui resizer Radzen senza attendere il roundtrip Blazor Server del mousedown.
+ * Registra un resize immediato sui resizer Radzen senza attendere il roundtrip Blazor Server del pointerdown.
  * @param {string} hostId - Identificatore del wrapper stabile della griglia.
  * @param {object} dotNetReference - Proprietario del layout semantico.
  */
@@ -1338,16 +1202,20 @@ export function registerRadzenColumnResizer(hostId, dotNetReference) {
     const controller = new AbortController();
     let drag = null;
     function finish(event) {
-        if (!drag) return;
+        if (!drag || event.pointerId !== drag.pointerId) return;
         const completed = drag;
         drag = null;
-        if (!completed.changed) return;
+        if (completed.handle.hasPointerCapture?.(completed.pointerId)) completed.handle.releasePointerCapture(completed.pointerId);
+        // pointercancel annulla il gesto: le larghezze tornano al layout semantico al prossimo render
+        if (!completed.changed || event.type === 'pointercancel') return;
         invokeCircuitMethod(dotNetReference, 'OnRadzenColumnWidthsChanged', completed.ids, completed.widths).catch(function () { });
-        event?.preventDefault();
+        event.preventDefault();
     }
     handles.forEach(function (handle, handleIndex) {
-        handle.addEventListener('mousedown', function (event) {
-            if (event.button !== 0) return;
+        // Impedisce al browser touch di trasformare il trascinamento in scroll
+        handle.style.touchAction = 'none';
+        handle.addEventListener('pointerdown', function (event) {
+            if (!event.isPrimary || event.button !== 0) return;
             const headers = Array.from(table.querySelectorAll('thead th')).filter(function (header) { return header.getClientRects().length > 0; });
             const columns = Array.from(table.querySelectorAll(':scope > colgroup > col'));
             if (headers.length !== columns.length || handleIndex >= headers.length) return;
@@ -1357,6 +1225,8 @@ export function registerRadzenColumnResizer(hostId, dotNetReference) {
             });
             if (ids.some(id => !id)) return;
             drag = {
+                pointerId: event.pointerId,
+                handle,
                 startX: event.clientX,
                 index: handleIndex,
                 startWidth: headers[handleIndex].getBoundingClientRect().width,
@@ -1365,12 +1235,18 @@ export function registerRadzenColumnResizer(hostId, dotNetReference) {
                 columns,
                 changed: false
             };
+            handle.setPointerCapture?.(event.pointerId);
+            event.preventDefault();
+            event.stopImmediatePropagation();
+        }, { capture: true, signal: controller.signal });
+        // Radzen avvia il proprio resize sul mousedown compatibile: resta di competenza dell'adapter
+        handle.addEventListener('mousedown', function (event) {
             event.preventDefault();
             event.stopImmediatePropagation();
         }, { capture: true, signal: controller.signal });
     });
-    document.addEventListener('mousemove', function (event) {
-        if (!drag) return;
+    document.addEventListener('pointermove', function (event) {
+        if (!drag || event.pointerId !== drag.pointerId) return;
         const index = drag.index;
         const width = Math.max(MIN_RADZEN_FILE_COLUMN_WIDTH, drag.startWidth + event.clientX - drag.startX);
         if (Math.abs(width - drag.widths[index]) < 0.01) return;
@@ -1379,7 +1255,10 @@ export function registerRadzenColumnResizer(hostId, dotNetReference) {
         drag.changed = true;
         event.preventDefault();
     }, { signal: controller.signal });
-    document.addEventListener('mouseup', finish, { signal: controller.signal });
+    document.addEventListener('pointerup', finish, { signal: controller.signal });
+    document.addEventListener('pointercancel', finish, { signal: controller.signal });
+    // Il mouseup sintetico di beginWorkspaceHandoff abbandona il gesto senza pubblicarlo
+    document.addEventListener('mouseup', function (event) { if (!event.isTrusted) drag = null; }, { signal: controller.signal });
 
     const registration = {
         table,
@@ -1394,20 +1273,6 @@ export function registerRadzenColumnResizer(hostId, dotNetReference) {
 }
 
 /**
- * Projects the Blazor-owned sort direction onto the generated Radzen column header.
- * @param {string} hostId - Stable grid wrapper identifier.
- */
-export function projectRadzenAriaSort(hostId) {
-    const host = document.getElementById(hostId);
-    if (!host) return;
-    for (const control of host.querySelectorAll('thead .radzen-file-sort[data-bivium-sort-direction]')) {
-        const header = control.closest('th');
-        const direction = control.getAttribute('data-bivium-sort-direction');
-        if (header && ['none', 'ascending', 'descending'].includes(direction)) header.setAttribute('aria-sort', direction);
-    }
-}
-
-/**
  * Rimuove l'adapter di resize colonne di una griglia Radzen.
  * @param {string} hostId - Identificatore del wrapper stabile della griglia.
  */
@@ -1416,54 +1281,123 @@ export function unregisterRadzenColumnResizer(hostId) {
 }
 
 /**
- * Installa la cattura Tab sull'input interno di RadzenAutoComplete.
+ * Installa Tab, conferma Enter, annullamento Escape e guardia del focus sull'input interno di RadzenAutoComplete.
  * @param {string} hostId - Identificatore del wrapper applicativo.
  * @param {object} dotNetReference - Proprietario del callback autocomplete.
+ * @param {number} generation - Lease del mount.
+ * @param {object} draft - Draft visuale da idratare.
+ * @returns {boolean} True quando l'adapter è installato sull'input corrente.
  */
-export function installRadzenPathAdapter(hostId, dotNetReference) {
+export function installRadzenPathAdapter(hostId, dotNetReference, generation, draft) {
     const host = document.getElementById(hostId);
     const input = host?.querySelector('input');
-    if (!host || !input || !dotNetReference) return;
+    if (!host || !input || !dotNetReference || !draft) return false;
     const existing = radzenPathAdapters.get(hostId);
-    if (existing?.input === input) return;
+    if (existing?.input === input && existing.generation === generation && existing.basePath === draft.basePath) return true;
     existing?.dispose();
+    // La lista viene portata nel body all'apertura: il riferimento si cattura finché è ancora nel wrapper
+    let list = host.querySelector('.rz-autocomplete-list');
 
     const controller = new AbortController();
     let disposed = false;
     let inputGeneration = 0;
+    let restoring = true;
     let pending = Promise.resolve();
+    function track(promise) {
+        desktopPublications.pending.add(promise);
+        promise.then(() => desktopPublications.pending.delete(promise), () => { desktopPublications.pending.delete(promise); desktopPublications.failures++; });
+        return promise;
+    }
+    function capture() {
+        if (disposed || restoring || !input.isConnected) return;
+        const value = input.value;
+        const start = input.selectionStart ?? 0;
+        const end = input.selectionEnd ?? start;
+        const focused = desktopPublications.freeze ? desktopPublications.freeze.active === input : document.activeElement === input;
+        pending = track(pending.then(async function () {
+            if (disposed) return;
+            const accepted = await invokeCircuitMethod(dotNetReference, 'OnRadzenPathDraftChanged', generation, draft.basePath, value, start, end, focused);
+            if (!accepted) desktopPublications.failures++;
+        }));
+    }
     input.addEventListener('input', function () {
         inputGeneration++;
+        capture();
     }, { signal: controller.signal });
+    for (const name of ['select', 'keyup', 'mouseup', 'focus', 'blur']) input.addEventListener(name, function () { if (!desktopPublications.freeze) capture(); }, { signal: controller.signal });
+    function getList() {
+        if (!list?.isConnected) list = document.getElementById(input.getAttribute('aria-controls') || '') || host.querySelector('.rz-autocomplete-list');
+        return list;
+    }
+    // Il popup portato nel body ruberebbe il focus: il blur chiuderebbe l'editor prima della selezione
+    document.addEventListener('mousedown', function (event) {
+        if (document.activeElement !== input || !(event.target instanceof Element)) return;
+        const panel = event.target.closest('.rz-autocomplete-panel');
+        if (panel && panel.contains(getList())) event.preventDefault();
+    }, { capture: true, signal: controller.signal });
     input.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') {
+            if (event.isComposing || desktopPublications.freeze) return;
+            pending = track(pending.then(function () {
+                if (disposed) return;
+                return invokeCircuitMethod(dotNetReference, 'OnRadzenPathCancel', generation, draft.basePath);
+            }));
+            return;
+        }
+        if (event.key === 'Enter') {
+            // Con un suggerimento evidenziato Enter appartiene a Radzen, che lo seleziona
+            const current = getList();
+            if (current && isVisibleElement(current) && current.querySelector('.rz-state-highlight')) return;
+            if (event.isComposing || desktopPublications.freeze) return;
+            // Conferma con il valore DOM reale, non con un ValueChanged eventualmente ancora in volo
+            const value = input.value;
+            pending = track(pending.then(function () {
+                if (disposed) return;
+                return invokeCircuitMethod(dotNetReference, 'OnRadzenPathCommit', generation, draft.basePath, value);
+            }));
+            return;
+        }
         if (event.key !== 'Tab') return;
         event.preventDefault();
         event.stopImmediatePropagation();
         const requestedGeneration = inputGeneration;
-        pending = pending.then(function () {
+        pending = track(pending.then(function () {
             if (disposed) return null;
-            return invokeCircuitMethod(dotNetReference, 'OnRadzenPathTab', input.value);
+            return invokeCircuitMethod(dotNetReference, 'OnRadzenPathTab', generation, draft.basePath, input.value);
         }).then(function (value) {
             if (disposed || requestedGeneration !== inputGeneration || typeof value !== 'string') return;
             input.value = value;
-        }).catch(function () { });
+            queueMicrotask(capture);
+        }));
     }, { capture: true, signal: controller.signal });
     const registration = {
         input,
+        generation,
+        basePath: draft.basePath,
+        capture,
+        get restoring() { return restoring; },
         dispose: function () {
             disposed = true;
             controller.abort();
+            desktopPublications.pathTrackers.delete(registration);
             if (radzenPathAdapters.get(hostId) === registration) radzenPathAdapters.delete(hostId);
         }
     };
     radzenPathAdapters.set(hostId, registration);
-    requestAnimationFrame(function () {
-        if (input.isConnected) input.focus();
+    desktopPublications.pathTrackers.add(registration);
+    requestVisualFrame(function () {
+        if (disposed || !input.isConnected) return;
+        // Hydration visuale senza input/change né navigazione
+        input.value = draft.text;
+        input.setSelectionRange(draft.selectionStart, draft.selectionEnd);
+        if (draft.focused && !desktopPublications.freeze && !isBlockingModalOpen()) input.focus({ preventScroll: true });
+        restoring = false;
     });
+    return true;
 }
 
 /**
- * Rimuove l'adapter Tab di un editor percorso Radzen.
+ * Rimuove l'adapter di un editor percorso Radzen.
  * @param {string} hostId - Identificatore del wrapper applicativo.
  */
 export function uninstallRadzenPathAdapter(hostId) {
@@ -1515,7 +1449,7 @@ export function computeWindowGeometry(geometry, viewportWidth, viewportHeight, s
  * @returns {number} First usable vertical viewport coordinate.
  */
 function getFloatingWindowUsableTop() {
-    const menuBar = document.querySelector('.bivium-radzen-menu-bar, .menu-bar');
+    const menuBar = document.querySelector('.bivium-radzen-menu-bar');
     if (!menuBar) return 0;
     const bottom = Number(menuBar.getBoundingClientRect().bottom);
     return Number.isFinite(bottom) ? Math.max(0, bottom) : 0;
@@ -1528,33 +1462,40 @@ function getFloatingWindowUsableTop() {
  * @param {string} resizeHandleId - DOM id of the resize handle
  * @param {object} dotNetReference - Optional callback owner for persisted geometry
  */
-export function initWindowDrag(windowId, titlebarId, resizeHandleId, dotNetReference = null) {
+export function initWindowDrag(windowId, titlebarId, resizeHandleId, dotNetReference = null, sessionId = '', leaseGeneration = 0) {
     const win = document.getElementById(windowId);
     const titlebar = document.getElementById(titlebarId);
     const resizeHandle = document.getElementById(resizeHandleId);
     if (!win || !titlebar) return;
-    registerFloatingWindow(win);
     const previousRegistration = windowDragRegistrations.get(windowId);
-    if (previousRegistration?.element === win) return;
-    if (previousRegistration) previousRegistration.dispose();
+    if (previousRegistration?.element === win && previousRegistration.sessionId === sessionId && previousRegistration.leaseGeneration === leaseGeneration) return;
+    if (previousRegistration) previousRegistration.dispose(false);
+    registerFloatingWindow(win);
     initializedWindowDragElements.add(win);
     const eventController = new AbortController();
     const eventSignal = eventController.signal;
 
     let isDragging = false;
     let isResizing = false;
+    let activePointerId = null;
     let dragOffsetX = 0;
     let dragOffsetY = 0;
     let geometryTimer = 0;
     let lastNotifiedGeometry = '';
+    let geometryInitialized = false;
+    let geometrySequence = 0;
+    let geometryFlight = Promise.resolve(true);
 
     function getFocusTarget() {
         const active = document.activeElement;
         if (active && win.contains(active)) {
-            if (active.classList.contains('terminal-virtual-viewport')) return 'terminal-input';
+            if (active.classList.contains('terminal-virtual-viewport') || active.classList.contains('terminal-ime-input')) return 'terminal-input';
             if (active.classList.contains('terminal-tab-rename')) return 'terminal-tab-rename';
+            if (windowId === 'editor-window' && active.closest('.monaco-editor')) return 'editor-text';
+            const identity = active.dataset.focusKey || active.getAttribute('name') || active.getAttribute('aria-label') || active.id;
+            if (identity) return 'control:' + identity;
         }
-        return win.dataset.focusTarget || 'terminal-input';
+        return win.dataset.focusTarget || (windowId === 'editor-window' ? 'editor-text' : windowId === 'renamer-window' ? 'renamer-method' : 'terminal-input');
     }
 
     function clampToViewport(scaleFromSavedViewport) {
@@ -1584,11 +1525,14 @@ export function initWindowDrag(windowId, titlebarId, resizeHandleId, dotNetRefer
             Math.abs(previous.height - geometry.height) > 0.01;
     }
 
-    function notifyGeometry() {
-        if (!dotNetReference || !isFloatingWindowVisible(win)) return;
+    function notifyGeometry(force = false) {
+        if (!dotNetReference || !isFloatingWindowVisible(win)) return Promise.resolve(true);
         const rect = win.getBoundingClientRect();
-        if (![rect.left, rect.top, rect.width, rect.height].every(Number.isFinite) || rect.width <= 0 || rect.height <= 0) return;
+        if (![rect.left, rect.top, rect.width, rect.height].every(Number.isFinite) || rect.width <= 0 || rect.height <= 0) return Promise.resolve(false);
         const update = {
+            sessionId,
+            leaseGeneration,
+            sequence: geometrySequence + 1,
             left: rect.left,
             top: rect.top,
             width: rect.width,
@@ -1599,31 +1543,66 @@ export function initWindowDrag(windowId, titlebarId, resizeHandleId, dotNetRefer
             focusTarget: getFocusTarget()
         };
         const signature = [update.left, update.top, update.width, update.height, update.viewportWidth, update.viewportHeight, update.mruOrder, update.focusTarget].join('|');
-        if (signature === lastNotifiedGeometry) return;
+        if (!force && signature === lastNotifiedGeometry) return geometryFlight;
+        geometrySequence = update.sequence;
         lastNotifiedGeometry = signature;
-        invokeCircuitMethod(dotNetReference, 'OnWindowGeometryChanged', update).catch(function () { });
+        const interactionSequence = floatingWindowManager.interactionSequence;
+        geometryFlight = geometryFlight.then(async function () {
+            if (eventSignal.aborted || !isCircuitConnected()) return false;
+            const snapshot = await invokeCircuitMethod(dotNetReference, 'OnWindowGeometryChanged', update);
+            const acknowledged = Boolean(snapshot && ['left', 'top', 'width', 'height', 'viewportWidth', 'viewportHeight', 'mruOrder', 'focusTarget'].every(key => snapshot[key] === update[key]));
+            // The terminal's existing callback returns no value; preserve that adapter contract.
+            if (!snapshot || eventSignal.aborted || update.sequence !== geometrySequence || interactionSequence !== floatingWindowManager.interactionSequence || isDragging || isResizing) return acknowledged;
+            if (snapshot.width > 0 && snapshot.height > 0) {
+                win.style.left = snapshot.left + 'px';
+                win.style.top = snapshot.top + 'px';
+                win.style.width = snapshot.width + 'px';
+                win.style.height = snapshot.height + 'px';
+            }
+            win.dataset.mruOrder = String(snapshot.mruOrder);
+            win.dataset.focusTarget = snapshot.focusTarget;
+            floatingWindowManager.windows.sort(function (left, right) {
+                return Number(left.dataset.mruOrder || 0) - Number(right.dataset.mruOrder || 0);
+            });
+            normalizeFloatingWindowStack();
+            return acknowledged;
+        }).catch(function () { return false; });
+        return geometryFlight;
     }
 
     function scheduleGeometryNotification() {
-        window.clearTimeout(geometryTimer);
+        if (geometryTimer) return;
         geometryTimer = window.setTimeout(function () {
             geometryTimer = 0;
             notifyGeometry();
         }, 150);
     }
 
-    if (clampToViewport(true)) scheduleGeometryNotification();
+    if (isFloatingWindowVisible(win)) {
+        geometryInitialized = true;
+        clampToViewport(true);
+        scheduleGeometryNotification();
+    }
 
     win.addEventListener('pointerdown', function () {
+        if (isBlockingModalOpen() || !isFloatingWindowVisible(win)) return;
+        floatingWindowManager.pendingActivation = null;
+        floatingWindowManager.activationSequence++;
         bringFloatingWindowToFront(win, false);
         scheduleGeometryNotification();
     }, { capture: true, signal: eventSignal });
 
     win.addEventListener('focusin', function (e) {
+        if (isBlockingModalOpen() || !isFloatingWindowVisible(win)) return;
+        floatingWindowManager.interactionSequence++;
         if (e.target && typeof e.target.focus === 'function') {
             floatingWindowManager.lastFocusedElements.set(win, e.target);
         }
-        bringFloatingWindowToFront(win, false);
+        if (getTopVisibleFloatingWindow() !== win) {
+            floatingWindowManager.pendingActivation = null;
+            floatingWindowManager.activationSequence++;
+            bringFloatingWindowToFront(win, false);
+        }
         scheduleGeometryNotification();
     }, { signal: eventSignal });
 
@@ -1631,63 +1610,85 @@ export function initWindowDrag(windowId, titlebarId, resizeHandleId, dotNetRefer
     const visibilityObserver = new MutationObserver(function () {
         const isVisible = isFloatingWindowVisible(win);
         if (isVisible && !wasVisible) {
-            clampToViewport(false);
-            bringFloatingWindowToFront(win, true);
+            floatingWindowManager.interactionSequence++;
+            clampToViewport(!geometryInitialized);
+            geometryInitialized = true;
+            normalizeFloatingWindowStack();
             scheduleGeometryNotification();
         } else if (!isVisible && wasVisible) {
+            floatingWindowManager.interactionSequence++;
+            cancelFloatingWindowActivation(windowId);
             activateTopVisibleFloatingWindow();
         }
         wasVisible = isVisible;
     });
     visibilityObserver.observe(win, { attributes: true, attributeFilter: ['class'] });
 
-    // Drag via titlebar
-    titlebar.addEventListener('mousedown', function (e) {
-        if (e.button !== 0 || isBlockingModalOpen() || e.target.closest('button, input, select, textarea, a, [role="tab"], [role="button"], [contenteditable="true"], .rz-tabview-nav, .terminal-tab')) return;
+    // Drag e resize con pointer events: mouse, touch e penna, con capture sul controllo che avvia il gesto
+    titlebar.style.touchAction = 'none';
+    titlebar.addEventListener('pointerdown', function (e) {
+        if (!e.isPrimary || e.button !== 0 || activePointerId !== null || isBlockingModalOpen() || e.target.closest('button, input, select, textarea, a, [role="tab"], [role="button"], [contenteditable="true"], .rz-tabview-nav, .terminal-tab')) return;
         bringFloatingWindowToFront(win, true);
         isDragging = true;
+        activePointerId = e.pointerId;
         dragOffsetX = e.clientX - win.offsetLeft;
         dragOffsetY = e.clientY - win.offsetTop;
+        titlebar.setPointerCapture?.(e.pointerId);
         e.preventDefault();
     }, { signal: eventSignal });
 
-    // Resize via handle
     if (resizeHandle) {
-        resizeHandle.addEventListener('mousedown', function (e) {
+        resizeHandle.style.touchAction = 'none';
+        resizeHandle.addEventListener('pointerdown', function (e) {
+            if (!e.isPrimary || e.button !== 0 || activePointerId !== null) return;
             isResizing = true;
+            activePointerId = e.pointerId;
+            resizeHandle.setPointerCapture?.(e.pointerId);
             e.preventDefault();
             e.stopPropagation();
         }, { signal: eventSignal });
     }
 
-    document.addEventListener('mousemove', function (e) {
+    document.addEventListener('pointermove', function (e) {
+        if (e.pointerId !== activePointerId) return;
         if (isDragging) {
+            floatingWindowManager.interactionSequence++;
             win.style.left = e.clientX - dragOffsetX + 'px';
             win.style.top = e.clientY - dragOffsetY + 'px';
             clampToViewport(false);
+            scheduleGeometryNotification();
         }
 
         if (isResizing) {
+            floatingWindowManager.interactionSequence++;
             win.style.width = e.clientX - win.offsetLeft + 'px';
             win.style.height = e.clientY - win.offsetTop + 'px';
             clampToViewport(false);
+            scheduleGeometryNotification();
 
             // Recalculate terminal dimensions after resize
             window.dispatchEvent(new Event('resize'));
         }
     }, { signal: eventSignal });
 
-    document.addEventListener('mouseup', function () {
+    function endInteraction() {
         const changed = isDragging || isResizing;
         isDragging = false;
         isResizing = false;
+        activePointerId = null;
         if (changed) {
             clampToViewport(false);
             notifyGeometry();
         }
-    }, { signal: eventSignal });
+    }
+    document.addEventListener('pointerup', function (e) { if (e.pointerId === activePointerId) endInteraction(); }, { signal: eventSignal });
+    document.addEventListener('pointercancel', function (e) { if (e.pointerId === activePointerId) endInteraction(); }, { signal: eventSignal });
+    // Il mouseup sintetico di beginWorkspaceHandoff conclude il gesto prima del freeze
+    document.addEventListener('mouseup', function (e) { if (!e.isTrusted) endInteraction(); }, { signal: eventSignal });
 
     window.addEventListener('resize', function () {
+        if (!geometryInitialized) return;
+        floatingWindowManager.interactionSequence++;
         clampToViewport(false);
         scheduleGeometryNotification();
     }, { signal: eventSignal });
@@ -1699,16 +1700,37 @@ export function initWindowDrag(windowId, titlebarId, resizeHandleId, dotNetRefer
 
     const registration = {
         element: win,
-        dispose: function () {
+        sessionId,
+        leaseGeneration,
+        captureFocus: function () { win.dataset.focusTarget = getFocusTarget(); },
+        flush: async function () {
+            window.clearTimeout(geometryTimer);
+            geometryTimer = 0;
+            isDragging = false;
+            isResizing = false;
+            activePointerId = null;
+            await geometryFlight;
+            if (eventSignal.aborted || !isCircuitConnected()) return false;
+            return await notifyGeometry(true);
+        },
+        dispose: function (cancelActivation = true) {
+            const activation = floatingWindowManager.pendingActivation;
             window.clearTimeout(geometryTimer);
             eventController.abort();
             visibilityObserver.disconnect();
             initializedWindowDragElements.delete(win);
             floatingWindowManager.windows = floatingWindowManager.windows.filter(function (item) { return item !== win; });
+            // Replacement releases only the old adapter, not the new opening's activation intent.
+            if (cancelActivation) {
+                if (activation?.windowId === windowId) cancelFloatingWindowActivation(windowId, activation.sequence);
+                activateTopVisibleFloatingWindow();
+            }
             if (windowDragRegistrations.get(windowId) === registration) windowDragRegistrations.delete(windowId);
+            desktopPublications.windows.delete(registration);
         }
     };
     windowDragRegistrations.set(windowId, registration);
+    desktopPublications.windows.add(registration);
 }
 
 /**
@@ -1718,4 +1740,12 @@ export function initWindowDrag(windowId, titlebarId, resizeHandleId, dotNetRefer
 export function disposeWindowDrag(windowId) {
     const registration = windowDragRegistrations.get(windowId);
     if (registration) registration.dispose();
+}
+
+/** Conferma la geometria finale della registrazione ancora corrente, anche dopo un timer throttled. */
+export async function flushWindowGeometry(windowId) {
+    const registration = windowDragRegistrations.get(windowId);
+    if (!registration) return !document.getElementById(windowId);
+    const accepted = await registration.flush();
+    return accepted && windowDragRegistrations.get(windowId) === registration;
 }

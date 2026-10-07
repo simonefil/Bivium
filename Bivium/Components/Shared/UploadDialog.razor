@@ -3,8 +3,8 @@
 
 @if (this._isVisible)
 {
-    <PersistentModalShell Label="Upload Files and Folders" OverlayClass="bivium-radzen-upload-overlay" OnCancel="this.HandleCancel" CanClose="true" OnContentRendered="this.HandleContentRenderedAsync">
-        <RadzenStack class="bivium-radzen-upload-dialog" Gap="1rem" Style="width:100%;max-height:calc(100dvh - 9rem);box-sizing:border-box;">
+    <PersistentModalShell Surface="upload" Label="Upload Files and Folders" OnCancel="this.HandleCancel" CanClose="@(!this._isUploading)" OnContentRendered="this.HandleContentRenderedAsync">
+        <RadzenStack data-workspace-workflow-id="@this._sessionId" class="bivium-radzen-upload-dialog" Gap="1rem" Style="width:100%;max-height:calc(100dvh - 9rem);box-sizing:border-box;">
                 <RadzenText TextStyle="TextStyle.Body1" Style="overflow-wrap:anywhere;">Destination: @this._destinationDir</RadzenText>
 
                 <input type="file" id="upload-files-input" multiple style="display:none" />
@@ -13,16 +13,16 @@
                 <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" AlignItems="AlignItems.Center" Wrap="FlexWrap.Wrap">
                     <RadzenButton id="upload-add-files-button" @ref="this._browseButton" Text="Add Files..." Icon="upload_file" ButtonStyle="ButtonStyle.Secondary" Disabled="@this._isUploading" />
                     <RadzenButton id="upload-add-folders-button" Text="Add Folders..." Icon="drive_folder_upload" ButtonStyle="ButtonStyle.Secondary" Disabled="@this._isUploading" />
-                    <RadzenButton Text="Clear" Icon="clear" ButtonStyle="ButtonStyle.Light" Click="this.HandleClearSelection" Disabled="@(this._isUploading || !this.HasSelection())" />
+                    <RadzenButton Text="Clear" Icon="clear" ButtonStyle="ButtonStyle.Light" Click="this.HandleClearSelection" Disabled="@(this._isUploading || !this._hasLocalSelection)" />
                 </RadzenStack>
 
                 <RadzenCard Variant="Variant.Outlined" id="upload-drop-zone" class="@("upload-drop-zone " + (this._isUploading ? "upload-drop-disabled" : ""))">
                     <RadzenText TextStyle="TextStyle.Body1" TagName="TagName.Div" class="rz-m-0" Text="Drop files and folders here" />
-                    <RadzenAlert AlertStyle="AlertStyle.Info" class="bivium-radzen-upload-hint">Selections are added to the current queue</RadzenAlert>
+                    <RadzenAlert AlertStyle="AlertStyle.Info" AllowClose="false" class="@("bivium-radzen-upload-hint " + (this.IsDropHintPersistent() ? "upload-hint-visible" : ""))">@this.GetDropHint()</RadzenAlert>
                 </RadzenCard>
 
                 <RadzenText TextStyle="TextStyle.Body1" Text="@this.GetSelectionSummary()" />
-                @if (this._isUploading)
+                @if (this._phase != WorkspaceUploadPhase.Selecting)
                 {
                     <RadzenProgressBar Value="@this._progress" ShowValue="true" Unit="%" />
                     @if (!string.IsNullOrEmpty(this._currentItem))
@@ -32,12 +32,16 @@
                 }
                 @if (!string.IsNullOrEmpty(this._statusText))
                 {
-                    <RadzenAlert AlertStyle="@(this._statusText.StartsWith("Error:", StringComparison.Ordinal) ? AlertStyle.Danger : AlertStyle.Info)">@this._statusText</RadzenAlert>
+                    <RadzenAlert AlertStyle="@(this._statusText.StartsWith("Error:", StringComparison.Ordinal) ? AlertStyle.Danger : AlertStyle.Info)" AllowClose="false">@this._statusText</RadzenAlert>
                 }
-                <div class="bivium-radzen-dialog-actions">
-                    <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="this.HandleCancel" />
-                    <RadzenButton Text="Upload" Icon="cloud_upload" ButtonStyle="ButtonStyle.Primary" Click="this.HandleUpload" Disabled="@(this._isUploading || !this._bridgeReady || !this.HasSelection())" />
-                </div>
+                <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" AlignItems="AlignItems.Center" Gap="0.5rem">
+                    <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="this.HandleCancel" IsBusy="@this._isCancelling" BusyText="Cancelling..." Disabled="@(this._isCancelling || this._isPausing)" />
+                    @if (this._isUploading)
+                    {
+                        <RadzenButton data-ui-key="upload-pause" Text="Pause" Icon="pause" ButtonStyle="ButtonStyle.Secondary" Click="this.HandlePause" IsBusy="@this._isPausing" BusyText="Pausing..." Disabled="@(this._isPausing || this._isCancelling)" />
+                    }
+                    <RadzenButton data-ui-key="upload-start" Text="@this.GetStartLabel()" Icon="cloud_upload" ButtonStyle="ButtonStyle.Primary" Click="this.HandleUpload" Disabled="@(this._isUploading || this._isCancelling || this._isPausing || !this._bridgeReady || !this._hasLocalSelection)" />
+                </RadzenStack>
         </RadzenStack>
     </PersistentModalShell>
 }

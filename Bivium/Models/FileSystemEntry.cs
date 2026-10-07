@@ -176,29 +176,7 @@ namespace Bivium.Models
         /// <returns>Formatted size string</returns>
         public string FormatSize()
         {
-            string result = "<DIR>";
-
-            if (!this.IsDirectory)
-            {
-                if (this.SizeBytes < 1024)
-                {
-                    result = this.SizeBytes.ToString() + " B";
-                }
-                else if (this.SizeBytes < 1024 * 1024)
-                {
-                    result = (this.SizeBytes / 1024.0).ToString("F1") + " KB";
-                }
-                else if (this.SizeBytes < 1024 * 1024 * 1024)
-                {
-                    result = (this.SizeBytes / (1024.0 * 1024.0)).ToString("F1") + " MB";
-                }
-                else
-                {
-                    result = (this.SizeBytes / (1024.0 * 1024.0 * 1024.0)).ToString("F1") + " GB";
-                }
-            }
-
-            return result;
+            return this.IsDirectory ? "<DIR>" : ByteSizeFormatter.Format(this.SizeBytes);
         }
 
         /// <summary>

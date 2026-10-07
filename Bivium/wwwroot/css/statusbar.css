@@ -2,17 +2,20 @@
 .bivium-radzen-status-bar {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: .5rem;
     min-width: 0;
     max-width: 100%;
     flex-wrap: nowrap;
+    white-space: nowrap;
 }
 
 .bivium-radzen-status-bar > .bivium-radzen-status-progress {
     display: flex;
     align-items: center;
     gap: .5rem;
-    flex: 0 1 auto;
+    flex: 1;
+    text-align: center;
 }
 
 .bivium-radzen-status-progress > .rz-text {
@@ -25,12 +28,12 @@
     flex-shrink: 0;
 }
 
-.bivium-radzen-status-bar > .bivium-status-shortcuts {
+.bivium-radzen-status-bar > .bivium-status-windows {
     display: flex;
-    flex: 1 1 0;
+    flex: 1 1 auto;
     flex-wrap: nowrap;
     align-items: center;
-    justify-content: safe center;
+    justify-content: flex-start;
     min-width: 0;
     max-width: 100%;
     gap: .25rem;
@@ -38,17 +41,21 @@
     overflow-y: hidden;
 }
 
-.bivium-status-shortcut {
+.bivium-status-window {
+    position: relative;
     display: inline-flex;
     flex: 0 0 auto;
     align-items: center;
-    gap: .25rem;
     white-space: nowrap;
 }
 
-.bivium-status-shortcut > .rz-badge,
-.bivium-status-shortcut > .rz-text {
+.bivium-status-window > .rz-button {
     flex: 0 0 auto;
+}
+
+.bivium-status-window > .rz-badge {
+    flex: 0 0 auto;
+    margin-inline-start: -.4rem;
 }
 
 .bivium-radzen-status-bar > span {
@@ -60,16 +67,10 @@
 
 .bivium-radzen-status-bar > .bivium-status-selection,
 .bivium-radzen-status-bar > .bivium-status-disk {
-    flex: 0 1 auto;
+    flex: 0 0 auto;
 }
 
 .bivium-radzen-status-bar > .bivium-status-disk {
     text-align: right;
     margin-inline-start: auto;
-}
-
-@media (max-width: 767px) {
-    .bivium-radzen-status-bar { flex-wrap: wrap; }
-    .bivium-radzen-status-bar > .bivium-status-shortcuts { flex-basis: 100%; order: 2; }
-    .bivium-radzen-status-bar > .bivium-radzen-status-progress { flex-basis: 100%; order: 1; }
 }

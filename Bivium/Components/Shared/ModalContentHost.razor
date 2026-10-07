@@ -1,6 +1,6 @@
 @namespace Bivium.Components.Shared
 
-@this.ChildContent
+<div @ref="this.Element" data-workspace-surface="@this.Surface" style="display:contents">@this.ChildContent</div>
 
 @code {
     #region Proprietà
@@ -8,6 +8,10 @@
     [Parameter] public RenderFragment ChildContent { get; set; }
     /// <summary>Notifica il mount reale e i render successivi</summary>
     [Parameter] public EventCallback<bool> OnContentRendered { get; set; }
+    /// <summary>Identità app della superficie del bridge</summary>
+    [Parameter] public string Surface { get; set; } = "";
+    /// <summary>Root reale, senza ricerca tramite indici DOM</summary>
+    public ElementReference Element { get; private set; }
     #endregion
 
     #region Variabili di classe

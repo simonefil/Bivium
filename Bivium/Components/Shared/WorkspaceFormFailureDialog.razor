@@ -1,0 +1,31 @@
+@namespace Bivium.Components.Shared
+@inject BiviumWorkspaceService WorkspaceService
+
+@if (this.Workflow != null && BiviumWorkspaceService.IsFormKind(this.Workflow.Kind) && this.Workflow.Kind != WorkspaceWorkflowKind.Properties && (this.Workflow.Phase == WorkspaceWorkflowPhase.Cancelled || (this.Workflow.Phase == WorkspaceWorkflowPhase.Failed && !BiviumWorkspaceService.IsEditableFormKind(this.Workflow.Kind))))
+{
+    <PersistentModalShell Surface="failure" Label="@(this.Workflow.InvocationParameters.Title + " - " + this.Workflow.Phase)" CloseOnOverlayClick="true" OnCancel="this.CloseAsync">
+        <div data-workspace-workflow-id="@this.Workflow.Id">
+            <RadzenStack Gap="1rem">
+                @if (!string.IsNullOrEmpty(this.Workflow.ErrorMessage))
+                {
+                    <RadzenAlert AlertStyle="@(this.Workflow.Phase == WorkspaceWorkflowPhase.Failed ? AlertStyle.Danger : AlertStyle.Warning)" AllowClose="false" class="rz-m-0">@this.Workflow.ErrorMessage</RadzenAlert>
+                }
+                <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" AlignItems="AlignItems.Center" Gap="0.75rem"><RadzenButton Text="Close" ButtonStyle="ButtonStyle.Primary" Click="this.CloseAsync" /></RadzenStack>
+            </RadzenStack>
+        </div>
+    </PersistentModalShell>
+}
+
+@code {
+    [Parameter] public WorkspaceWorkflowSnapshot Workflow { get; set; }
+    [Parameter] public string AttachmentId { get; set; } = "";
+    [Parameter] public long LeaseGeneration { get; set; }
+    private readonly WorkspaceFormBinding _binding = new WorkspaceFormBinding();
+    protected override void OnParametersSet() => this._binding.Adopt(this.Workflow, this.LeaseGeneration);
+    private System.Threading.Tasks.Task CloseAsync()
+    {
+        this._binding.Respond(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), true);
+        return System.Threading.Tasks.Task.CompletedTask;
+    }
+    internal System.Threading.Tasks.Task<bool> FlushForHandoffAsync(CancellationToken cancellationToken) => this._binding.FlushAsync(this.WorkspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this._binding.Current.Draft, cancellationToken);
+}

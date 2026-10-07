@@ -42,11 +42,11 @@ Runs on Linux, Windows and macOS. Accessible from any browser.
 | F2 | Rename |
 | Ctrl+F2 | Advanced Rename |
 | F4 | Edit in Monaco editor |
+| Shift+F4 | New file |
 | F5 | Refresh panel |
+| F7 | New folder |
 | F12 | Toggle terminal (goes to the shell while the terminal has focus) |
 | Del | Delete |
-| Ctrl+N | New file |
-| Ctrl+Shift+N | New folder |
 | Ctrl+C / X / V | Copy / Cut / Paste |
 | Ctrl+A | Select all |
 | Ctrl+O | Toggle single / dual panel |
@@ -104,7 +104,7 @@ Renaming uses a two-pass operation so circular changes such as swapping two name
 
 ## Desktop workspace persistence
 
-Bivium keeps one shared workspace for the entire time the application is running. Closing the browser, temporarily losing the network or using **File -> Exit** does not discard that workspace.
+Bivium keeps one shared workspace for the entire time the application is running. Closing the browser or temporarily losing the network does not discard that workspace.
 
 The following state is restored when a browser reconnects:
 
@@ -197,7 +197,7 @@ The port can also be set via the `BIVIUM_PORT` environment variable. `BIVIUM_HOM
 
 `BIVIUM_DATA_DIR` controls where Data Protection keys are stored for authentication cookies. Set it to a persistent writable directory if authentication is enabled, otherwise existing browser sessions will be invalidated when keys are lost.
 
-Closing a browser tab, using **File -> Exit** or losing the network does not terminate terminal processes. Use the terminal tab or window close controls to stop them, or choose **File -> Reset Workspace...** to stop every terminal and clear the saved workspace. Restarting Bivium or its container also stops every terminal; sessions cannot be recovered after a restart.
+Closing a browser tab or losing the network does not terminate terminal processes. Use the terminal tab or window close controls to stop them, or choose **File -> Reset Workspace...** to stop every terminal and clear the saved workspace. Restarting Bivium or its container also stops every terminal; sessions cannot be recovered after a restart.
 
 To build the Docker image:
 

@@ -88,22 +88,58 @@ namespace Bivium.Components.Shared
 
                 string json = JsonSerializer.Serialize(request);
                 await this.EnsureJsModule();
-                bool success = await this._jsModule.InvokeAsync<bool>("postJson", "/api/Auth/login", json);
+                JsFetchResult response = await this._jsModule.InvokeAsync<JsFetchResult>("postJsonResult", "/api/Auth/login", json);
 
-                if (success)
+                if (response.Ok)
                 {
                     await this.OnLogin.InvokeAsync();
                     await this._jsModule.InvokeVoidAsync("reloadPage");
                 }
                 else
                 {
-                    this._statusText = "Invalid credentials";
+                    this._statusText = this.GetFailureText(response);
                 }
             }
             finally
             {
                 this._isSubmitting = false;
             }
+        }
+
+        /// <summary>Distingue credenziali rifiutate da server irraggiungibile o in errore</summary>
+        /// <param name="response">Esito della richiesta browser</param>
+        /// <returns>Messaggio per l'utente</returns>
+        private string GetFailureText(JsFetchResult response)
+        {
+            if (response.Status == 0)
+                return "The server could not be reached. Check the connection and try again.";
+            if (response.Status == 401)
+            {
+                if (response.Data.ValueKind == JsonValueKind.Object && response.Data.TryGetProperty("error", out JsonElement error) && error.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(error.GetString()))
+                    return error.GetString();
+                return "Invalid credentials";
+            }
+            return "Login failed because of a server error (HTTP " + response.Status + "). Try again later.";
+        }
+
+        #endregion
+
+        #region Public Methods
+
+        /// <summary>Rilascia il modulo JS importato, tollerando il circuito già chiuso</summary>
+        public async System.Threading.Tasks.ValueTask DisposeAsync()
+        {
+            if (this._jsModule == null)
+                return;
+            try
+            {
+                await this._jsModule.DisposeAsync();
+            }
+            catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException)
+            {
+                // Circuito già rilasciato
+            }
+            this._jsModule = null;
         }
 
         #endregion

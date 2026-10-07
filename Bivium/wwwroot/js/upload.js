@@ -4,7 +4,6 @@
 const CHUNK_SIZE = 50 * 1024 * 1024;
 const MAX_RETRIES = 3;
 
-let _dotNetRef = null;
 let _selectedFiles = new Map();
 let _selectedDirectories = new Set();
 let _dropZone = null;
@@ -13,16 +12,28 @@ let _directoriesButton = null;
 let _dragDepth = 0;
 let _uploadInProgress = false;
 let _uploadController = null;
+let _context = null;
+let _runPromise = null;
+let _selectionPromise = Promise.resolve();
+let _selectionInProgress = false;
+const desktopPublications = globalThis[Symbol.for('bivium.desktopPublications')] ??= { pending: new Set(), panelTrackers: new Set(), windows: new Set(), freeze: null, failures: 0, composing: false };
 
 const LEASE_REVOKED_MESSAGE = 'Workspace lease revoked';
 const USER_CANCEL_REASON = 'Upload cancelled by user';
+const PAUSE_REASON = 'Upload paused';
 
 /**
  * Store the .NET callback reference and initialize the drop area.
  * @param {object} dotNetRef - DotNetObjectReference from Blazor.
  */
-export function initUpload(dotNetRef) {
-    _dotNetRef = dotNetRef;
+export function initUpload(dotNetRef, sessionId, generation, attachmentId) {
+    if (_context?.sessionId !== sessionId || _context?.generation !== generation) {
+        _uploadController?.abort();
+        _selectedFiles.clear();
+        _selectedDirectories.clear();
+        _uploadInProgress = false;
+    }
+    _context = { reference: dotNetRef, sessionId, generation, attachmentId };
     detachDropZone();
     detachPickerButtons();
     _dropZone = document.getElementById('upload-drop-zone');
@@ -41,15 +52,17 @@ export function initUpload(dotNetRef) {
 /**
  * Opens the native multi-file picker and appends its selection.
  */
-export function selectFiles() {
-    if (_uploadInProgress) return;
+function selectFiles() {
+    if (_uploadInProgress || _selectionInProgress) return;
     const input = document.getElementById('upload-files-input');
     if (!input) return;
+    const context = _context;
 
     input.value = '';
     input.onchange = async function () {
+        if (_context !== context || desktopPublications.freeze) return;
         addFilesFromList(input.files);
-        await notifySelectionChanged();
+        await notifySelectionChanged(context);
     };
     input.click();
 }
@@ -57,22 +70,24 @@ export function selectFiles() {
 /**
  * Opens the native multi-directory picker and appends its selection.
  */
-export function selectDirectories() {
-    if (_uploadInProgress) return;
+function selectDirectories() {
+    if (_uploadInProgress || _selectionInProgress) return;
     const input = document.getElementById('upload-directories-input');
     if (!input) return;
+    const context = _context;
 
     input.value = '';
     input.onchange = async function () {
-        const entries = Array.from(input.webkitEntries || []);
-        if (entries.length > 0) {
-            for (const entry of entries) {
-                await addLegacyEntry(entry, '');
+        if (_context !== context || desktopPublications.freeze) return;
+        await trackSelection(async function () {
+            const entries = Array.from(input.webkitEntries || []);
+            if (entries.length > 0) {
+                for (const entry of entries) await addLegacyEntry(entry, '', context);
+            } else {
+                addFilesFromList(input.files);
             }
-        } else {
-            addFilesFromList(input.files);
-        }
-        await notifySelectionChanged();
+            await notifySelectionChanged(context);
+        });
     };
     input.click();
 }
@@ -81,7 +96,7 @@ export function selectDirectories() {
  * Clears all selected files and directories.
  */
 export async function clearUploadSelection() {
-    if (_uploadInProgress) return;
+    if (_uploadInProgress || _selectionInProgress || desktopPublications.freeze) return;
     _selectedFiles.clear();
     _selectedDirectories.clear();
     await notifySelectionChanged();
@@ -89,87 +104,115 @@ export async function clearUploadSelection() {
 
 /**
  * Uploads the complete current selection while preserving relative paths.
- * @param {string} destinationDir - Server destination directory.
+ * @param {string} sessionId - Workspace-owned upload session.
  * @param {string} attachmentId - Authorized workspace attachment.
  * @param {number} leaseGeneration - Authorized lease generation.
  */
-export function uploadSelection(destinationDir, attachmentId, leaseGeneration) {
-    runUploadSelection(destinationDir, attachmentId, leaseGeneration).catch(async function (error) {
-        _uploadInProgress = false;
-        _uploadController = null;
-        await reportComplete(false, error.message || 'Upload failed');
-    });
+export function uploadSelection(sessionId, attachmentId, leaseGeneration) {
+    if (_uploadInProgress || _selectionInProgress || _context?.sessionId !== sessionId || _context?.generation !== leaseGeneration || desktopPublications.freeze) return false;
+    _runPromise = runUploadSelection(sessionId, attachmentId, leaseGeneration, _context);
+    return true;
 }
 
-async function runUploadSelection(destinationDir, attachmentId, leaseGeneration) {
+async function runUploadSelection(sessionId, attachmentId, leaseGeneration, context) {
     if (_uploadInProgress) return;
     const files = Array.from(_selectedFiles.values()).sort(function (left, right) {
         return left.relativePath.localeCompare(right.relativePath);
     });
     const directories = Array.from(_selectedDirectories).sort(comparePathsParentFirst);
     if (files.length === 0 && directories.length === 0) {
-        await reportComplete(false, 'No files or folders selected');
+        await reportLocalError('No files or folders selected', context);
         return;
     }
 
     _uploadInProgress = true;
     const uploadController = new AbortController();
     _uploadController = uploadController;
-    const createdDirectories = [];
-    let uploadError = '';
-    let leaseRevoked = false;
+    let admitted = false;
     try {
-        for (const relativePath of directories) {
-            await reportProgress(0, 'Preparing ' + relativePath, 0, files.length);
-            const directoryResult = await requestUploadDirectory(destinationDir, relativePath, false, attachmentId, leaseGeneration, uploadController.signal);
-            if (directoryResult.created) createdDirectories.push(relativePath);
+        await _selectionPromise;
+        uploadController.signal.throwIfAborted();
+        let state = await uploadRequest('/api/FileTransfer/upload-state', 'GET', attachmentId, leaseGeneration, uploadController.signal);
+        if (state.id !== sessionId) throw new Error('Upload session changed. Reopen the dialog.');
+        await verifySources(state, files, directories, attachmentId, leaseGeneration, uploadController.signal);
+        state = await uploadRequest('/api/FileTransfer/upload-start?id=' + sessionId + '&revision=' + state.revision, 'POST', attachmentId, leaseGeneration, uploadController.signal);
+        admitted = true;
+        const destinationDir = state.destination;
+        for (const directory of state.directories) {
+            if (!directory.prepared) await requestUploadDirectory(destinationDir, directory.relativePath, false, sessionId, attachmentId, leaseGeneration, uploadController.signal);
         }
-
-        const totalBytes = files.reduce(function (total, item) { return total + item.file.size; }, 0);
-        let completedBytes = 0;
-        for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
-            const item = files[fileIndex];
-            await uploadOneFile(destinationDir, item, attachmentId, leaseGeneration, uploadController.signal, function (uploadedFileBytes) {
-                let percent;
-                if (totalBytes > 0) {
-                    percent = Math.round(((completedBytes + uploadedFileBytes) / totalBytes) * 100);
-                } else {
-                    percent = Math.round(((fileIndex + 1) / files.length) * 100);
-                }
-                return reportProgress(percent, item.relativePath, fileIndex, files.length);
-            });
-            completedBytes += item.file.size;
-            await reportProgress(totalBytes > 0 ? Math.round((completedBytes / totalBytes) * 100) : Math.round(((fileIndex + 1) / files.length) * 100), item.relativePath, fileIndex + 1, files.length);
+        for (const receipt of state.files) {
+            if (receipt.completed) continue;
+            const item = files.find(file => file.relativePath === receipt.source.relativePath);
+            await uploadOneFile(destinationDir, item, receipt, sessionId, attachmentId, leaseGeneration, uploadController.signal);
         }
+        // Le directory create sono memorizzate sul server, anche quando la risposta HTTP è andata persa
+        state = await uploadRequest('/api/FileTransfer/upload-state', 'GET', attachmentId, leaseGeneration, uploadController.signal);
+        for (const directory of [...state.directories].sort((left, right) => comparePathsChildFirst(left.relativePath, right.relativePath))) {
+            if (directory.created && !directory.finalized) await requestUploadDirectory(destinationDir, directory.relativePath, true, sessionId, attachmentId, leaseGeneration, uploadController.signal);
+        }
+        await uploadRequest('/api/FileTransfer/upload-complete?id=' + sessionId, 'POST', attachmentId, leaseGeneration, uploadController.signal);
+        await reportComplete(true, '', context);
     } catch (error) {
-        uploadError = error.message || 'Upload failed';
-        leaseRevoked = error instanceof UploadLeaseRevokedError || uploadController.signal.aborted;
+        if (!uploadController.signal.aborted && !(error instanceof UploadLeaseRevokedError)) {
+            if (admitted) await reportComplete(false, error.message || 'Upload failed', context);
+            else await reportLocalError(error.message || 'Source verification failed', context);
+        }
+    } finally {
+        if (_uploadController === uploadController) {
+            _uploadInProgress = false;
+            _uploadController = null;
+        }
     }
+}
 
-    if (!leaseRevoked) {
-        try {
-            createdDirectories.sort(comparePathsChildFirst);
-            for (const relativePath of createdDirectories) {
-                await requestUploadDirectory(destinationDir, relativePath, true, attachmentId, leaseGeneration, uploadController.signal);
+/** Verifica metadati dell'intero manifest e SHA-256 di ogni chunk già acknowledged. */
+async function verifySources(state, files, directories, attachmentId, generation, signal) {
+    if (files.length !== state.files.length || directories.length !== state.directories.length || state.directories.some(directory => !directories.includes(directory.relativePath))) {
+        throw new Error('Select the same original files and folders. The selection does not match the saved manifest.');
+    }
+    for (const receipt of state.files) {
+        const item = files.find(file => file.relativePath === receipt.source.relativePath);
+        if (!item || item.file.name !== receipt.source.name || item.file.size !== receipt.source.size || item.file.lastModified !== receipt.source.lastModified) {
+            throw new Error('Source metadata does not match: ' + receipt.source.relativePath);
+        }
+        for (let index = 0; index < receipt.chunkHashes.length; index++) {
+            signal.throwIfAborted();
+            const chunk = item.file.slice(index * CHUNK_SIZE, Math.min((index + 1) * CHUNK_SIZE, item.file.size));
+            if (globalThis.crypto?.subtle) {
+                const digest = await crypto.subtle.digest('SHA-256', await chunk.arrayBuffer());
+                const hash = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('');
+                if (hash !== receipt.chunkHashes[index]) throw new Error('Received source chunk does not match: ' + receipt.source.relativePath);
+            } else {
+                // Il listener predefinito è HTTP: il server verifica lo stesso chunk senza riscriverlo
+                const headers = buildUploadHeaders(state.destination, receipt.source.name, receipt.source.relativePath, index, Math.max(1, Math.ceil(item.file.size / CHUNK_SIZE)), receipt.id, state.id, attachmentId, generation);
+                headers['X-Verify-Only'] = 'true';
+                const response = await fetch('/api/FileTransfer/upload', { method: 'POST', headers, body: chunk, signal });
+                if (!response.ok) {
+                    const message = await response.text();
+                    if (isLeaseRevokedResponse(response.status, message)) throw new UploadLeaseRevokedError(message);
+                    throw new Error(message || 'Received source chunk does not match: ' + receipt.source.relativePath);
+                }
             }
-        } catch (error) {
-            if (!uploadError) uploadError = error.message || 'Could not finalize uploaded folders';
         }
     }
+}
 
-    const cancelledByUser = uploadController.signal.aborted && uploadController.signal.reason === USER_CANCEL_REASON;
-    if (!cancelledByUser) {
-        if (uploadError) {
-            await reportComplete(false, uploadError);
-        } else {
-            await reportProgress(100, '', files.length, files.length);
-            await reportComplete(true, '');
-        }
-    }
-    if (_uploadController === uploadController) {
-        _uploadInProgress = false;
-        _uploadController = null;
-    }
+async function uploadRequest(url, method, attachmentId, generation, signal, body = null) {
+    const headers = { 'X-Bivium-Attachment': attachmentId, 'X-Bivium-Lease-Generation': String(generation) };
+    if (body !== null) headers['Content-Type'] = 'application/json';
+    const response = await fetch(url, { method, headers, signal, body: body === null ? null : JSON.stringify(body) });
+    if (response.ok) return await response.json();
+    const message = await response.text();
+    if (isLeaseRevokedResponse(response.status, message)) throw new UploadLeaseRevokedError(message);
+    throw new Error(message || 'HTTP ' + response.status);
+}
+
+/** Pausa esplicita o per handoff: ferma il trasporto e attende il rollback del chunk corrente, conservando la selezione. */
+export async function pauseUpload(sessionId, generation) {
+    if (_context?.sessionId !== sessionId || _context?.generation !== generation) throw new Error('Upload adapter changed');
+    _uploadController?.abort(PAUSE_REASON);
+    if (_runPromise) await _runPromise;
 }
 
 /**
@@ -221,12 +264,12 @@ export function getParentDirectories(relativePath) {
     return result;
 }
 
-async function uploadOneFile(destinationDir, item, attachmentId, leaseGeneration, signal, onProgress) {
+async function uploadOneFile(destinationDir, item, receipt, sessionId, attachmentId, leaseGeneration, signal) {
     const fileSize = item.file.size;
     const totalChunks = Math.max(1, Math.ceil(fileSize / CHUNK_SIZE));
-    const uploadId = createUploadId();
+    const uploadId = receipt.id;
 
-    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+    for (let chunkIndex = receipt.receivedChunks; chunkIndex < totalChunks; chunkIndex++) {
         const start = chunkIndex * CHUNK_SIZE;
         const end = Math.min(start + CHUNK_SIZE, fileSize);
         const chunk = item.file.slice(start, end);
@@ -237,7 +280,7 @@ async function uploadOneFile(destinationDir, item, attachmentId, leaseGeneration
             try {
                 const response = await fetch('/api/FileTransfer/upload', {
                     method: 'POST',
-                    headers: buildUploadHeaders(destinationDir, item.file.name, item.relativePath, chunkIndex, totalChunks, uploadId, attachmentId, leaseGeneration),
+                    headers: buildUploadHeaders(destinationDir, item.file.name, item.relativePath, chunkIndex, totalChunks, uploadId, sessionId, attachmentId, leaseGeneration),
                     body: chunk,
                     signal: signal
                 });
@@ -255,7 +298,6 @@ async function uploadOneFile(destinationDir, item, attachmentId, leaseGeneration
         }
 
         if (!success) throw new Error('Chunk ' + chunkIndex + ' of ' + item.relativePath + ' failed: ' + lastError);
-        await onProgress(end);
     }
 }
 
@@ -266,7 +308,7 @@ function isLeaseRevokedResponse(status, responseText) {
 class UploadLeaseRevokedError extends Error {
 }
 
-function buildUploadHeaders(destinationDir, fileName, relativePath, chunkIndex, totalChunks, uploadId, attachmentId, leaseGeneration) {
+function buildUploadHeaders(destinationDir, fileName, relativePath, chunkIndex, totalChunks, uploadId, sessionId, attachmentId, leaseGeneration) {
     return {
         'X-Destination-Dir': encodeURIComponent(destinationDir),
         'X-File-Name': encodeURIComponent(fileName),
@@ -274,12 +316,13 @@ function buildUploadHeaders(destinationDir, fileName, relativePath, chunkIndex, 
         'X-Chunk-Index': String(chunkIndex),
         'X-Total-Chunks': String(totalChunks),
         'X-Upload-Id': uploadId,
+        'X-Upload-Session': sessionId,
         'X-Bivium-Attachment': attachmentId,
         'X-Bivium-Lease-Generation': String(leaseGeneration)
     };
 }
 
-async function requestUploadDirectory(destinationDir, relativePath, finalize, attachmentId, leaseGeneration, signal) {
+async function requestUploadDirectory(destinationDir, relativePath, finalize, sessionId, attachmentId, leaseGeneration, signal) {
     let lastError = '';
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
         try {
@@ -289,6 +332,7 @@ async function requestUploadDirectory(destinationDir, relativePath, finalize, at
                     'X-Destination-Dir': encodeURIComponent(destinationDir),
                     'X-Relative-Path': encodeURIComponent(relativePath),
                     'X-Finalize': String(finalize),
+                    'X-Upload-Session': sessionId,
                     'X-Bivium-Attachment': attachmentId,
                     'X-Bivium-Lease-Generation': String(leaseGeneration)
                 },
@@ -332,24 +376,27 @@ function addSelectedDirectory(relativePath) {
     }
 }
 
-async function addFileSystemHandle(handle, parentPath) {
+async function addFileSystemHandle(handle, parentPath, context) {
+    if (_context !== context) return;
     const relativePath = normalizeRelativePath(parentPath ? parentPath + '/' + handle.name : handle.name);
     if (handle.kind === 'file') {
-        addSelectedFile(await handle.getFile(), relativePath);
+        const file = await handle.getFile();
+        if (_context === context) addSelectedFile(file, relativePath);
         return;
     }
 
     addSelectedDirectory(relativePath);
     for await (const childHandle of handle.values()) {
-        await addFileSystemHandle(childHandle, relativePath);
+        await addFileSystemHandle(childHandle, relativePath, context);
     }
 }
 
-async function addLegacyEntry(entry, parentPath) {
+async function addLegacyEntry(entry, parentPath, context) {
+    if (_context !== context) return;
     const relativePath = normalizeRelativePath(parentPath ? parentPath + '/' + entry.name : entry.name);
     if (entry.isFile) {
         const file = await new Promise(function (resolve, reject) { entry.file(resolve, reject); });
-        addSelectedFile(file, relativePath);
+        if (_context === context) addSelectedFile(file, relativePath);
         return;
     }
 
@@ -359,7 +406,7 @@ async function addLegacyEntry(entry, parentPath) {
     let children = await readLegacyEntries(reader);
     while (children.length > 0) {
         for (const child of children) {
-            await addLegacyEntry(child, relativePath);
+            await addLegacyEntry(child, relativePath, context);
         }
         children = await readLegacyEntries(reader);
     }
@@ -369,20 +416,52 @@ function readLegacyEntries(reader) {
     return new Promise(function (resolve, reject) { reader.readEntries(resolve, reject); });
 }
 
-async function notifySelectionChanged() {
-    if (!_dotNetRef) return;
-    const totalBytes = Array.from(_selectedFiles.values()).reduce(function (total, item) { return total + item.file.size; }, 0);
-    await _dotNetRef.invokeMethodAsync('OnUploadSelectionChanged', _selectedFiles.size, _selectedDirectories.size, totalBytes);
+async function notifySelectionChanged(context = _context) {
+    if (!context || _context !== context) return;
+    const files = Array.from(_selectedFiles.values(), item => ({ relativePath: item.relativePath, name: item.file.name, size: item.file.size, lastModified: item.file.lastModified }));
+    const directories = Array.from(_selectedDirectories);
+    const pending = _selectionPromise.catch(() => {}).then(async function () {
+        if (_context !== context) return;
+        const state = await uploadRequest('/api/FileTransfer/upload-state', 'GET', context.attachmentId, context.generation);
+        if (state.id !== context.sessionId) throw new Error('Upload session changed. Select the source again.');
+        if (state.canEditManifest) {
+            await uploadRequest('/api/FileTransfer/upload-manifest?id=' + context.sessionId + '&revision=' + state.revision, 'POST', context.attachmentId, context.generation, undefined, { files, directories });
+        }
+        if (_context !== context) return;
+        const acknowledged = await context.reference.invokeMethodAsync('OnUploadSelectionChanged', context.sessionId, context.generation, files.length > 0 || directories.length > 0);
+        if (!acknowledged) desktopPublications.failures++;
+    });
+    _selectionPromise = pending;
+    desktopPublications.pending.add(pending);
+    try { await pending; }
+    catch (error) {
+        desktopPublications.failures++;
+        if (!(error instanceof UploadLeaseRevokedError)) await reportComplete(false, error.message || 'Selection checkpoint failed', context);
+        throw error;
+    }
+    finally { desktopPublications.pending.delete(pending); }
 }
 
-async function reportProgress(percent, currentPath, processedFiles, totalFiles) {
-    if (!_dotNetRef) return;
-    await _dotNetRef.invokeMethodAsync('OnUploadProgress', Math.max(0, Math.min(100, percent)), currentPath, processedFiles, totalFiles);
+async function reportComplete(success, message, context = _context) {
+    if (!context || _context !== context) return;
+    try { await context.reference.invokeMethodAsync('OnUploadComplete', context.sessionId, context.generation, success, message); }
+    catch { /* Le ricevute server sopravvivono al dispose o alla perdita del circuito. */ }
 }
 
-async function reportComplete(success, message) {
-    if (!_dotNetRef) return;
-    await _dotNetRef.invokeMethodAsync('OnUploadComplete', success, message);
+/** Un errore preflight non pubblica fase, progresso o checkpoint nel workspace. */
+async function reportLocalError(message, context = _context) {
+    if (!context || _context !== context) return;
+    try { await context.reference.invokeMethodAsync('OnUploadVerificationFailed', context.sessionId, context.generation, message); }
+    catch { /* L'errore locale non sopravvive al dispose del chiamante. */ }
+}
+
+async function trackSelection(action) {
+    _selectionInProgress = true;
+    const pending = action();
+    desktopPublications.pending.add(pending);
+    try { await pending; }
+    catch (error) { desktopPublications.failures++; throw error; }
+    finally { desktopPublications.pending.delete(pending); _selectionInProgress = false; }
 }
 
 function handleDragEnter(event) {
@@ -408,27 +487,30 @@ async function handleDrop(event) {
     event.preventDefault();
     _dragDepth = 0;
     if (_dropZone) _dropZone.classList.remove('upload-drop-active');
-    if (_uploadInProgress) return;
+    if (_uploadInProgress || _selectionInProgress || desktopPublications.freeze) return;
 
+    const context = _context;
     try {
-        const items = Array.from(event.dataTransfer?.items || []).filter(function (item) { return item.kind === 'file'; });
-        if (items.length > 0 && typeof items[0].getAsFileSystemHandle === 'function') {
-            const handlePromises = items.map(function (item) { return item.getAsFileSystemHandle(); });
-            for (const handlePromise of handlePromises) {
-                const handle = await handlePromise;
-                if (handle) await addFileSystemHandle(handle, '');
+        await trackSelection(async function () {
+            const items = Array.from(event.dataTransfer?.items || []).filter(function (item) { return item.kind === 'file'; });
+            if (items.length > 0 && typeof items[0].getAsFileSystemHandle === 'function') {
+                const handlePromises = items.map(function (item) { return item.getAsFileSystemHandle(); });
+                for (const handlePromise of handlePromises) {
+                    const handle = await handlePromise;
+                    if (handle) await addFileSystemHandle(handle, '', context);
+                }
+            } else if (items.length > 0 && typeof items[0].webkitGetAsEntry === 'function') {
+                for (const item of items) {
+                    const entry = item.webkitGetAsEntry();
+                    if (entry) await addLegacyEntry(entry, '', context);
+                }
+            } else {
+                addFilesFromList(event.dataTransfer?.files);
             }
-        } else if (items.length > 0 && typeof items[0].webkitGetAsEntry === 'function') {
-            for (const item of items) {
-                const entry = item.webkitGetAsEntry();
-                if (entry) await addLegacyEntry(entry, '');
-            }
-        } else {
-            addFilesFromList(event.dataTransfer?.files);
-        }
-        await notifySelectionChanged();
+            await notifySelectionChanged(context);
+        });
     } catch (error) {
-        await reportComplete(false, error.message || 'Could not read dropped files');
+        await reportComplete(false, error.message || 'Could not read dropped files', context);
     }
 }
 
@@ -439,16 +521,6 @@ function comparePathsParentFirst(left, right) {
 
 function comparePathsChildFirst(left, right) {
     return -comparePathsParentFirst(left, right);
-}
-
-function createUploadId() {
-    if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
-
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (char) {
-        const random = Math.floor(Math.random() * 16);
-        const value = char === 'x' ? random : (random & 0x3) | 0x8;
-        return value.toString(16);
-    });
 }
 
 function detachDropZone() {
@@ -472,8 +544,9 @@ function detachPickerButtons() {
 /**
  * Disposes callbacks and DOM handlers.
  */
-export function dispose() {
-    _dotNetRef = null;
+export function dispose(sessionId, generation) {
+    if (_context?.sessionId !== sessionId || _context?.generation !== generation) return;
+    _context = null;
     _uploadController?.abort();
     _uploadController = null;
     detachDropZone();

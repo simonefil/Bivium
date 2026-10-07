@@ -71,5 +71,8 @@ namespace Bivium.Services
         /// <param name="dirCount">Output: number of subdirectories found</param>
         /// <returns>Total size in bytes</returns>
         long CalculateDirectorySize(string path, out int fileCount, out int dirCount);
+
+        /// <summary>Stesso calcolo con cancellazione del task workspace e progresso dei file visitati</summary>
+        long CalculateDirectorySize(string path, out int fileCount, out int dirCount, CancellationToken cancellationToken, Action<int, int> onProgress = null);
     }
 }

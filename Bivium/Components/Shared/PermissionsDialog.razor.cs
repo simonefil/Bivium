@@ -12,12 +12,6 @@ namespace Bivium.Components.Shared
         #region Injected Services
 
         /// <summary>
-        /// Permission service for reading and writing permissions
-        /// </summary>
-        [Inject]
-        private IPermissionService _permissionService { get; set; }
-
-        /// <summary>
         /// Workspace lease authority
         /// </summary>
         [Inject]
@@ -27,17 +21,41 @@ namespace Bivium.Components.Shared
 
         #region Parameters
 
-        /// <summary>
-        /// Callback when dialog is closed (true if permissions were saved)
-        /// </summary>
-        [Parameter]
-        public EventCallback<bool> OnClose { get; set; }
-
         [Parameter]
         public string AttachmentId { get; set; } = "";
 
         [Parameter]
         public long LeaseGeneration { get; set; }
+
+        [Parameter] public WorkspaceWorkflowSnapshot Workflow { get; set; }
+        private readonly WorkspaceFormBinding _binding = new WorkspaceFormBinding();
+
+        /// <summary>Ripristina il draft e il contesto originale senza rileggere permessi</summary>
+        protected override void OnParametersSet()
+        {
+            if (this.Workflow == null)
+            {
+                this._isVisible = false;
+                return;
+            }
+            if (!this._binding.Adopt(this.Workflow, this.LeaseGeneration))
+                return;
+            WorkspacePermissionsDraft draft = System.Text.Json.JsonSerializer.Deserialize<WorkspacePermissionsDraft>(this.Workflow.Draft);
+            WorkspacePermissionsContext context = System.Text.Json.JsonSerializer.Deserialize<WorkspacePermissionsContext>(this.Workflow.InvocationParameters.FormContext);
+            this._model = draft.Model;
+            this._recursive = draft.Recursive;
+            this._entryName = context.EntryName;
+            this._isDirectory = context.IsDirectory;
+            this._canSave = context.CanSave;
+            this._errorMessage = this.Workflow.ErrorMessage;
+            this._isVisible = this.Workflow.Phase is WorkspaceWorkflowPhase.AwaitingInput or WorkspaceWorkflowPhase.Failed;
+        }
+
+        private string GetDraft() => System.Text.Json.JsonSerializer.Serialize(new WorkspacePermissionsDraft(this._model, this._recursive));
+        private void PublishDraft() => this._binding.Publish(this._workspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this.GetDraft());
+
+        /// <summary>Confronta il checkpoint senza aspettare la ricorsione</summary>
+        internal System.Threading.Tasks.Task<bool> FlushForHandoffAsync(CancellationToken cancellationToken) => this._binding.FlushAsync(this._workspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this.GetDraft(), cancellationToken);
 
         #endregion
 
@@ -54,11 +72,6 @@ namespace Bivium.Components.Shared
         private string _entryName = "";
 
         /// <summary>
-        /// Full path of the entry being edited
-        /// </summary>
-        private string _entryPath = "";
-
-        /// <summary>
         /// Whether the entry is a directory
         /// </summary>
         private bool _isDirectory = false;
@@ -67,16 +80,6 @@ namespace Bivium.Components.Shared
         /// Permission model being edited
         /// </summary>
         private PermissionModel _model = new PermissionModel();
-
-        /// <summary>
-        /// Original owner name for change detection
-        /// </summary>
-        private string _originalOwner = "";
-
-        /// <summary>
-        /// Original group name for change detection
-        /// </summary>
-        private string _originalGroup = "";
 
         /// <summary>
         /// Whether to apply permissions recursively
@@ -100,41 +103,7 @@ namespace Bivium.Components.Shared
 
         #endregion
 
-        #region Public Methods
-
-        /// <summary>
-        /// Shows the dialog for the specified entry
-        /// </summary>
-        /// <param name="entry">File system entry to edit permissions for</param>
-        public void Show(FileSystemEntry entry)
-        {
-            this._entryName = entry.Name;
-            this._entryPath = entry.FullPath;
-            this._isDirectory = entry.IsDirectory;
-            this._recursive = false;
-            this._errorMessage = "";
-            this._canSave = false;
-
-            // Load current permissions
-            try
-            {
-                this._model = this._permissionService.GetPermissions(entry.FullPath);
-                this._originalOwner = this._model.Owner;
-                this._originalGroup = this._model.Group;
-                this._canSave = true;
-            }
-            catch (Exception ex)
-            {
-                this._model = new PermissionModel();
-                this._originalOwner = "";
-                this._originalGroup = "";
-                this._errorMessage = "Could not read permissions: " + ex.Message;
-            }
-
-            this._isVisible = true;
-            this.StateHasChanged();
-
-        }
+        #region Private Methods
 
         /// <summary>
         /// Focuses the dialog element after render
@@ -146,91 +115,16 @@ namespace Bivium.Components.Shared
                 await this._cancelButton.Element.FocusAsync();
         }
 
-        /// <summary>
-        /// Hides the dialog
-        /// </summary>
-        public void Hide()
+        /// <summary>Conferma il draft; permessi e ownership vengono applicati dal workflow server</summary>
+        private void HandleSave()
         {
-            this._isVisible = false;
-            this.StateHasChanged();
+            this._binding.Respond(this._workspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), false);
         }
 
-        #endregion
-
-        #region Private Methods
-
-        /// <summary>
-        /// Handles save button click - applies permissions and ownership changes
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleSave()
+        /// <summary>Chiude senza applicare modifiche</summary>
+        private void HandleCancel()
         {
-            this._errorMessage = "";
-
-            if (!this._canSave)
-            {
-                this._errorMessage = "Cannot save permissions because current permissions were not loaded.";
-                return;
-            }
-            if (!this._workspaceService.ValidateMutation(new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration)))
-            {
-                this._errorMessage = "This browser no longer controls the workspace.";
-                return;
-            }
-
-            CancellationToken cancellationToken = this._workspaceService.GetRevocationToken(new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration));
-
-            // Apply permission changes
-            FileOperationResult permResult;
-            try
-            {
-                permResult = this._permissionService.SetPermissions(this._entryPath, this._model, this._recursive, cancellationToken);
-            }
-            catch (OperationCanceledException)
-            {
-                this._errorMessage = "Permission update cancelled because browser control was revoked.";
-                return;
-            }
-            if (!permResult.Success)
-            {
-                this._errorMessage = permResult.ErrorMessage;
-                return;
-            }
-
-            // Apply ownership changes, or reapply current ownership recursively to directory contents
-            bool ownerChanged = this._model.Owner != this._originalOwner;
-            bool groupChanged = this._model.IsUnix && this._model.Group != this._originalGroup;
-            bool applyOwner = ownerChanged || groupChanged || (this._isDirectory && this._recursive);
-
-            if (applyOwner)
-            {
-                FileOperationResult ownResult;
-                try
-                {
-                    ownResult = this._permissionService.SetOwner(this._entryPath, this._model.Owner, this._model.Group, this._recursive, cancellationToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    this._errorMessage = "Ownership update cancelled because browser control was revoked.";
-                    return;
-                }
-                if (!ownResult.Success)
-                {
-                    this._errorMessage = ownResult.ErrorMessage;
-                    return;
-                }
-            }
-
-            this._isVisible = false;
-            await this.OnClose.InvokeAsync(true);
-        }
-
-        /// <summary>
-        /// Handles cancel button click
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleCancel()
-        {
-            this._isVisible = false;
-            await this.OnClose.InvokeAsync(false);
+            this._binding.Respond(this._workspaceService, new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), true);
         }
 
         /// <summary>

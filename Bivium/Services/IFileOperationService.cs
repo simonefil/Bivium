@@ -7,6 +7,14 @@ namespace Bivium.Services
     /// </summary>
     public interface IFileOperationService
     {
+        /// <summary>Verifica path e nome con le regole esistenti prima dell'ammissione del piano</summary>
+        /// <param name="kind">Comando chiuso</param>
+        /// <param name="sourcePath">Sorgente rename</param>
+        /// <param name="parentPath">Directory di creazione</param>
+        /// <param name="name">Nome confermato</param>
+        /// <returns>Validazione senza mutazioni; i permessi OS restano controllati dall'I/O</returns>
+        FileOperationResult ValidateNameOperation(WorkspaceWorkflowKind kind, string sourcePath, string parentPath, string name);
+
         /// <summary>
         /// Copies files and directories to a destination
         /// </summary>
@@ -74,6 +82,13 @@ namespace Bivium.Services
         /// <param name="cancellationToken">Cancellation token for lease revocation</param>
         /// <returns>Operation result</returns>
         FileOperationResult DeleteEntries(List<string> paths, CancellationToken cancellationToken = default);
+
+        /// <summary>Delete preesistente con progresso dopo ogni elemento radice completato o fallito</summary>
+        /// <param name="paths">Selezione catturata dal piano</param>
+        /// <param name="onProgress">Conteggi completati e falliti, senza callback verso componenti</param>
+        /// <param name="cancellationToken">Lifetime dell'operazione chiamante</param>
+        /// <returns>Esito aggregato, senza rollback degli elementi già eliminati</returns>
+        FileOperationResult DeleteEntriesWithProgress(List<string> paths, Action<int, int> onProgress, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Renames a file or directory

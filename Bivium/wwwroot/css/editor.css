@@ -6,9 +6,8 @@
     top: 15vh;
     width: 80vw;
     height: 70vh;
-    z-index: 2000;
+    z-index: var(--bivium-floating-window-zindex);
     flex-direction: column;
-    min-width: 40ch;
     min-height: 10lh;
     box-sizing: border-box;
 }

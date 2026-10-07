@@ -3,14 +3,14 @@
 @inject IJSRuntime JSRuntime
 @using System.Globalization
 
-<div id="@this.HostId" class="radzen-file-grid-host" data-default-column-layout="@(this.State.Columns.Count == 0 && !this.HasLegacyRatios() ? "true" : "false")" data-parent-row-count="@(this.HasParentDirectory() ? 1 : 0)" @oncontextmenu="this.HandleBackgroundContextMenuAsync" @oncontextmenu:preventDefault="true" @oncontextmenu:stopPropagation="true">
+<div id="@this.HostId" class="radzen-file-grid-host" data-default-column-layout="@(this.State.Columns.Count == 0 && !this.HasLegacyRatios() ? "true" : "false")" data-parent-row-count="@(this._hasParentDirectory ? 1 : 0)" @oncontextmenu="this.HandleBackgroundContextMenuAsync" @oncontextmenu:preventDefault="true" @oncontextmenu:stopPropagation="true">
     <RadzenDataGrid @ref="this._grid" Data="@this._rowsRenderSnapshot" TItem="FileListRow"
                     AllowVirtualization="true" VirtualizationOverscanCount="8" Density="Density.Compact" Style="height:100%"
                     AllowSorting="false" AllowColumnResize="true" AllowColumnReorder="true"
                     SelectionMode="DataGridSelectionMode.Multiple" AllowRowSelectOnRowClick="false" Value="@this._selectedRows" ValueChanged="this.DiscardNativeSelection"
                     AllowColumnPicking="true" AllowPickAllColumns="false" ShowPagingSummary="false"
                     RowClick="this.HandleRowClick" RowDoubleClick="this.HandleRowDoubleClick"
-                     RowRender="this.HandleRowRender" CellRender="this.HandleCellRender" CellContextMenu="this.HandleCellContextMenu"
+                    RowRender="this.HandleRowRender" HeaderCellRender="this.HandleHeaderCellRender" CellContextMenu="this.HandleCellContextMenu"
                     ColumnResized="this.HandleColumnResized" ColumnReordered="this.HandleColumnReordered"
                     PickedColumnsChanged="this.HandlePickedColumnsChanged" EmptyText="Empty directory" FooterTemplate="@this.GetEmptyDirectoryFooter()"
                     ColumnsPickerMaxSelectedLabels="0" ColumnsShowingText="columns" SelectVisibleColumnsAriaLabel="Choose visible columns">
@@ -22,9 +22,14 @@
                                        HeaderCssClass="@("bivium-column-" + column.Id.ToString().ToLowerInvariant())"
                                        CssClass="@("bivium-column-" + column.Id.ToString().ToLowerInvariant())"
                                        Visible="@column.Visible" Pickable="@(column.Id != FileListColumnId.Name)" Reorderable="true" Resizable="true">
+                    @* Sort Radzen nativo non usato: riordinerebbe Data ignorando "directory prima"; il bottone delega a Commander *@
                     <HeaderTemplate>
-                        <RadzenButton ButtonStyle="ButtonStyle.Base" Variant="Variant.Text" Size="ButtonSize.Small" class="radzen-file-sort" data-bivium-sort-direction="@this.GetAriaSort(column.Id)" Click="() => this.ToggleSortAsync(column.Id)" @onclick:stopPropagation="true">
-                            @this.GetTitle(column.Id) @this.GetSortIndicator(column.Id)
+                        <RadzenButton ButtonStyle="ButtonStyle.Base" Variant="Variant.Text" Size="ButtonSize.Small" class="radzen-file-sort" Click="() => this.ToggleSortAsync(column.Id)" @onclick:stopPropagation="true">
+                            @this.GetTitle(column.Id)
+                            @if (this.State.CurrentSort.Field == this.GetSortField(column.Id))
+                            {
+                                <RadzenIcon Icon="@(this.State.CurrentSort.Direction == SortDirection.Ascending ? "arrow_upward" : "arrow_downward")" aria-hidden="true" />
+                            }
                         </RadzenButton>
                     </HeaderTemplate>
                     <Template Context="row">
@@ -33,7 +38,7 @@
                             @if (column.Id == FileListColumnId.Name)
                             {
                                 <RadzenButton ButtonStyle="ButtonStyle.Base" Variant="Variant.Text" Size="ButtonSize.Small" class="bivium-parent-action" aria-label="Parent directory" title="Parent directory"
-                                        Click="args => this.HandleParentButtonClickAsync(row, args)" @onclick:stopPropagation="true" @onkeydown:stopPropagation="true">
+                                        Click="args => this.HandleParentButtonClickAsync(row, args)" @onkeydown:stopPropagation="true">
                                     <RadzenIcon Icon="folder" aria-hidden="true" /><span>..</span>
                                 </RadzenButton>
                             }
@@ -146,6 +151,21 @@
     private List<string> _renderedSelectionPaths = new List<string>();
 
     /// <summary>
+    /// Selezione Commander indicizzata per il RowRender, ricalcolata solo al cambio selezione
+    /// </summary>
+    private HashSet<string> _selectedPathSet = new HashSet<string>();
+
+    /// <summary>
+    /// Presenza della riga padre, calcolata una volta per render
+    /// </summary>
+    private bool _hasParentDirectory;
+
+    /// <summary>
+    /// Il context menu di una cella è già stato inoltrato: lo sfondo ignora la stessa gesture
+    /// </summary>
+    private bool _cellContextMenuHandled;
+
+    /// <summary>
     /// Proiezione one-way della selezione Commander per la skin nativa Radzen
     /// </summary>
     private IList<FileListRow> _selectedRows = new List<FileListRow>();
@@ -179,11 +199,6 @@
     /// Indica che l'adapter colonne deve verificare il DOM corrente
     /// </summary>
     private bool _columnAdapterPending = true;
-
-    /// <summary>
-    /// Indica che la direzione accessibile deve essere riproiettata sugli header
-    /// </summary>
-    private bool _ariaSortProjectionPending = true;
 
     /// <summary>
     /// Indica che il sort proiettato è stato osservato almeno una volta
@@ -251,7 +266,8 @@
             this._entriesObserved = true;
         }
 
-        string parentPath = this.HasParentDirectory() ? this.ParentPath : "";
+        this._hasParentDirectory = this.HasParentDirectory();
+        string parentPath = this._hasParentDirectory ? this.ParentPath : "";
         int parentOffset = string.IsNullOrEmpty(parentPath) ? 0 : 1;
         bool rowsChanged = entriesChanged || !this.GetPathComparer().Equals(this._renderedParentPath, parentPath);
         if (rowsChanged)
@@ -269,16 +285,17 @@
         bool semanticStateChanged = selectionChanged || !this.GetPathComparer().Equals(this._focusedPath, this.State.FocusedPath);
         if (rowsChanged || selectionChanged)
         {
-            HashSet<string> selectedPaths = new HashSet<string>(this.State.SelectedPaths, this.GetPathComparer());
+            this._selectedPathSet = new HashSet<string>(this.State.SelectedPaths, this.GetPathComparer());
             List<FileListRow> selectedRows = new List<FileListRow>();
             foreach (FileListRow row in this._rowsRenderSnapshot)
             {
-                if (row.Kind == FileListRowKind.Entry && selectedPaths.Contains(row.Entry.FullPath))
+                if (row.Kind == FileListRowKind.Entry && this._selectedPathSet.Contains(row.Entry.FullPath))
                     selectedRows.Add(row);
             }
             this._selectedRows = selectedRows;
         }
-        if (this._semanticStateObserved && semanticStateChanged)
+        // Un solo spostamento del cursore aggiorna le righe con il render ordinario della griglia, senza rileggere i dati
+        if (this._semanticStateObserved && selectionChanged)
             this._refreshPending = true;
         if (!this._semanticStateObserved || semanticStateChanged)
         {
@@ -291,7 +308,6 @@
         {
             this._columns = this.CreateInitialColumns();
             this._columnAdapterPending = true;
-            this._ariaSortProjectionPending = true;
         }
         if (!this._sortProjectionObserved || this._sortProjectionField != this.State.CurrentSort.Field || this._sortProjectionDirection != this.State.CurrentSort.Direction)
         {
@@ -304,7 +320,6 @@
             this._sortProjectionField = this.State.CurrentSort.Field;
             this._sortProjectionDirection = this.State.CurrentSort.Direction;
             this._sortProjectionObserved = true;
-            this._ariaSortProjectionPending = true;
         }
         if (this.State.Columns.Count == 0)
             this._measurePending = true;
@@ -321,7 +336,13 @@
 
         if (this._jsModule == null)
         {
-            this._jsModule = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js?v=20260922-file-columns-v1");
+            IJSObjectReference module = await this.JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/interop.js");
+            if (this._isDisposed)
+            {
+                await module.DisposeAsync();
+                return;
+            }
+            this._jsModule = module;
             this._dotNetReference ??= DotNetObjectReference.Create(this);
         }
 
@@ -363,12 +384,6 @@
             this._columnAdapterPending = false;
         }
 
-        if (this._jsModule != null && this._ariaSortProjectionPending)
-        {
-            await this._jsModule.InvokeVoidAsync("projectRadzenAriaSort", this.HostId);
-            this._ariaSortProjectionPending = false;
-        }
-
         if (this._measurePending && this.State.Columns.Count == 0)
         {
             this._measurePending = false;
@@ -404,14 +419,14 @@
         }
 
         FileSystemEntry entry = args.Data.Entry;
-        bool selected = this.IsSelected(entry.FullPath);
+        bool selected = this._selectedPathSet.Contains(entry.FullPath);
         bool focused = this.GetPathComparer().Equals(this.State.FocusedPath, entry.FullPath);
         args.Attributes["data-entry-path"] = entry.FullPath;
         int semanticIndex;
         if (!this._entryIndexes.TryGetValue(entry.FullPath, out semanticIndex))
             return;
         args.Attributes["data-entry-index"] = semanticIndex.ToString(CultureInfo.InvariantCulture);
-        args.Attributes["data-entry-render-index"] = (semanticIndex + (this.HasParentDirectory() ? 1 : 0)).ToString(CultureInfo.InvariantCulture);
+        args.Attributes["data-entry-render-index"] = (semanticIndex + (this._hasParentDirectory ? 1 : 0)).ToString(CultureInfo.InvariantCulture);
         args.Attributes["aria-selected"] = selected ? "true" : "false";
         args.Attributes["tabindex"] = focused ? "0" : "-1";
         // Lo splat RowRender sostituisce la classe Radzen: conserva la base e lo stato nativo
@@ -465,23 +480,25 @@
     /// <param name="args">Cella cliccata con il tasto secondario</param>
     private async System.Threading.Tasks.Task HandleCellContextMenu(DataGridCellMouseEventArgs<FileListRow> args)
     {
+        // Impostato in modo sincrono: il callback dello sfondo, nella stessa gesture, arriva dopo
+        this._cellContextMenuHandled = true;
         if (args.Data.Kind == FileListRowKind.Parent)
             return;
-        FileListInteractionIntent intent = this.IsSelected(args.Data.Entry.FullPath) ? FileListInteractionIntent.Focus : FileListInteractionIntent.Click;
+        FileListInteractionIntent intent = this._selectedPathSet.Contains(args.Data.Entry.FullPath) ? FileListInteractionIntent.Focus : FileListInteractionIntent.Click;
         this.State.InteractionRequested?.Invoke(new FileListInteractionRequest { Intent = intent, TargetPath = args.Data.Entry.FullPath });
         await this.OnStateChanged.InvokeAsync();
         await this.OnContextMenu.InvokeAsync(new ContextMenuEventArgs { X = args.ClientX, Y = args.ClientY, Entry = args.Data.Entry });
     }
 
     /// <summary>
-    /// Isola il context menu delle celle dal callback dello sfondo, incluso il padre escluso
+    /// Proietta l'ordinamento Commander nell'attributo accessibile dell'header
     /// </summary>
-    /// <param name="args">Cella nativa Radzen</param>
-    private void HandleCellRender(DataGridCellRenderEventArgs<FileListRow> args)
+    /// <param name="args">Header nativo Radzen</param>
+    private void HandleHeaderCellRender(DataGridCellRenderEventArgs<FileListRow> args)
     {
-        // Flag emesso da AddEventStopPropagationAttribute in Blazor .NET 10
-        args.Attributes["__internal_stopPropagation_oncontextmenu"] = true;
-        args.Attributes["__internal_preventDefault_oncontextmenu"] = true;
+        FileListColumnId id;
+        if (args.Column != null && this.TryGetColumnId(args.Column.Property, out id))
+            args.Attributes["aria-sort"] = this.GetAriaSort(id);
     }
 
     /// <summary>
@@ -490,6 +507,12 @@
     /// <param name="args">Coordinate originali del context menu</param>
     private async System.Threading.Tasks.Task HandleBackgroundContextMenuAsync(MouseEventArgs args)
     {
+        // La stessa gesture su una cella risale fino al wrapper: è già stata inoltrata con la sua entry
+        if (this._cellContextMenuHandled)
+        {
+            this._cellContextMenuHandled = false;
+            return;
+        }
         await this.OnContextMenu.InvokeAsync(new ContextMenuEventArgs { X = args.ClientX, Y = args.ClientY });
     }
 
@@ -507,7 +530,7 @@
     }
 
     /// <summary>
-    /// Attiva il padre da tastiera mantenendo il doppio click mouse della baseline
+    /// Attiva il padre da tastiera mantenendo il doppio click mouse della baseline; il click singolo attiva solo il pannello
     /// </summary>
     /// <param name="row">Riga padre UI</param>
     /// <param name="args">Click nativo, con Detail zero per l'attivazione da tastiera</param>
@@ -523,7 +546,7 @@
     /// <returns>Messaggio solo per una directory non root senza entry reali</returns>
     private RenderFragment GetEmptyDirectoryFooter()
     {
-        if (this.State.Entries.Count == 0 && this.HasParentDirectory())
+        if (this.State.Entries.Count == 0 && this._hasParentDirectory)
             return @<RadzenText TextStyle="TextStyle.Body2" class="bivium-empty-directory rz-m-0 rz-p-2" role="status" Text="Empty directory" />;
         return null;
     }
@@ -630,7 +653,6 @@
     {
         this._columns = this.CloneColumns(layout);
         this._columnAdapterPending = true;
-        this._ariaSortProjectionPending = true;
         this.State.ColumnLayoutRequested?.Invoke(layout);
     }
 
@@ -733,22 +755,6 @@
     }
 
     /// <summary>
-    /// Consulta la selezione autoritativa senza mantenerne una copia locale
-    /// </summary>
-    /// <param name="path">Percorso da verificare</param>
-    /// <returns>True quando il percorso è selezionato</returns>
-    private bool IsSelected(string path)
-    {
-        StringComparer comparer = this.GetPathComparer();
-        for (int i = 0; i < this.State.SelectedPaths.Count; i++)
-        {
-            if (comparer.Equals(this.State.SelectedPaths[i], path))
-                return true;
-        }
-        return false;
-    }
-
-    /// <summary>
     /// Converte l'identità UI nella proprietà stabile Radzen
     /// </summary>
     /// <param name="id">Identità della colonna</param>
@@ -768,13 +774,6 @@
     /// <param name="id">Identità della colonna</param>
     /// <returns>Campo di ordinamento equivalente</returns>
     private SortField GetSortField(FileListColumnId id) => id switch { FileListColumnId.Name => SortField.Name, FileListColumnId.Size => SortField.Size, FileListColumnId.Date => SortField.Date, FileListColumnId.Attributes => SortField.Attributes, _ => SortField.Owner };
-
-    /// <summary>
-    /// Restituisce l'indicatore dell'ordinamento autoritativo
-    /// </summary>
-    /// <param name="id">Identità della colonna</param>
-    /// <returns>Indicatore visuale o stringa vuota</returns>
-    private string GetSortIndicator(FileListColumnId id) => this.State.CurrentSort.Field == this.GetSortField(id) ? (this.State.CurrentSort.Direction == SortDirection.Ascending ? "▲" : "▼") : "";
 
     /// <summary>
     /// Proietta l'ordinamento Commander nell'attributo accessibile dell'header

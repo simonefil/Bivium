@@ -21,44 +21,41 @@
     padding: 0;
 }
 
+/* Header e footer statici sopra le finestre modeless, sotto i dialog Radzen (1000/1001) */
+.commander-layout {
+    --rz-header-z: 900;
+    --rz-footer-z: 900;
+}
+
+/* .rz-layout raddoppiato: il tema Radzen, caricato dopo app.css, imposta .rz-layout .rz-header{z-index:2} */
+.rz-layout.commander-layout > .rz-header {
+    position: relative;
+    z-index: var(--rz-header-z);
+}
+
+.rz-layout.commander-layout > .rz-footer {
+    position: relative;
+    z-index: var(--rz-footer-z);
+}
+
+/* Menu bar e switch pannello del layout compatto sulla stessa riga */
+.bivium-header-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    min-width: 0;
+}
+
+.bivium-header-bar > .bivium-radzen-menu-bar {
+    flex: 1 1 auto;
+}
+
+.bivium-header-bar > .bivium-panel-switch {
+    flex: 0 0 auto;
+    margin-inline-end: 0.25rem;
+}
+
 .bivium-page-state {
     width: min(90vw, 40rem);
     margin: 2rem auto;
-}
-
-/* Panels area - 2 columns with vertical splitter */
-.panels-area {
-    display: grid;
-    grid-template-columns: 1fr 1ch 1fr;
-    min-height: 0;
-    overflow: hidden;
-}
-
-/* Single panel mode - left panel takes full width */
-.panels-area.single-panel {
-    grid-template-columns: 1fr;
-}
-
-/* Single panel - 4 rows: header, tree, splitter, file list */
-.file-panel {
-    display: grid;
-    grid-template-rows: 1lh 30% 1lh 1fr;
-    min-height: 0;
-    overflow: hidden;
-    box-sizing: border-box;
-    user-select: none;
-}
-
-/* Tree section */
-.panel-tree {
-    overflow-y: auto;
-    overflow-x: hidden;
-    min-height: 0;
-}
-
-/* File list section */
-.panel-filelist {
-    overflow-y: auto;
-    overflow-x: hidden;
-    min-height: 0;
 }

@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
+using Bivium.Models;
+using Bivium.Services;
 
 namespace Bivium.Components.Shared
 {
@@ -9,12 +11,6 @@ namespace Bivium.Components.Shared
     public partial class UploadDialog : ComponentBase, IAsyncDisposable
     {
         #region Parameters
-
-        /// <summary>
-        /// Callback when dialog is closed (true if upload succeeded)
-        /// </summary>
-        [Parameter]
-        public EventCallback<bool> OnClose { get; set; }
 
         /// <summary>
         /// Attachment authorized for the mutating upload
@@ -27,6 +23,10 @@ namespace Bivium.Components.Shared
         /// </summary>
         [Parameter]
         public long LeaseGeneration { get; set; }
+
+        /// <summary>Projection autorizzata; mount e hydration non inviano byte</summary>
+        [Parameter] public WorkspaceUploadSnapshot Upload { get; set; }
+        [Inject] private BiviumWorkspaceService WorkspaceService { get; set; }
 
         #endregion
 
@@ -113,41 +113,35 @@ namespace Bivium.Components.Shared
         /// <summary>Generazione locale dell'apertura per scartare inizializzazioni obsolete</summary>
         private long _showGeneration;
 
+        /// <summary>Disponibilità delle sorgenti soltanto nel browser corrente</summary>
+        private bool _hasLocalSelection;
+
+        /// <summary>Identità del mount per scartare callback tardivi</summary>
+        private Guid _sessionId;
+
+        /// <summary>Lease con la quale è stato inizializzato il mount</summary>
+        private long _generation;
+
+        /// <summary>Ultima projection autorizzata, letta dal parametro o dai callback; il parametro non viene mai sovrascritto</summary>
+        private WorkspaceUploadSnapshot _upload;
+
+        /// <summary>Fase autorevole proiettata dal workspace</summary>
+        private WorkspaceUploadPhase _phase = WorkspaceUploadPhase.Selecting;
+
+        /// <summary>Annullamento in corso: Cancel è idempotente finché il servizio non conclude</summary>
+        private bool _isCancelling;
+
+        /// <summary>Pausa in corso: il trasporto browser e il writer server devono quietarsi</summary>
+        private bool _isPausing;
+
         #endregion
 
-        #region Public Methods
+        #region Lifecycle
 
-        /// <summary>
-        /// Shows the upload dialog for the specified destination directory
-        /// </summary>
-        /// <param name="destinationDir">Target directory path</param>
-        public void Show(string destinationDir)
+        /// <summary>Ripristina destinazione, manifest e progresso dal workspace, non dai callback locali</summary>
+        protected override void OnParametersSet()
         {
-            this._destinationDir = destinationDir;
-            this._fileCount = 0;
-            this._directoryCount = 0;
-            this._totalBytes = 0;
-            this._progress = 0;
-            this._isUploading = false;
-            this._statusText = "";
-            this._currentItem = "";
-            this._processedFiles = 0;
-            this._uploadFileCount = 0;
-            this._isVisible = true;
-            this._bridgeReady = false;
-            this._showGeneration++;
-            this.StateHasChanged();
-        }
-
-        /// <summary>
-        /// Hides the dialog
-        /// </summary>
-        public void Hide()
-        {
-            this._isVisible = false;
-            this._bridgeReady = false;
-            this._showGeneration++;
-            this.StateHasChanged();
+            this.ApplyUpload(this.Upload);
         }
 
         #endregion
@@ -157,67 +151,92 @@ namespace Bivium.Components.Shared
         /// <summary>
         /// Called from JS when files or directories are added to the upload queue
         /// </summary>
-        /// <param name="fileCount">Selected file count</param>
-        /// <param name="directoryCount">Selected directory count</param>
-        /// <param name="totalBytes">Total selected file bytes</param>
+        /// <param name="sessionId">Sessione del mount browser</param>
+        /// <param name="generation">Lease catturata</param>
+        /// <param name="hasSelection">Disponibilità locale delle sorgenti, non stato di dominio</param>
+        /// <returns>True quando l'adapter appartiene ancora alla sessione autorizzata</returns>
         [JSInvokable]
-        public void OnUploadSelectionChanged(int fileCount, int directoryCount, long totalBytes)
+        public bool OnUploadSelectionChanged(string sessionId, long generation, bool hasSelection)
         {
-            if (this._isDisposed || !this._isVisible)
-                return;
-
-            this._fileCount = fileCount;
-            this._directoryCount = directoryCount;
-            this._totalBytes = totalBytes;
-            this._statusText = "";
+            if (!this.IsCurrentCallback(sessionId, generation))
+                return false;
+            WorkspaceClientToken token = new WorkspaceClientToken(this.AttachmentId, generation);
+            WorkspaceUploadSnapshot upload = this.WorkspaceService.GetUpload(token);
+            if (upload?.Id != this._sessionId || !upload.Visible)
+                return false;
+            this._hasLocalSelection = hasSelection;
+            this.ApplyUpload(upload);
             this.InvokeAsync(() => this.StateHasChanged());
+            return true;
+        }
+
+        /// <summary>Errore preflight locale; nessuna mutazione o pubblicazione nel workspace</summary>
+        /// <param name="sessionId">Sessione del mount browser</param>
+        /// <param name="generation">Lease catturata</param>
+        /// <param name="message">Errore della verifica delle sorgenti</param>
+        /// <returns>Aggiornamento del solo dialog del chiamante</returns>
+        [JSInvokable]
+        public async System.Threading.Tasks.Task OnUploadVerificationFailed(string sessionId, long generation, string message)
+        {
+            if (!this.IsCurrentCallback(sessionId, generation))
+                return;
+            this._isUploading = false;
+            this._statusText = "Error: " + message;
+            await this.InvokeAsync(() => this.StateHasChanged());
         }
 
         /// <summary>
-        /// Called from JS to update upload progress
-        /// </summary>
-        /// <param name="percent">Progress percentage (0-100)</param>
-        /// <param name="currentPath">Current relative path</param>
-        /// <param name="processedFiles">Number of completed files</param>
-        /// <param name="totalFiles">Total number of files</param>
-        [JSInvokable]
-        public void OnUploadProgress(int percent, string currentPath, int processedFiles, int totalFiles)
-        {
-            if (this._isDisposed || !this._isVisible || !this._isUploading)
-                return;
-
-            this._progress = percent;
-            this._currentItem = currentPath;
-            this._processedFiles = processedFiles;
-            this._uploadFileCount = totalFiles;
-            this.InvokeAsync(() => this.StateHasChanged());
-        }
-
-        /// <summary>
-        /// Called from JS when upload completes or fails
+        /// Called from JS when an admitted upload completes or fails
         /// </summary>
         /// <param name="success">True if upload succeeded</param>
         /// <param name="message">Error message on failure</param>
         [JSInvokable]
-        public async System.Threading.Tasks.Task OnUploadComplete(bool success, string message)
+        public async System.Threading.Tasks.Task OnUploadComplete(string sessionId, long generation, bool success, string message)
         {
-            if (this._isDisposed || !this._isVisible || !this._isUploading)
+            if (!this.IsCurrentCallback(sessionId, generation))
                 return;
 
             this._isUploading = false;
 
             if (success)
             {
-                this._statusText = "Upload complete";
-                this._isVisible = false;
-                await this.OnClose.InvokeAsync(true);
+                this.ApplyUpload(this.WorkspaceService.GetUpload(new WorkspaceClientToken(this.AttachmentId, generation)));
             }
             else
             {
-                this._statusText = "Error: " + message;
+                try
+                {
+                    this.ApplyUpload(this.WorkspaceService.PauseUpload(new WorkspaceClientToken(this.AttachmentId, generation), this._sessionId, message));
+                }
+                catch (OperationCanceledException) { }
+                catch (InvalidOperationException) { }
             }
 
             await this.InvokeAsync(() => this.StateHasChanged());
+        }
+
+        /// <summary>Callback del mount obsoleto o della lease revocata non modificano la sessione</summary>
+        private bool IsCurrentCallback(string sessionId, long generation) => !this._isDisposed && Guid.TryParse(sessionId, out Guid id) && id == this._sessionId && generation == this.LeaseGeneration && this.WorkspaceService.ValidatePublication(new WorkspaceClientToken(this.AttachmentId, generation));
+
+        /// <summary>Ferma solo il trasporto browser e aspetta il rollback del chunk corrente, non l'intero upload</summary>
+        internal async System.Threading.Tasks.Task<bool> FlushForHandoffAsync(CancellationToken cancellationToken)
+        {
+            if (this._upload?.Visible != true)
+                return true;
+            if (this._jsModule == null || !this._bridgeReady)
+                return false;
+            try
+            {
+                await this._jsModule.InvokeVoidAsync("pauseUpload", cancellationToken, this._sessionId.ToString(), this.LeaseGeneration);
+                this.ApplyUpload(await this.WorkspaceService.PauseUploadTransferAsync(new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration), this._sessionId, cancellationToken));
+            }
+            finally
+            {
+                this._isUploading = false;
+                if (!this._isDisposed)
+                    this.StateHasChanged();
+            }
+            return this.WorkspaceService.ValidatePublication(new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration));
         }
 
         #endregion
@@ -237,10 +256,7 @@ namespace Bivium.Components.Shared
             await this.InitializeJsModule();
             if (this._isDisposed || !this._isVisible || generation != this._showGeneration || this._jsModule == null)
                 return;
-            await this._jsModule.InvokeVoidAsync("initUpload", this._dotNetRef);
-            if (this._isDisposed || !this._isVisible || generation != this._showGeneration)
-                return;
-            await this._jsModule.InvokeVoidAsync("clearUploadSelection");
+            await this._jsModule.InvokeVoidAsync("initUpload", this._dotNetRef, this._sessionId.ToString(), this.LeaseGeneration, this.AttachmentId);
             if (this._isDisposed || !this._isVisible || generation != this._showGeneration)
                 return;
             this._bridgeReady = true;
@@ -281,7 +297,7 @@ namespace Bivium.Components.Shared
         /// </summary>
         private async System.Threading.Tasks.Task HandleClearSelection()
         {
-            if (this._jsModule == null || this._isUploading)
+            if (this._jsModule == null || this._isUploading || this._isCancelling || this._isPausing)
                 return;
 
             await this._jsModule.InvokeVoidAsync("clearUploadSelection");
@@ -292,18 +308,19 @@ namespace Bivium.Components.Shared
         /// </summary>
         private async System.Threading.Tasks.Task HandleUpload()
         {
-            if (this._jsModule == null || !this._bridgeReady || this._isUploading || !this.HasSelection())
+            if (this._jsModule == null || !this._bridgeReady || this._isUploading || this._isCancelling || this._isPausing || !this._hasLocalSelection)
                 return;
 
             this._isUploading = true;
-            this._progress = 0;
             this._statusText = "Uploading...";
-            this._currentItem = "";
-            this._processedFiles = 0;
             this._uploadFileCount = this._fileCount;
             this.StateHasChanged();
 
-            await this._jsModule.InvokeVoidAsync("uploadSelection", this._destinationDir, this.AttachmentId, this.LeaseGeneration);
+            if (!await this._jsModule.InvokeAsync<bool>("uploadSelection", this._sessionId.ToString(), this.AttachmentId, this.LeaseGeneration))
+            {
+                this._isUploading = false;
+                this.StateHasChanged();
+            }
         }
 
         /// <summary>
@@ -311,9 +328,27 @@ namespace Bivium.Components.Shared
         /// </summary>
         private async System.Threading.Tasks.Task HandleCancel()
         {
-            if (!this._isVisible)
+            if (!this._isVisible || this._isCancelling)
                 return;
 
+            WorkspaceClientToken token = new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration);
+            if (!this.WorkspaceService.ValidateMutation(token))
+                return;
+            this._isCancelling = true;
+            try
+            {
+                await this.WorkspaceService.CancelUploadAsync(token, this._sessionId);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException || ex is OperationCanceledException || ex is UnauthorizedAccessException)
+            {
+                // La sessione è già stata annullata o revocata: lo stato autorevole arriva dal workspace
+            }
+            finally
+            {
+                this._isCancelling = false;
+            }
+            if (this._isDisposed)
+                return;
             bool wasUploading = this._isUploading;
             this._isUploading = false;
             this._isVisible = false;
@@ -331,16 +366,97 @@ namespace Bivium.Components.Shared
                 await this._jsModule.InvokeVoidAsync("cancelUpload");
             else if (this._jsModule != null)
                 await this._jsModule.InvokeVoidAsync("clearUploadSelection");
-            await this.OnClose.InvokeAsync(false);
         }
 
         /// <summary>
-        /// Returns whether the upload queue contains files or directories
+        /// Mette in pausa il trasferimento conservando i chunk ricevuti e la selezione locale
         /// </summary>
-        /// <returns>True when at least one entry is selected</returns>
-        private bool HasSelection()
+        private async System.Threading.Tasks.Task HandlePause()
         {
-            return this._fileCount > 0 || this._directoryCount > 0;
+            if (this._jsModule == null || !this._isUploading || this._isPausing || this._isCancelling)
+                return;
+
+            WorkspaceClientToken token = new WorkspaceClientToken(this.AttachmentId, this.LeaseGeneration);
+            if (!this.WorkspaceService.ValidateMutation(token))
+                return;
+            this._isPausing = true;
+            try
+            {
+                await this._jsModule.InvokeVoidAsync("pauseUpload", this._sessionId.ToString(), this.LeaseGeneration);
+                this.ApplyUpload(await this.WorkspaceService.PauseUploadTransferAsync(token, this._sessionId, CancellationToken.None));
+            }
+            catch (Exception ex) when (ex is InvalidOperationException || ex is OperationCanceledException || ex is UnauthorizedAccessException || ex is JSException)
+            {
+                this._statusText = "Error: " + ex.Message;
+            }
+            finally
+            {
+                this._isPausing = false;
+                this._isUploading = false;
+            }
+        }
+
+        /// <summary>
+        /// Applica la projection autorevole senza modificare il parametro ricevuto dal Commander
+        /// </summary>
+        /// <param name="upload">Projection del workspace</param>
+        private void ApplyUpload(WorkspaceUploadSnapshot upload)
+        {
+            bool changed = this._sessionId != (upload?.Id ?? Guid.Empty) || this._generation != this.LeaseGeneration;
+            if (changed)
+            {
+                this._sessionId = upload?.Id ?? Guid.Empty;
+                this._generation = this.LeaseGeneration;
+                this._hasLocalSelection = false;
+                this._bridgeReady = false;
+                this._isUploading = false;
+                this._showGeneration++;
+            }
+            this._upload = upload;
+            this._isVisible = upload?.Visible == true;
+            if (upload == null)
+                return;
+            this._phase = upload.Phase;
+            this._destinationDir = upload.Destination;
+            this._fileCount = upload.Files.Length;
+            this._directoryCount = upload.Directories.Length;
+            this._totalBytes = upload.TotalBytes;
+            this._processedFiles = upload.CompletedFiles;
+            this._uploadFileCount = this._fileCount;
+            this._progress = upload.Percent;
+            this._currentItem = upload.CurrentPath;
+            this._statusText = !string.IsNullOrEmpty(upload.Error) ? "Error: " + upload.Error : upload.Phase == WorkspaceUploadPhase.Paused ? "Upload paused. Received chunks are preserved." : "";
+        }
+
+        /// <summary>
+        /// Etichetta dell'azione di avvio derivata dalla fase autorevole
+        /// </summary>
+        /// <returns>Upload oppure Resume per un trasferimento in pausa o fallito</returns>
+        private string GetStartLabel()
+        {
+            return this._phase is WorkspaceUploadPhase.Paused or WorkspaceUploadPhase.Failed ? "Resume" : "Upload";
+        }
+
+        /// <summary>
+        /// Indica se il suggerimento della drop zone deve restare visibile anche senza trascinamento
+        /// </summary>
+        /// <returns>True durante l'upload o quando le sorgenti vanno riselezionate</returns>
+        private bool IsDropHintPersistent()
+        {
+            return this._isUploading || (this._fileCount > 0 && !this._hasLocalSelection);
+        }
+
+        /// <summary>
+        /// Testo del suggerimento della drop zone coerente con lo stato corrente
+        /// </summary>
+        /// <returns>Suggerimento da mostrare</returns>
+        private string GetDropHint()
+        {
+            if (this._isUploading)
+                return "The selection is locked while the upload is running.";
+            if (this._fileCount > 0 && !this._hasLocalSelection)
+                return "Reselect the original files and folders. Browser file handles are not transferred.";
+            return "Selections are added to the current queue";
         }
 
         /// <summary>
@@ -349,10 +465,10 @@ namespace Bivium.Components.Shared
         /// <returns>Selection summary</returns>
         private string GetSelectionSummary()
         {
-            if (!this.HasSelection())
+            if (this._fileCount == 0 && this._directoryCount == 0)
                 return "No files or folders selected";
 
-            return this._fileCount + " file(s), " + this._directoryCount + " folder(s), " + this.FormatSize(this._totalBytes);
+            return this._fileCount + " file(s), " + this._directoryCount + " folder(s), " + ByteSizeFormatter.Format(this._totalBytes);
         }
 
         /// <summary>
@@ -365,34 +481,6 @@ namespace Bivium.Components.Shared
                 return "";
             int currentFile = Math.Min(this._processedFiles + 1, this._uploadFileCount);
             return "[" + currentFile + "/" + this._uploadFileCount + "] ";
-        }
-
-        /// <summary>
-        /// Formats a byte count for display
-        /// </summary>
-        /// <param name="bytes">Size in bytes</param>
-        /// <returns>Formatted size string</returns>
-        private string FormatSize(long bytes)
-        {
-            string result;
-            if (bytes < 1024)
-            {
-                result = bytes + " B";
-            }
-            else if (bytes < 1024 * 1024)
-            {
-                result = (bytes / 1024.0).ToString("F1") + " KB";
-            }
-            else if (bytes < 1024L * 1024 * 1024)
-            {
-                result = (bytes / (1024.0 * 1024.0)).ToString("F1") + " MB";
-            }
-            else
-            {
-                result = (bytes / (1024.0 * 1024.0 * 1024.0)).ToString("F1") + " GB";
-            }
-
-            return result;
         }
 
         #endregion
@@ -414,7 +502,7 @@ namespace Bivium.Components.Shared
                 {
                     try
                     {
-                        await this._jsModule.InvokeVoidAsync("dispose");
+                        await this._jsModule.InvokeVoidAsync("dispose", this._sessionId.ToString(), this._generation);
                     }
                     finally
                     {

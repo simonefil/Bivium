@@ -10,7 +10,7 @@
 }
 
 .upload-drop-active .bivium-radzen-upload-hint,
-.upload-drop-disabled .bivium-radzen-upload-hint {
+.bivium-radzen-upload-hint.upload-hint-visible {
     visibility: visible;
 }
 

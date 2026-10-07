@@ -311,37 +311,47 @@ namespace Bivium.Services
                 this.ScheduleNotification(session, false);
         }
 
-        /// <summary>
-        /// Renames a terminal tab
-        /// </summary>
-        /// <param name="token">Requesting client lease</param>
-        /// <param name="sessionId">Session identifier</param>
-        /// <param name="label">New label</param>
-        public void RenameSession(WorkspaceClientToken token, int sessionId, string label)
+        /// <summary>Mutazione condivisa fra API con lease e piano workspace già ammesso</summary>
+        private TerminalSessionRuntime RenameSessionState(int sessionId, string label)
         {
-            if (string.IsNullOrWhiteSpace(label))
-                return;
-
-            TerminalSessionRuntime session = null;
-            bool changed = false;
-            this._workspaceService.ExecuteMutation(token, () =>
+            TerminalSessionRuntime session = this.GetSession(sessionId);
+            if (session == null || string.IsNullOrWhiteSpace(label))
+                return null;
+            lock (session.SyncRoot)
             {
-                session = this.GetSession(sessionId);
+                session.Label = label.Trim();
+                this.AdvanceSessionRevisionLocked(session);
+            }
+            this.IncrementRuntimeRevision();
+            return session;
+        }
+
+        /// <summary>Ingresso interno del runner: non riceve token browser revocabili o callback circuito</summary>
+        internal FileOperationResult ExecuteAdmittedWorkspaceAction(WorkspaceWorkflowKind kind, System.Collections.Immutable.ImmutableArray<int> sessionIds, string draft)
+        {
+            if (kind == WorkspaceWorkflowKind.TerminalRename && sessionIds.Length == 1)
+            {
+                TerminalSessionRuntime session = this.RenameSessionState(sessionIds[0], draft);
                 if (session == null)
-                    return;
-
-                lock (session.SyncRoot)
-                {
-                    session.Label = label.Trim();
-                    this.AdvanceSessionRevisionLocked(session);
-                    changed = true;
-                }
-
-                this.IncrementRuntimeRevision();
-            });
-
-            if (changed)
+                    return FileOperationResult.Fail("The terminal session no longer exists or the label is empty.");
                 this.ScheduleNotification(session, true);
+                return FileOperationResult.Ok(1);
+            }
+            if (kind != WorkspaceWorkflowKind.TerminalClose)
+                return FileOperationResult.Fail("Unsupported terminal action");
+            List<TerminalSessionRuntime> removed = new List<TerminalSessionRuntime>();
+            lock (this._lock)
+            {
+                foreach (int id in sessionIds)
+                    if (this._sessions.Remove(id, out TerminalSessionRuntime session))
+                        removed.Add(session);
+                if (!this._sessions.ContainsKey(this._activeSessionId))
+                    this._activeSessionId = this.GetLastSessionIdLocked();
+                this._runtimeRevision++;
+            }
+            this.DisposeSessions(removed);
+            this.NotifySubscribers(new TerminalRuntimeEvent { SessionId = 0, Revision = this.GetRuntimeRevision(), SessionsChanged = true });
+            return FileOperationResult.Ok(removed.Count);
         }
 
         /// <summary>
@@ -597,33 +607,6 @@ namespace Bivium.Services
         }
 
         /// <summary>
-        /// Explicitly restarts an exited session
-        /// </summary>
-        /// <param name="token">Requesting client lease</param>
-        /// <param name="sessionId">Session identifier</param>
-        public void RestartSession(WorkspaceClientToken token, int sessionId)
-        {
-            bool restart = false;
-            this._workspaceService.ExecuteMutation(token, () =>
-            {
-                TerminalSessionRuntime session = this.GetSession(sessionId);
-                if (session == null)
-                    return;
-
-                lock (session.SyncRoot)
-                {
-                    if (session.Disposed || session.RestartPending)
-                        return;
-                    session.RestartPending = true;
-                    restart = true;
-                }
-            });
-
-            if (restart)
-                this.RestartSessionInternal(sessionId);
-        }
-
-        /// <summary>
         /// Restarts a session after prior validation
         /// </summary>
         /// <param name="sessionId">Session identifier</param>
@@ -687,27 +670,23 @@ namespace Bivium.Services
             }
         }
 
-        /// <summary>
-        /// Explicitly closes every session
-        /// </summary>
-        /// <param name="token">Requesting client lease</param>
-        public void CloseAllSessions(WorkspaceClientToken token)
+        /// <summary>Rimuove i PTY sotto il lock workspace del chiamante; restituisce solo il cleanup fuori lock</summary>
+        /// <returns>Disposal e notifica delle sessioni esattamente rimosse, mai di nuovi PTY</returns>
+        internal Action DetachAllSessionsForWorkspaceReset()
         {
-            List<TerminalSessionRuntime> sessions = null;
-            this._workspaceService.ExecuteMutation(token, () =>
+            List<TerminalSessionRuntime> sessions;
+            lock (this._lock)
             {
-                lock (this._lock)
-                {
-                    sessions = new List<TerminalSessionRuntime>(this._sessions.Values);
-                    this._sessions.Clear();
-                    this._activeSessionId = 0;
-                    this._runtimeRevision++;
-                }
-            });
-
-            this.DisposeSessions(sessions);
-
-            this.NotifySubscribers(new TerminalRuntimeEvent { SessionId = 0, Revision = this.GetRuntimeRevision(), SessionsChanged = true });
+                sessions = new List<TerminalSessionRuntime>(this._sessions.Values);
+                this._sessions.Clear();
+                this._activeSessionId = 0;
+                this._runtimeRevision++;
+            }
+            return () =>
+            {
+                this.DisposeSessions(sessions);
+                this.NotifySubscribers(new TerminalRuntimeEvent { SessionId = 0, Revision = this.GetRuntimeRevision(), SessionsChanged = true });
+            };
         }
 
         /// <summary>
@@ -1042,6 +1021,7 @@ namespace Bivium.Services
             }
 
             // XTerm.NET must always receive output even when no circuit is connected
+            TerminalClientEvent[] clipboardRequests;
             lock (session.SyncRoot)
             {
                 if (generation != session.ShellGeneration || session.Disposed)
@@ -1057,9 +1037,13 @@ namespace Bivium.Services
                     session.PaletteChangePending = false;
                 }
                 session.HasUnreadOutput = sessionId != activeSessionId;
+                clipboardRequests = session.WorkspaceClipboardRequests.ToArray();
+                session.WorkspaceClipboardRequests.Clear();
             }
 
             // Process budgets and notifications after the session commit to avoid holding its lock
+            foreach (TerminalClientEvent request in clipboardRequests)
+                this._workspaceService.EnqueueTerminalClipboard(request, () => ReferenceEquals(this.GetSession(session.Id), session));
             this.EnforceGlobalHistoryBudget();
             this.IncrementRuntimeRevision();
             this.ScheduleNotification(session, false);
@@ -1449,6 +1433,12 @@ namespace Bivium.Services
                 Title = title ?? "",
                 Text = text ?? ""
             };
+            if (type == TerminalClientEventType.ClipboardWrite)
+            {
+                if (session.WorkspaceClipboardRequests.Count < 8)
+                    session.WorkspaceClipboardRequests.Add(clientEvent);
+                return;
+            }
             this.NotifySubscribers(new TerminalRuntimeEvent
             {
                 SessionId = session.Id,
@@ -2011,6 +2001,8 @@ namespace Bivium.Services
             /// Whether a restart was requested
             /// </summary>
             public bool RestartPending { get; set; }
+            /// <summary>Pubblicazioni catturate dopo Terminal.Write, prima della notifica browser</summary>
+            public List<TerminalClientEvent> WorkspaceClipboardRequests { get; } = new List<TerminalClientEvent>();
 
             /// <summary>
             /// Whether the tab has unread output
