@@ -6,9 +6,6 @@ namespace Bivium.Models
     /// <summary>Lease and identity of only the visual owners of the current render</summary>
     public sealed record WorkspaceSurfaceOwner(string AttachmentId, long Generation, Guid WorkflowId, Guid QuestionId, WorkspaceWorkflowPhase Phase, Guid UploadId);
 
-    /// <summary>App-owned menu: open identities, burger and navigation context, without commands</summary>
-    public sealed record WorkspaceMenuDraft(long Revision, ImmutableArray<string> OpenIds, bool ResponsiveOpen = false, string NavigationParent = "", string ActiveItem = "", bool Focused = false);
-
     /// <summary>Immutable entry captured when the context menu opens</summary>
     public sealed record WorkspaceContextEntry(string Path, string Name, bool IsDirectory);
 

@@ -1,7 +1,5 @@
 using Microsoft.AspNetCore.Components;
-using Microsoft.JSInterop;
-using Bivium.Models;
-using Bivium.Services;
+using Radzen;
 using System;
 using System.Collections.Generic;
 
@@ -10,22 +8,8 @@ namespace Bivium.Components.Shared
     /// <summary>
     /// Top menu bar with dropdown menus (File, Edit, View, Settings, Help)
     /// </summary>
-    public partial class MenuBar : ComponentBase, IAsyncDisposable
+    public partial class MenuBar : ComponentBase
     {
-        #region Injected Services
-
-        /// <summary>
-        /// JS runtime for the menu adapters
-        /// </summary>
-        [Inject]
-        private IJSRuntime _jsRuntime { get; set; }
-        /// <summary>Workspace runtime of the visual draft only</summary>
-        [Inject] private BiviumWorkspaceService WorkspaceService { get; set; }
-        /// <summary>Lease captured by the Commander render</summary>
-        [CascadingParameter] public WorkspaceSurfaceOwner SurfaceOwner { get; set; }
-
-        #endregion
-
         #region Parameters
 
         /// <summary>Availability and shortcuts computed exclusively by the Commander</summary>
@@ -221,86 +205,12 @@ namespace Bivium.Components.Shared
 
         #endregion
 
-        #region Class Variables
+        #region Constants
 
         /// <summary>
-        /// Radzen menu host used by the hover adapter
+        /// Prefix of the menu item values that select a theme
         /// </summary>
-        private ElementReference _radzenMenuHost;
-
-        /// <summary>
-        /// Radzen menu adapter module
-        /// </summary>
-        private IJSObjectReference _jsRadzenModule;
-
-        /// <summary>Prevents registrations after the menu is released</summary>
-        private bool _isDisposed;
-        /// <summary>Acknowledged menu draft, without commands or delegates</summary>
-        private WorkspaceMenuDraft _menuDraft;
-        /// <summary>App-owned surfaces module</summary>
-        private IJSObjectReference _surfaceModule;
-        /// <summary>Callback of the owned mount</summary>
-        private DotNetObjectReference<MenuBar> _surfaceReference;
-        /// <summary>Installed lease, distinct from ordinary renders</summary>
-        private long _surfaceGeneration = -1;
-        /// <summary>Lease being installed: OnAfterRenderAsync re-enters during the awaits and a second installation would restart from an already superseded revision</summary>
-        private long _surfaceInstallingGeneration = -1;
-
-        #endregion
-
-        #region Overrides
-
-        /// <summary>
-        /// Attaches hover and the menu surface adapter after the render
-        /// </summary>
-        /// <param name="firstRender">True on the first render</param>
-        protected override async System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender)
-        {
-            if (firstRender && !this._isDisposed)
-                await this.InitializeRadzenMenuAsync();
-            if (!this._isDisposed && this.SurfaceOwner != null && this._surfaceGeneration != this.SurfaceOwner.Generation && this._surfaceInstallingGeneration != this.SurfaceOwner.Generation)
-            {
-                WorkspaceSurfaceOwner owner = this.SurfaceOwner;
-                this._surfaceInstallingGeneration = owner.Generation;
-                try
-                {
-                    this._menuDraft = this.WorkspaceService.GetMenuDraft(new WorkspaceClientToken(owner.AttachmentId, owner.Generation));
-                    if (this._menuDraft == null)
-                        return;
-                    IJSObjectReference module = this._surfaceModule ?? await this._jsRuntime.InvokeAsync<IJSObjectReference>("import", "./js/surface-adapters.js");
-                    if (this._isDisposed || this.SurfaceOwner.Generation != owner.Generation)
-                    {
-                        if (this._surfaceModule == null)
-                            await module.DisposeAsync();
-                        return;
-                    }
-                    this._surfaceModule = module;
-                    this._surfaceReference ??= DotNetObjectReference.Create(this);
-                    if (await this._surfaceModule.InvokeAsync<bool>("installMenuSurface", this._radzenMenuHost, this._surfaceReference, owner.Generation, this._menuDraft))
-                        this._surfaceGeneration = owner.Generation;
-                }
-                finally
-                {
-                    if (this._surfaceInstallingGeneration == owner.Generation)
-                        this._surfaceInstallingGeneration = -1;
-                }
-            }
-        }
-
-        /// <summary>CAS of the visual menu only; the command remains in the existing owner</summary>
-        /// <param name="generation">Lease captured by the adapter</param>
-        /// <param name="draft">Captured visual identities</param>
-        /// <returns>Acknowledged revision, or -1</returns>
-        [JSInvokable]
-        public long OnMenuSurfaceChanged(long generation, WorkspaceMenuDraft draft)
-        {
-            if (this._isDisposed || this.SurfaceOwner == null || generation != this.SurfaceOwner.Generation)
-                return -1;
-            long revision = this.WorkspaceService.PublishMenuDraft(new WorkspaceClientToken(this.SurfaceOwner.AttachmentId, generation), draft);
-            if (revision >= 0)
-                this._menuDraft = draft with { Revision = revision };
-            return revision;
-        }
+        private const string ThemeValuePrefix = "theme:";
 
         #endregion
 
@@ -323,71 +233,6 @@ namespace Bivium.Components.Shared
         /// <param name="id">Command identifier</param>
         /// <returns>True if enabled</returns>
         private bool IsEnabled(string id) => this.GetCommand(id)?.Enabled == true;
-
-        /// <summary>
-        /// Attaches the hover transition between menus after the first click-open
-        /// </summary>
-        private async System.Threading.Tasks.Task InitializeRadzenMenuAsync()
-        {
-            this._jsRadzenModule = await this._jsRuntime.InvokeAsync<IJSObjectReference>("import", "./js/radzen-startup.js");
-            if (this._isDisposed)
-            {
-                await this._jsRadzenModule.DisposeAsync();
-                this._jsRadzenModule = null;
-                return;
-            }
-            await this._jsRadzenModule.InvokeVoidAsync("initializeRadzenMenuHover", this._radzenMenuHost);
-        }
-
-        /// <summary>Releases the hover listeners and module owned by the instance</summary>
-        /// <returns>Asynchronous release operation</returns>
-        public async System.Threading.Tasks.ValueTask DisposeAsync()
-        {
-            if (this._isDisposed)
-                return;
-            this._isDisposed = true;
-            if (this._surfaceModule != null)
-            {
-                try
-                {
-                    try { await this._surfaceModule.InvokeVoidAsync("disposeSurface", this._radzenMenuHost); }
-                    finally { await this._surfaceModule.DisposeAsync(); }
-                }
-                catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException) { }
-                finally { this._surfaceReference?.Dispose(); }
-            }
-            if (this._jsRadzenModule == null)
-                return;
-
-            try
-            {
-                try
-                {
-                    await this._jsRadzenModule.InvokeVoidAsync("disposeRadzenMenuHover", this._radzenMenuHost);
-                }
-                finally
-                {
-                    await this._jsRadzenModule.DisposeAsync();
-                }
-            }
-            catch (Exception ex) when (ex is JSDisconnectedException || ex is OperationCanceledException)
-            {
-            }
-            this._jsRadzenModule = null;
-        }
-
-        /// <summary>
-        /// Handles theme dropdown change
-        /// </summary>
-        /// <param name="args">Change event args</param>
-        private async System.Threading.Tasks.Task HandleThemeChange(ChangeEventArgs args)
-        {
-            if (this.CanInvoke != null && !this.CanInvoke())
-                return;
-
-            string theme = args.Value?.ToString() ?? "";
-            await this.OnThemeChanged.InvokeAsync(theme);
-        }
 
         /// <summary>
         /// Returns the selected theme for the compiled variant
@@ -430,189 +275,46 @@ namespace Bivium.Components.Shared
         }
 
         /// <summary>
-        /// Handles New File action
+        /// Dispatches the clicked menu item to the action bound to its command identifier
         /// </summary>
-        private async System.Threading.Tasks.Task HandleNewFile()
+        /// <param name="args">Clicked item; parent items carry no value</param>
+        private async System.Threading.Tasks.Task HandleMenuClick(MenuItemEventArgs args)
         {
-            await this.HandleAction(this.OnNewFile);
-        }
-
-        /// <summary>
-        /// Handles New Folder action
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleNewFolder()
-        {
-            await this.HandleAction(this.OnNewFolder);
-        }
-
-        /// <summary>
-        /// Handles Download action
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleDownload()
-        {
-            await this.HandleAction(this.OnDownload);
-        }
-
-        /// <summary>
-        /// Handles Upload action
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleUpload()
-        {
-            await this.HandleAction(this.OnUpload);
-        }
-
-        /// <summary>
-        /// Handles the explicit workspace reset action
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleResetWorkspace()
-        {
-            await this.HandleAction(this.OnResetWorkspace);
-        }
-
-        /// <summary>
-        /// Handles Copy action
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleCopy()
-        {
-            await this.HandleAction(this.OnCopy);
-        }
-
-        /// <summary>
-        /// Handles Cut action
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleCut()
-        {
-            await this.HandleAction(this.OnCut);
-        }
-
-        /// <summary>
-        /// Handles Paste action
-        /// </summary>
-        private async System.Threading.Tasks.Task HandlePaste()
-        {
-            await this.HandleAction(this.OnPaste);
-        }
-
-        /// <summary>
-        /// Handles Delete action
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleDelete()
-        {
-            await this.HandleAction(this.OnDelete);
-        }
-
-        /// <summary>
-        /// Handles Rename action
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleRename()
-        {
-            await this.HandleAction(this.OnRename);
-        }
-
-        /// <summary>
-        /// Handles Advanced Rename action
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleAdvancedRename()
-        {
-            await this.HandleAction(this.OnAdvancedRename);
-        }
-
-        /// <summary>
-        /// Handles Select All action
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleSelectAll()
-        {
-            await this.HandleAction(this.OnSelectAll);
-        }
-
-        /// <summary>
-        /// Handles Refresh action
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleRefresh()
-        {
-            await this.HandleAction(this.OnRefresh);
-        }
-
-        /// <summary>
-        /// Handles Terminal toggle action
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleTerminal()
-        {
-            await this.HandleAction(this.OnTerminal);
-        }
-
-        /// <summary>
-        /// Handles Editor Extensions action
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleEditorExtensions()
-        {
-            await this.HandleAction(this.OnEditorExtensions);
-        }
-
-        /// <summary>
-        /// Handles default creation permissions action
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleCreationPermissions()
-        {
-            await this.HandleAction(this.OnCreationPermissions);
-        }
-
-        /// <summary>
-        /// Handles Authentication Settings action
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleAuthenticationSettings()
-        {
-            await this.HandleAction(this.OnAuthenticationSettings);
-        }
-
-        /// <summary>
-        /// Handles Logout action
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleLogout()
-        {
-            await this.HandleAction(this.OnLogout);
-        }
-
-        /// <summary>
-        /// Handles About action
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleAbout()
-        {
-            await this.HandleAction(this.OnAbout);
-        }
-
-        /// <summary>
-        /// Handles Extract action
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleExtract()
-        {
-            await this.HandleAction(this.OnExtract);
-        }
-
-        /// <summary>
-        /// Handles Compress action
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleCompress()
-        {
-            await this.HandleAction(this.OnCompress);
-        }
-
-        /// <summary>
-        /// Handles toggle single/dual panel mode
-        /// </summary>
-        private async System.Threading.Tasks.Task HandleToggleSinglePanel()
-        {
-            await this.HandleAction(this.OnToggleSinglePanel);
-        }
-
-        /// <summary>
-        /// Revalidates the authority and invokes the selected action
-        /// </summary>
-        /// <param name="callback">Action callback</param>
-        private async System.Threading.Tasks.Task HandleAction(EventCallback callback)
-        {
-            if (this.CanInvoke == null || !this.CanInvoke())
+            if (args.Value is not string command || this.CanInvoke == null || !this.CanInvoke())
                 return;
+
+            if (command.StartsWith(ThemeValuePrefix, StringComparison.Ordinal))
+            {
+                await this.OnThemeChanged.InvokeAsync(command.Substring(ThemeValuePrefix.Length));
+                return;
+            }
+
+            EventCallback callback = command switch
+            {
+                "new-file" => this.OnNewFile,
+                "new-folder" => this.OnNewFolder,
+                "download" => this.OnDownload,
+                "upload" => this.OnUpload,
+                "logout" => this.OnLogout,
+                "extract" => this.OnExtract,
+                "compress" => this.OnCompress,
+                "reset" => this.OnResetWorkspace,
+                "copy" => this.OnCopy,
+                "cut" => this.OnCut,
+                "paste" => this.OnPaste,
+                "delete" => this.OnDelete,
+                "rename" => this.OnRename,
+                "advanced-rename" => this.OnAdvancedRename,
+                "select-all" => this.OnSelectAll,
+                "refresh" => this.OnRefresh,
+                "panels" => this.OnToggleSinglePanel,
+                "terminal" => this.OnTerminal,
+                "editor-extensions" => this.OnEditorExtensions,
+                "creation-permissions" => this.OnCreationPermissions,
+                "authentication" => this.OnAuthenticationSettings,
+                "about" => this.OnAbout,
+                _ => default
+            };
             await callback.InvokeAsync();
         }
 

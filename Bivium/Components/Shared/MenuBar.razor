@@ -1,33 +1,33 @@
 @namespace Bivium.Components.Shared
 
-<div class="bivium-radzen-menu-bar" data-workspace-menu-surface="true" @ref="this._radzenMenuHost">
-    <RadzenMenu id="workspace-application-menu" Responsive="true" ToggleAriaLabel="Toggle menu" ClickToOpen="true" Flyout="true" AriaLabel="Application menu">
+<div class="bivium-radzen-menu-bar">
+    <RadzenMenu id="workspace-application-menu" Responsive="true" ToggleAriaLabel="Toggle menu" ClickToOpen="true" AriaLabel="Application menu" Click="this.HandleMenuClick">
         <RadzenMenuItem id="menu-file" Text="File">
-            <RadzenMenuItem id="menu-file-new-file" Text="New File" Icon="note_add" Disabled="@(!this.IsEnabled("new-file"))" Template="@this.CommandTemplate("new-file")" Click="async _ => await this.HandleNewFile()" />
-            <RadzenMenuItem id="menu-file-new-folder" Text="New Folder" Icon="create_new_folder" Disabled="@(!this.IsEnabled("new-folder"))" Template="@this.CommandTemplate("new-folder")" Click="async _ => await this.HandleNewFolder()" />
-            <RadzenMenuItem id="menu-file-download" Text="@(this.IsMultiSelection ? "Download as ZIP" : "Download")" Icon="download" Disabled="@(!this.IsEnabled("download"))" Click="async _ => await this.HandleDownload()" />
-            <RadzenMenuItem id="menu-file-upload" Text="Upload" Icon="upload" Disabled="@(!this.IsEnabled("upload"))" Click="async _ => await this.HandleUpload()" />
+            <RadzenMenuItem id="menu-file-new-file" Text="New File" Icon="note_add" Disabled="@(!this.IsEnabled("new-file"))" Template="@this.CommandTemplate("new-file")" Value="@("new-file")" />
+            <RadzenMenuItem id="menu-file-new-folder" Text="New Folder" Icon="create_new_folder" Disabled="@(!this.IsEnabled("new-folder"))" Template="@this.CommandTemplate("new-folder")" Value="@("new-folder")" />
+            <RadzenMenuItem id="menu-file-download" Text="@(this.IsMultiSelection ? "Download as ZIP" : "Download")" Icon="download" Disabled="@(!this.IsEnabled("download"))" Value="@("download")" />
+            <RadzenMenuItem id="menu-file-upload" Text="Upload" Icon="upload" Disabled="@(!this.IsEnabled("upload"))" Value="@("upload")" />
             @if (this.CanLogout)
             {
-                <RadzenMenuItem id="menu-file-logout" Text="Logout" Icon="logout" Disabled="@(!this.IsEnabled("logout"))" Click="async _ => await this.HandleLogout()" />
+                <RadzenMenuItem id="menu-file-logout" Text="Logout" Icon="logout" Disabled="@(!this.IsEnabled("logout"))" Value="@("logout")" />
             }
-            <RadzenMenuItem id="menu-file-extract" Text="Extract Here" Icon="unarchive" Disabled="@(!this.IsEnabled("extract"))" Click="async _ => await this.HandleExtract()" />
-            <RadzenMenuItem id="menu-file-compress" Text="Compress to..." Icon="archive" Disabled="@(!this.IsEnabled("compress"))" Click="async _ => await this.HandleCompress()" />
-            <RadzenMenuItem id="menu-file-reset" Text="Reset Workspace..." Icon="restart_alt" Disabled="@(!this.IsEnabled("reset"))" Click="async _ => await this.HandleResetWorkspace()" />
+            <RadzenMenuItem id="menu-file-extract" Text="Extract Here" Icon="unarchive" Disabled="@(!this.IsEnabled("extract"))" Value="@("extract")" />
+            <RadzenMenuItem id="menu-file-compress" Text="Compress to..." Icon="archive" Disabled="@(!this.IsEnabled("compress"))" Value="@("compress")" />
+            <RadzenMenuItem id="menu-file-reset" Text="Reset Workspace..." Icon="restart_alt" Disabled="@(!this.IsEnabled("reset"))" Value="@("reset")" />
         </RadzenMenuItem>
         <RadzenMenuItem id="menu-edit" Text="Edit">
-            <RadzenMenuItem id="menu-edit-copy" Text="Copy" Icon="content_copy" Disabled="@(!this.IsEnabled("copy"))" Template="@this.CommandTemplate("copy")" Click="async _ => await this.HandleCopy()" />
-            <RadzenMenuItem id="menu-edit-cut" Text="Cut" Icon="content_cut" Disabled="@(!this.IsEnabled("cut"))" Template="@this.CommandTemplate("cut")" Click="async _ => await this.HandleCut()" />
-            <RadzenMenuItem id="menu-edit-paste" Text="Paste" Icon="content_paste" Disabled="@(!this.IsEnabled("paste"))" Template="@this.CommandTemplate("paste")" Click="async _ => await this.HandlePaste()" />
-            <RadzenMenuItem id="menu-edit-delete" Text="Delete" Icon="delete" Disabled="@(!this.IsEnabled("delete"))" Template="@this.CommandTemplate("delete")" Click="async _ => await this.HandleDelete()" />
-            <RadzenMenuItem id="menu-edit-rename" Text="Rename" Icon="drive_file_rename_outline" Disabled="@(!this.IsEnabled("rename"))" Template="@this.CommandTemplate("rename")" Click="async _ => await this.HandleRename()" />
-            <RadzenMenuItem id="menu-edit-advanced-rename" Text="Advanced Rename..." Icon="edit_note" Disabled="@(!this.IsEnabled("advanced-rename"))" Template="@this.CommandTemplate("advanced-rename")" Click="async _ => await this.HandleAdvancedRename()" />
-            <RadzenMenuItem id="menu-edit-select-all" Text="Select All" Icon="select_all" Disabled="@(!this.IsEnabled("select-all"))" Template="@this.CommandTemplate("select-all")" Click="async _ => await this.HandleSelectAll()" />
+            <RadzenMenuItem id="menu-edit-copy" Text="Copy" Icon="content_copy" Disabled="@(!this.IsEnabled("copy"))" Template="@this.CommandTemplate("copy")" Value="@("copy")" />
+            <RadzenMenuItem id="menu-edit-cut" Text="Cut" Icon="content_cut" Disabled="@(!this.IsEnabled("cut"))" Template="@this.CommandTemplate("cut")" Value="@("cut")" />
+            <RadzenMenuItem id="menu-edit-paste" Text="Paste" Icon="content_paste" Disabled="@(!this.IsEnabled("paste"))" Template="@this.CommandTemplate("paste")" Value="@("paste")" />
+            <RadzenMenuItem id="menu-edit-delete" Text="Delete" Icon="delete" Disabled="@(!this.IsEnabled("delete"))" Template="@this.CommandTemplate("delete")" Value="@("delete")" />
+            <RadzenMenuItem id="menu-edit-rename" Text="Rename" Icon="drive_file_rename_outline" Disabled="@(!this.IsEnabled("rename"))" Template="@this.CommandTemplate("rename")" Value="@("rename")" />
+            <RadzenMenuItem id="menu-edit-advanced-rename" Text="Advanced Rename..." Icon="edit_note" Disabled="@(!this.IsEnabled("advanced-rename"))" Template="@this.CommandTemplate("advanced-rename")" Value="@("advanced-rename")" />
+            <RadzenMenuItem id="menu-edit-select-all" Text="Select All" Icon="select_all" Disabled="@(!this.IsEnabled("select-all"))" Template="@this.CommandTemplate("select-all")" Value="@("select-all")" />
         </RadzenMenuItem>
         <RadzenMenuItem id="menu-view" Text="View">
-            <RadzenMenuItem id="menu-view-refresh" Text="Refresh" Icon="refresh" Disabled="@(!this.IsEnabled("refresh"))" Template="@this.CommandTemplate("refresh")" Click="async _ => await this.HandleRefresh()" />
-            <RadzenMenuItem id="menu-view-panels" Text="@(this.SinglePanelMode ? "Dual Panel" : "Single Panel")" Icon="view_column" Disabled="@(!this.IsEnabled("panels"))" Template="@this.CommandTemplate("panels", this.SinglePanelMode ? "Dual Panel" : "Single Panel")" Click="async _ => await this.HandleToggleSinglePanel()" />
-            <RadzenMenuItem id="menu-view-terminal" Text="@(this.TerminalNeedsAttention ? "Terminal — attention" : this.TerminalMinimized ? "Terminal — minimized" : this.TerminalVisible ? "Terminal — visible" : "Terminal")" Icon="@(this.TerminalNeedsAttention ? "notification_important" : "terminal")" Disabled="@(!this.IsEnabled("terminal"))" Template="@this.CommandTemplate("terminal", this.TerminalNeedsAttention ? "Terminal — attention" : this.TerminalMinimized ? "Terminal — minimized" : this.TerminalVisible ? "Terminal — visible" : "Terminal")" Click="async _ => await this.HandleTerminal()" />
+            <RadzenMenuItem id="menu-view-refresh" Text="Refresh" Icon="refresh" Disabled="@(!this.IsEnabled("refresh"))" Template="@this.CommandTemplate("refresh")" Value="@("refresh")" />
+            <RadzenMenuItem id="menu-view-panels" Text="@(this.SinglePanelMode ? "Dual Panel" : "Single Panel")" Icon="view_column" Disabled="@(!this.IsEnabled("panels"))" Template="@this.CommandTemplate("panels", this.SinglePanelMode ? "Dual Panel" : "Single Panel")" Value="@("panels")" />
+            <RadzenMenuItem id="menu-view-terminal" Text="@(this.TerminalNeedsAttention ? "Terminal — attention" : this.TerminalMinimized ? "Terminal — minimized" : this.TerminalVisible ? "Terminal — visible" : "Terminal")" Icon="@(this.TerminalNeedsAttention ? "notification_important" : "terminal")" Disabled="@(!this.IsEnabled("terminal"))" Template="@this.CommandTemplate("terminal", this.TerminalNeedsAttention ? "Terminal — attention" : this.TerminalMinimized ? "Terminal — minimized" : this.TerminalVisible ? "Terminal — visible" : "Terminal")" Value="@("terminal")" />
         </RadzenMenuItem>
         <RadzenMenuItem id="menu-settings" Text="Settings">
             <RadzenMenuItem id="menu-settings-theme" Text="Theme" Icon="palette" Disabled="@(!this.IsEnabled("theme"))">
@@ -35,18 +35,18 @@
                 {
                     <RadzenMenuItem id="@("menu-settings-theme-" + theme)" Text="@this.FormatThemeName(theme)"
                                     Icon="@(string.Equals(this.GetCurrentTheme(), theme, StringComparison.OrdinalIgnoreCase) ? "check" : "")"
-                                    Disabled="@(!this.IsEnabled("theme"))" Click="async _ => await this.HandleThemeChange(new ChangeEventArgs { Value = theme })" />
+                                    Disabled="@(!this.IsEnabled("theme"))" Value="@(ThemeValuePrefix + theme)" />
                 }
             </RadzenMenuItem>
-            <RadzenMenuItem id="menu-settings-editor" Text="Editor Extensions..." Icon="code" Disabled="@(!this.IsEnabled("editor-extensions"))" Click="async _ => await this.HandleEditorExtensions()" />
-            <RadzenMenuItem id="menu-settings-permissions" Text="Default Permissions..." Icon="admin_panel_settings" Disabled="@(!this.IsEnabled("creation-permissions"))" Click="async _ => await this.HandleCreationPermissions()" />
+            <RadzenMenuItem id="menu-settings-editor" Text="Editor Extensions..." Icon="code" Disabled="@(!this.IsEnabled("editor-extensions"))" Value="@("editor-extensions")" />
+            <RadzenMenuItem id="menu-settings-permissions" Text="Default Permissions..." Icon="admin_panel_settings" Disabled="@(!this.IsEnabled("creation-permissions"))" Value="@("creation-permissions")" />
             @if (this.CanManageAuthenticationSettings)
             {
-                <RadzenMenuItem id="menu-settings-auth" Text="Authentication..." Icon="lock" Disabled="@(!this.IsEnabled("authentication"))" Click="async _ => await this.HandleAuthenticationSettings()" />
+                <RadzenMenuItem id="menu-settings-auth" Text="Authentication..." Icon="lock" Disabled="@(!this.IsEnabled("authentication"))" Value="@("authentication")" />
             }
         </RadzenMenuItem>
         <RadzenMenuItem id="menu-help" Text="Help">
-            <RadzenMenuItem id="menu-help-about" Text="About" Icon="help" Disabled="@(!this.IsEnabled("about"))" Template="@this.CommandTemplate("about")" Click="async _ => await this.HandleAbout()" />
+            <RadzenMenuItem id="menu-help-about" Text="About" Icon="help" Disabled="@(!this.IsEnabled("about"))" Template="@this.CommandTemplate("about")" Value="@("about")" />
         </RadzenMenuItem>
     </RadzenMenu>
 </div>

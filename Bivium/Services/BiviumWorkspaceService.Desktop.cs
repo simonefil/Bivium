@@ -130,31 +130,6 @@ namespace Bivium.Services
             }
         }
 
-        /// <summary>Authorized hydration of the app-owned menu</summary>
-        /// <param name="token">Mount lease</param>
-        /// <returns>Visual draft or null</returns>
-        internal WorkspaceMenuDraft GetMenuDraft(WorkspaceClientToken token)
-        {
-            lock (this._lock)
-                return this.ValidateLeaseLocked(token) && !this.IsStopped ? this._desktopRuntime.Menu : null;
-        }
-
-        /// <summary>Ordered menu checkpoint, also allowed during the drain</summary>
-        /// <param name="token">Publisher lease</param>
-        /// <param name="draft">Observed identity and visual context</param>
-        /// <returns>New revision or -1, with no implicit retry</returns>
-        internal long PublishMenuDraft(WorkspaceClientToken token, WorkspaceMenuDraft draft)
-        {
-            lock (this._lock)
-            {
-                if (!this.ValidateLeaseLocked(token) || this.IsStopped || draft == null || draft.Revision != this._desktopRuntime.Menu.Revision || draft.OpenIds.IsDefault || draft.OpenIds.Any(id => id is not ("menu-file" or "menu-edit" or "menu-view" or "menu-settings" or "menu-help" or "menu-settings-theme")) || draft.NavigationParent == null || draft.ActiveItem == null)
-                    return -1;
-                this._desktopRuntime.Menu = draft with { Revision = draft.Revision + 1 };
-                this.CommitDesktopLocked(this._snapshot.FloatingWindows);
-                return this._desktopRuntime.Menu.Revision;
-            }
-        }
-
         /// <summary>Reads the opening without rereading entries or flags from the filesystem</summary>
         /// <param name="token">Mount lease</param>
         /// <returns>Captured opening or null</returns>

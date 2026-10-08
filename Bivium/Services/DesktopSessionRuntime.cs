@@ -14,8 +14,6 @@ namespace Bivium.Services
         internal WorkspacePanelPathDraft LeftPathDraft { get; set; }
         /// <summary>Unconfirmed path of the right panel</summary>
         internal WorkspacePanelPathDraft RightPathDraft { get; set; }
-        /// <summary>Visual application menu, separate from the commands</summary>
-        internal WorkspaceMenuDraft Menu { get; set; } = new WorkspaceMenuDraft(0, []);
         /// <summary>Last context menu opening with captured sources</summary>
         internal WorkspaceContextMenuDraft ContextMenu { get; set; }
         /// <summary>Draft of the current dialog owner; contains no form data</summary>
@@ -36,7 +34,6 @@ namespace Bivium.Services
             this.EditorHistory = null;
             this.LeftPathDraft = null;
             this.RightPathDraft = null;
-            this.Menu = new WorkspaceMenuDraft(0, []);
             this.ContextMenu = null;
             this.Dialogs.Clear();
             this.Renamer = null;

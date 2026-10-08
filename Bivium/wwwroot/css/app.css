@@ -27,6 +27,12 @@ html, body {
     overflow: hidden;
 }
 
+/* Body clips its popups: a Radzen popup focused before being positioned cannot extend and scroll the document */
+body {
+    position: relative;
+    overflow: clip;
+}
+
 body:has(.bivium-radzen) {
     font-family: var(--rz-text-font-family);
     font-size: var(--rz-body-font-size);

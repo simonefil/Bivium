@@ -83,7 +83,7 @@ export function beginWorkspaceHandoff(id, remainingMilliseconds = 10000, workflo
     if (!root) return false;
     // Surfaces declared by the app must have completed the adapter mount
     const surfaceKey = Symbol.for('bivium.surfaceAdapter');
-    for (const surface of document.querySelectorAll('[data-workspace-menu-surface], [data-workspace-context-surface], [data-workspace-format-surface], [data-workspace-dropdown-surface], [data-workspace-renamer-surface], [data-workspace-terminal-view], [data-workspace-terminal-strip], [data-workspace-surface]:not([data-workspace-surface=""])')) {
+    for (const surface of document.querySelectorAll('[data-workspace-context-surface], [data-workspace-format-surface], [data-workspace-dropdown-surface], [data-workspace-renamer-surface], [data-workspace-terminal-view], [data-workspace-terminal-strip], [data-workspace-surface]:not([data-workspace-surface=""])')) {
         if (!surface[surfaceKey]?.ready()) return false;
     }
     const active = document.activeElement;

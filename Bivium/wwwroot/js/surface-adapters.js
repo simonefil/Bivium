@@ -68,66 +68,6 @@ function publisher(host, reference, method, generation, initial, read) {
 
 export { publisher as createSurfacePublisher };
 
-/** Official Radzen menu: native keyboard and responsive toggle, the adapter captures and restores only the visual state. */
-export function installMenuSurface(host, reference, generation, initial) {
-    const root = host?.querySelector('.rz-menu');
-    if (!root || typeof globalThis.Radzen?.toggleMenuItem !== 'function') return false;
-    let active = initial.activeItem || '';
-    let focused = initial.focused;
-    const openIds = ['menu-file', 'menu-edit', 'menu-view', 'menu-settings', 'menu-help', 'menu-settings-theme'];
-    const item = id => Array.from(root.querySelectorAll('.rz-navigation-item[id]')).find(element => element.id === id);
-    const opened = () => openIds.filter(id => {
-        const element = item(id);
-        if (!element?.classList.contains('rz-navigation-item-active')) return false;
-        const ancestor = element.parentElement.closest('.rz-navigation-item');
-        return !ancestor || ancestor.classList.contains('rz-navigation-item-active');
-    });
-    // Element highlighted by the native RadzenMenu keyboard, if any
-    const nativeActive = () => root.querySelector('.rz-navigation-item.rz-state-focused[id]:not([data-bivium-restored-focus])')?.id || '';
-    function expand(element, open) {
-        const wrapper = element?.querySelector(':scope > .rz-navigation-item-wrapper');
-        if (wrapper) globalThis.Radzen.toggleMenuItem(wrapper, 'event', open, true);
-    }
-    const adapter = publisher(host, reference, 'OnMenuSurfaceChanged', generation, initial, () => {
-        active = nativeActive() || active;
-        return { openIds: opened(), responsiveOpen: root.classList.contains('rz-menu-open'), navigationParent: opened().at(-1) || '', activeItem: active, focused };
-    });
-    // The restored highlight is visual only and yields to the first native interaction
-    function clearRestoredFocus() {
-        for (const element of root.querySelectorAll('[data-bivium-restored-focus]')) {
-            element.classList.remove('rz-state-focused');
-            element.removeAttribute('data-bivium-restored-focus');
-        }
-    }
-    const capture = () => { if (!registry().freeze) adapter.registration.capture(); };
-    root.addEventListener('keydown', clearRestoredFocus, { capture: true, signal: adapter.signal });
-    root.addEventListener('pointerdown', clearRestoredFocus, { capture: true, signal: adapter.signal });
-    root.addEventListener('click', event => {
-        const target = event.target.closest('.rz-navigation-item[id]');
-        if (target && !registry().freeze) active = target.id;
-        queueMicrotask(capture);
-    }, { signal: adapter.signal });
-    root.addEventListener('focusin', () => { focused = true; capture(); }, { signal: adapter.signal });
-    root.addEventListener('focusout', event => { if (!root.contains(event.relatedTarget) && !registry().freeze) { focused = false; adapter.registration.capture(); } }, { signal: adapter.signal });
-    adapter.registration.observer = new MutationObserver(capture);
-    adapter.registration.observer.observe(root, { attributes: true, subtree: true, attributeFilter: ['class', 'aria-expanded'] });
-    requestVisualFrame(() => {
-        if (host[registrationKey] !== adapter.registration) return;
-        // The native responsive toggle owns the open state: it is restored with its own event
-        if (root.classList.contains('rz-menu-open') !== Boolean(initial.responsiveOpen)) root.querySelector('.rz-menu-toggle')?.click();
-        for (const id of openIds) expand(item(id), initial.openIds.includes(id));
-        const restored = item(active);
-        if (restored && !nativeActive()) {
-            restored.classList.add('rz-state-focused');
-            restored.setAttribute('data-bivium-restored-focus', '');
-        }
-        if (focused && !modal() && !registry().freeze) root.focus({ preventScroll: true });
-        adapter.registration.restoring = false;
-        adapter.registration.capture();
-    });
-    return true;
-}
-
 /** App keys: explicit id/name or accessible labels declared by the markup, never DOM indices. */
 function focusKey(element, root) {
     const keyed = element?.closest('[data-ui-key]');
