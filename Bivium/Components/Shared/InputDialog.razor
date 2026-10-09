@@ -6,7 +6,21 @@
 {
     <PersistentModalShell Surface="input" @key="this.Workflow.QuestionId" Label="@(this.Workflow.Phase == Bivium.Models.WorkspaceWorkflowPhase.Failed ? "File operation failed" : this.Workflow.InvocationParameters.Title)" Width="min(92vw, 36rem)" CloseOnOverlayClick="@(this.Workflow.Phase == Bivium.Models.WorkspaceWorkflowPhase.Failed)" CanClose="@(!this._draftRejected)" OnCancel="@(() => this.RespondWorkspaceAsync(true))" OnContentRendered="this.HandleContentRenderedAsync">
         <div data-workspace-workflow-id="@this.Workflow.Id">
-            @if (this.Workflow.Phase == Bivium.Models.WorkspaceWorkflowPhase.AwaitingInput)
+            @* The closing dialog keeps rendering after the response: only Failed shows the error *@
+            @if (this.Workflow.Phase == Bivium.Models.WorkspaceWorkflowPhase.Failed)
+            {
+                <RadzenStack Gap="1rem">
+                    <RadzenAlert AlertStyle="AlertStyle.Danger" AllowClose="false" class="rz-m-0">@this.Workflow.ErrorMessage</RadzenAlert>
+                    @if (!string.IsNullOrEmpty(this._workspaceError))
+                    {
+                        <RadzenAlert AlertStyle="AlertStyle.Warning" AllowClose="false" class="rz-m-0">@this._workspaceError</RadzenAlert>
+                    }
+                    <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" AlignItems="AlignItems.Center" Gap="0.75rem">
+                        <RadzenButton Text="Close" ButtonStyle="ButtonStyle.Primary" Click="@(() => this.RespondWorkspaceAsync(true))" />
+                    </RadzenStack>
+                </RadzenStack>
+            }
+            else
             {
                 <RadzenTemplateForm TItem="InputDialog" Data="this" Submit="@(_ => this.RespondWorkspaceAsync(false))">
                     <RadzenStack Gap="1rem">
@@ -29,19 +43,6 @@
                         </RadzenStack>
                     </RadzenStack>
                 </RadzenTemplateForm>
-            }
-            else
-            {
-                <RadzenStack Gap="1rem">
-                    <RadzenAlert AlertStyle="AlertStyle.Danger" AllowClose="false" class="rz-m-0">@this.Workflow.ErrorMessage</RadzenAlert>
-                    @if (!string.IsNullOrEmpty(this._workspaceError))
-                    {
-                        <RadzenAlert AlertStyle="AlertStyle.Warning" AllowClose="false" class="rz-m-0">@this._workspaceError</RadzenAlert>
-                    }
-                    <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" AlignItems="AlignItems.Center" Gap="0.75rem">
-                        <RadzenButton Text="Close" ButtonStyle="ButtonStyle.Primary" Click="@(() => this.RespondWorkspaceAsync(true))" />
-                    </RadzenStack>
-                </RadzenStack>
             }
         </div>
     </PersistentModalShell>
