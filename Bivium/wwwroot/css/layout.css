@@ -52,6 +52,9 @@
 
 .bivium-header-bar > .bivium-panel-switch {
     flex: 0 0 auto;
+    /* Stays on the first row when the responsive menu expands below the toggle */
+    align-self: flex-start;
+    margin-block-start: 0.25rem;
     margin-inline-end: 0.25rem;
 }
 

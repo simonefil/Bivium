@@ -11,7 +11,7 @@
         </RadzenStack>
         <RadzenStack class="bivium-native-window-titlebar-actions" Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem">
             <RadzenButton Icon="minimize" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" Size="ButtonSize.Small" Click="this.MinimizeAsync" title="Minimize renamer" aria-label="Minimize renamer" />
-            <RadzenButton Icon="close" ButtonStyle="ButtonStyle.Light" Variant="Variant.Text" Size="ButtonSize.Small" Click="this.HandleClose" Disabled="@this.IsBatchRunning" title="Close" aria-label="Close renamer" />
+            <RadzenButton Icon="close" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Text" Size="ButtonSize.Small" Click="this.HandleClose" Disabled="@this.IsBatchRunning" title="Close" aria-label="Close renamer" />
         </RadzenStack>
     </RadzenStack>
 
@@ -127,7 +127,7 @@
         </div>
     </div>
 
-    <div class="renamer-statusbar bivium-radzen-renamer-statusbar rz-p-2">
+    <div class="renamer-statusbar bivium-radzen-renamer-statusbar rz-py-2 rz-ps-2">
         <div class="renamer-statusbar-status">
             <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0" Text="@this._statusText" />
             @if (this.IsBatchRunning && this._batchOperation?.ProgressTotal > 0)

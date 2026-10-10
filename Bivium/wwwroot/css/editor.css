@@ -30,6 +30,8 @@
 
 .editor-statusbar {
     display: flex;
+    /* Keeps the actions clear of the corner resize grip */
+    padding-inline-end: var(--bivium-resize-handle-size);
     justify-content: space-between;
     align-items: center;
     flex-shrink: 0;

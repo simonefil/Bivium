@@ -1411,12 +1411,14 @@ export function uninstallRadzenPathAdapter(hostId) {
  * @param {number} viewportHeight - Current viewport height.
  * @param {boolean} scaleFromSavedViewport - Whether coordinates should be scaled proportionally.
  * @param {number} usableTop - First usable viewport coordinate below fixed application chrome.
+ * @param {number} usableBottom - Last usable viewport coordinate above fixed application chrome.
  * @returns {object} Reachable geometry.
  */
-export function computeWindowGeometry(geometry, viewportWidth, viewportHeight, scaleFromSavedViewport, usableTop = 0) {
+export function computeWindowGeometry(geometry, viewportWidth, viewportHeight, scaleFromSavedViewport, usableTop = 0, usableBottom = Number.POSITIVE_INFINITY) {
     const safeViewportWidth = Number.isFinite(Number(viewportWidth)) && Number(viewportWidth) > 0 ? Number(viewportWidth) : 1;
     const safeViewportHeight = Number.isFinite(Number(viewportHeight)) && Number(viewportHeight) > 0 ? Number(viewportHeight) : 1;
     const safeUsableTop = Number.isFinite(Number(usableTop)) ? Math.max(0, Math.min(Number(usableTop), safeViewportHeight - 1)) : 0;
+    const safeUsableBottom = Number.isFinite(Number(usableBottom)) ? Math.max(safeUsableTop + 1, Math.min(Number(usableBottom), safeViewportHeight)) : safeViewportHeight;
     let left = Number(geometry?.left);
     let top = Number(geometry?.top);
     let width = Number(geometry?.width);
@@ -1434,13 +1436,13 @@ export function computeWindowGeometry(geometry, viewportWidth, viewportHeight, s
         top *= safeViewportHeight / savedHeight;
     }
     const maxWidth = Math.max(1, safeViewportWidth - 16);
-    const maxHeight = Math.max(1, safeViewportHeight - safeUsableTop - 16);
+    const maxHeight = Math.max(1, safeUsableBottom - safeUsableTop - 16);
     const minWidth = Math.min(300, maxWidth);
     const minHeight = Math.min(150, maxHeight);
     width = Math.max(minWidth, Math.min(width, maxWidth));
     height = Math.max(minHeight, Math.min(height, maxHeight));
     left = Math.max(0, Math.min(left, Math.max(0, safeViewportWidth - width)));
-    top = Math.max(safeUsableTop, Math.min(top, Math.max(safeUsableTop, safeViewportHeight - height)));
+    top = Math.max(safeUsableTop, Math.min(top, Math.max(safeUsableTop, safeUsableBottom - height)));
     return { left, top, width, height };
 }
 
@@ -1453,6 +1455,17 @@ function getFloatingWindowUsableTop() {
     if (!menuBar) return 0;
     const bottom = Number(menuBar.getBoundingClientRect().bottom);
     return Number.isFinite(bottom) ? Math.max(0, bottom) : 0;
+}
+
+/**
+ * Measures the status footer that fixed windows must remain above.
+ * @returns {number} Last usable vertical viewport coordinate.
+ */
+function getFloatingWindowUsableBottom() {
+    const footer = document.querySelector('.commander-layout > .rz-footer');
+    if (!footer) return window.innerHeight;
+    const top = Number(footer.getBoundingClientRect().top);
+    return Number.isFinite(top) ? top : window.innerHeight;
 }
 
 /**
@@ -1512,7 +1525,7 @@ export function initWindowDrag(windowId, titlebarId, resizeHandleId, dotNetRefer
             height: Number.isFinite(previous.height) ? previous.height : win.offsetHeight,
             viewportWidth: parseFloat(win.dataset.viewportWidth),
             viewportHeight: parseFloat(win.dataset.viewportHeight)
-        }, window.innerWidth, window.innerHeight, scaleFromSavedViewport, getFloatingWindowUsableTop());
+        }, window.innerWidth, window.innerHeight, scaleFromSavedViewport, getFloatingWindowUsableTop(), getFloatingWindowUsableBottom());
         win.style.left = geometry.left + 'px';
         win.style.top = geometry.top + 'px';
         win.style.width = geometry.width + 'px';

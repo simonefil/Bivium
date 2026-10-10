@@ -34,7 +34,7 @@
                 @foreach (string theme in this.GetThemeOptions())
                 {
                     <RadzenMenuItem id="@("menu-settings-theme-" + theme)" Text="@this.FormatThemeName(theme)"
-                                    Icon="@(string.Equals(this.GetCurrentTheme(), theme, StringComparison.OrdinalIgnoreCase) ? "check" : "")"
+                                    Icon="check" IconColor="@(string.Equals(this.GetCurrentTheme(), theme, StringComparison.OrdinalIgnoreCase) ? null : "transparent")"
                                     Disabled="@(!this.IsEnabled("theme"))" Value="@(ThemeValuePrefix + theme)" />
                 }
             </RadzenMenuItem>

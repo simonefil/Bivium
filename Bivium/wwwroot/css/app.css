@@ -17,6 +17,8 @@
  */
 :root {
     --bivium-floating-window-zindex: 100;
+    /* Corner resize grip of the modeless windows; status bars reserve this width */
+    --bivium-resize-handle-size: 28px;
 }
 
 html, body {
@@ -236,6 +238,8 @@ body:has(.bivium-radzen) {
 }
 
 @media (pointer: coarse) {
+    :root { --bivium-resize-handle-size: 44px; }
+
     .bivium-radzen .rz-splitter-bar,
     .terminal-resize-handle,
     .editor-resize-handle,
@@ -243,4 +247,13 @@ body:has(.bivium-radzen) {
         min-width: 44px;
         min-height: 44px;
     }
+}
+
+/* Radzen stripes only td: the row header cells of the permission tables follow their row */
+.bivium-radzen-permissions .rz-grid-table-striped tbody > tr:nth-child(even) > th {
+    background-color: var(--rz-grid-stripe-background-color);
+}
+
+.bivium-radzen-permissions .rz-grid-table-striped tbody > tr:nth-child(odd) > th {
+    background-color: var(--rz-grid-stripe-odd-background-color);
 }

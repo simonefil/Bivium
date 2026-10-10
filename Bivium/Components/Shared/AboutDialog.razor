@@ -7,8 +7,8 @@
     <PersistentModalShell Surface="about" Label="About" Width="min(92vw, 48rem)" CloseOnOverlayClick="true" OnCancel="this.CloseAsync">
         <div data-workspace-workflow-id="@this.Workflow.Id">
             <RadzenStack Gap="0.5rem">
-                <RadzenRow><RadzenColumn Size="4"><strong>Name</strong></RadzenColumn><RadzenColumn Size="8"><img src="favicon-32x32.png" alt="" /> Bivium File Manager</RadzenColumn></RadzenRow>
-                <RadzenRow><RadzenColumn Size="4"><strong>Version</strong></RadzenColumn><RadzenColumn Size="8">@this._draft.Version</RadzenColumn></RadzenRow>
+                <RadzenRow AlignItems="AlignItems.Center"><RadzenColumn Size="4"><strong>Name</strong></RadzenColumn><RadzenColumn Size="8"><RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem"><img src="favicon-32x32.png" alt="" /> Bivium File Manager</RadzenStack></RadzenColumn></RadzenRow>
+                <RadzenRow><RadzenColumn Size="4"><strong>Version</strong></RadzenColumn><RadzenColumn Size="8" Style="overflow-wrap: anywhere;">@this._draft.Version</RadzenColumn></RadzenRow>
                 <RadzenRow><RadzenColumn Size="4"><strong>License</strong></RadzenColumn><RadzenColumn Size="8">GNU General Public License v3.0</RadzenColumn></RadzenRow>
                 <RadzenRow><RadzenColumn Size="4"><strong>Repository</strong></RadzenColumn><RadzenColumn Size="8"><RadzenLink data-ui-key="repository-link" Path="https://github.com/simonefil/Bivium" Target="_blank" Text="github.com/simonefil/Bivium" /></RadzenColumn></RadzenRow>
                 <RadzenRow><RadzenColumn Size="4"><strong>Runtime</strong></RadzenColumn><RadzenColumn Size="8">@this._draft.Runtime</RadzenColumn></RadzenRow>
