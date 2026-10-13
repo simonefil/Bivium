@@ -5,7 +5,6 @@ WORKDIR /src
 RUN dotnet tool install -g Microsoft.Web.LibraryManager.Cli
 ENV PATH="$PATH:/root/.dotnet/tools"
 COPY Bivium/ ./Bivium/
-COPY Dependencies/ ./Dependencies/
 RUN cd Bivium && libman restore && cd ..
 RUN dotnet publish Bivium/Bivium.csproj -c Release -p:Version=${VERSION} -o /app
 

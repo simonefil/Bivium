@@ -229,7 +229,7 @@ Login sessions last up to 8 hours and are extended while the application is in u
 - [ZstdSharp](https://github.com/oleg-st/ZstdSharp) 0.8.7 — Zstandard compression
 - [Monaco Editor](https://microsoft.github.io/monaco-editor/) — file editor
 - [Porta.Pty](https://github.com/tomlm/Porta.Pty) 1.0.7 — native PTYs on Windows, macOS and Linux
-- [XTerm.NET](https://github.com/tomlm/XTerm.NET) 2.0.2 — server-side VT terminal model
+- [XTerm.NET](https://github.com/tomlm/XTerm.NET) 2.0.7 — server-side VT terminal model
 - [Radzen Blazor](https://blazor.radzen.com/) 11.4.2 — application UI components and themes
 
 ## License

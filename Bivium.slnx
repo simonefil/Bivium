@@ -1,4 +1,3 @@
 <Solution>
   <Project Path="Bivium/Bivium.csproj" />
-  <Project Path="Dependencies/XTerm.NET/src/XTerm.NET/XTerm.NET.csproj" />
 </Solution>
