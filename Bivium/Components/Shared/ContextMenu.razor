@@ -76,22 +76,7 @@
                 {
                     <RadzenMenuItem id="context-edit" Text="Edit" Icon="edit" Disabled="@(!this.IsEnabled("edit"))" Template="@this.CommandTemplate("edit", "Edit")" Click="async _ => await this.HandleActionAsync(this.OnEdit)" />
                 }
-                <RadzenMenuItem id="context-cut" Text="Cut" Icon="content_cut" Disabled="@(!this.IsEnabled("cut"))" Template="@this.CommandTemplate("cut", "Cut")" Click="async _ => await this.HandleActionAsync(this.OnCut)" />
-                <RadzenMenuItem id="context-copy" Text="Copy" Icon="content_copy" Disabled="@(!this.IsEnabled("copy"))" Template="@this.CommandTemplate("copy", "Copy")" Click="async _ => await this.HandleActionAsync(this.OnCopy)" />
-                <RadzenMenuItem id="context-paste" Text="Paste" Icon="content_paste" Disabled="@(!this.IsEnabled("paste"))" Template="@this.CommandTemplate("paste", "Paste")" Click="async _ => await this.HandleActionAsync(this.OnPaste)" />
-                @if (!this.IsMultiSelection)
-                {
-                    <RadzenMenuItem id="context-rename" Text="Rename" Icon="drive_file_rename_outline" Disabled="@(!this.IsEnabled("rename"))" Template="@this.CommandTemplate("rename", "Rename")" Click="async _ => await this.HandleActionAsync(this.OnRename)" />
-                }
-                @if (this.HasSelection)
-                {
-                    <RadzenMenuItem id="context-advanced-rename" Text="Advanced Rename..." Icon="edit_note" Disabled="@(!this.IsEnabled("advanced-rename"))" Template="@this.CommandTemplate("advanced-rename", "Advanced Rename...")" Click="async _ => await this.HandleActionAsync(this.OnAdvancedRename)" />
-                }
-                <RadzenMenuItem id="context-delete" Text="Delete" Icon="delete" Disabled="@(!this.IsEnabled("delete"))" Template="@this.CommandTemplate("delete", "Delete")" Click="async _ => await this.HandleActionAsync(this.OnDelete)" />
-                <RadzenMenuItem id="context-new-file" Text="New File" Icon="note_add" Disabled="@(!this.IsEnabled("new-file"))" Template="@this.CommandTemplate("new-file", "New File")" Click="async _ => await this.HandleActionAsync(this.OnNewFile)" />
-                <RadzenMenuItem id="context-new-folder" Text="New Folder" Icon="create_new_folder" Disabled="@(!this.IsEnabled("new-folder"))" Template="@this.CommandTemplate("new-folder", "New Folder")" Click="async _ => await this.HandleActionAsync(this.OnNewFolder)" />
-                <RadzenMenuItem id="context-download" Text="@(this.IsMultiSelection ? "Download as ZIP" : "Download")" Icon="download" Disabled="@(!this.IsEnabled("download"))" Template="@this.CommandTemplate("download", this.IsMultiSelection ? "Download as ZIP" : "Download")" Click="async _ => await this.HandleActionAsync(this.OnDownload)" />
-                <RadzenMenuItem id="context-upload" Text="Upload" Icon="upload" Disabled="@(!this.IsEnabled("upload"))" Template="@this.CommandTemplate("upload", "Upload")" Click="async _ => await this.HandleActionAsync(this.OnUpload)" />
+                <RadzenMenuItem id="context-download" class="bivium-menu-group-start" Text="@(this.IsMultiSelection ? "Download as ZIP" : "Download")" Icon="download" Disabled="@(!this.IsEnabled("download"))" Template="@this.CommandTemplate("download", this.IsMultiSelection ? "Download as ZIP" : "Download")" Click="async _ => await this.HandleActionAsync(this.OnDownload)" />
                 @if (this.IsArchive)
                 {
                     <RadzenMenuItem id="context-extract" Text="Extract Here" Icon="unarchive" Disabled="@(!this.IsEnabled("extract"))" Template="@this.CommandTemplate("extract", "Extract Here")" Click="async _ => await this.HandleActionAsync(this.OnExtract)" />
@@ -101,10 +86,25 @@
                 {
                     <RadzenMenuItem id="context-compress" Text="Compress to..." Icon="archive" Disabled="@(!this.IsEnabled("compress"))" Template="@this.CommandTemplate("compress", "Compress to...")" Click="async _ => await this.HandleActionAsync(this.OnCompress)" />
                 }
-                <RadzenMenuItem id="context-refresh" Text="Refresh" Icon="refresh" Disabled="@(!this.IsEnabled("refresh"))" Template="@this.CommandTemplate("refresh", "Refresh")" Click="async _ => await this.HandleActionAsync(this.OnRefresh)" />
+                <RadzenMenuItem id="context-cut" class="bivium-menu-group-start" Text="Cut" Icon="content_cut" Disabled="@(!this.IsEnabled("cut"))" Template="@this.CommandTemplate("cut", "Cut")" Click="async _ => await this.HandleActionAsync(this.OnCut)" />
+                <RadzenMenuItem id="context-copy" Text="Copy" Icon="content_copy" Disabled="@(!this.IsEnabled("copy"))" Template="@this.CommandTemplate("copy", "Copy")" Click="async _ => await this.HandleActionAsync(this.OnCopy)" />
+                <RadzenMenuItem id="context-paste" Text="Paste" Icon="content_paste" Disabled="@(!this.IsEnabled("paste"))" Template="@this.CommandTemplate("paste", "Paste")" Click="async _ => await this.HandleActionAsync(this.OnPaste)" />
+                <RadzenMenuItem id="context-delete" class="bivium-menu-group-start" Text="Delete" Icon="delete" Disabled="@(!this.IsEnabled("delete"))" Template="@this.CommandTemplate("delete", "Delete")" Click="async _ => await this.HandleActionAsync(this.OnDelete)" />
                 @if (!this.IsMultiSelection)
                 {
-                    <RadzenMenuItem id="context-permissions" Text="Permissions" Icon="admin_panel_settings" Disabled="@(!this.IsEnabled("permissions"))" Template="@this.CommandTemplate("permissions", "Permissions")" Click="async _ => await this.HandleActionAsync(this.OnPermissions)" />
+                    <RadzenMenuItem id="context-rename" Text="Rename" Icon="drive_file_rename_outline" Disabled="@(!this.IsEnabled("rename"))" Template="@this.CommandTemplate("rename", "Rename")" Click="async _ => await this.HandleActionAsync(this.OnRename)" />
+                }
+                @if (this.HasSelection)
+                {
+                    <RadzenMenuItem id="context-advanced-rename" Text="Advanced Rename..." Icon="edit_note" Disabled="@(!this.IsEnabled("advanced-rename"))" Template="@this.CommandTemplate("advanced-rename", "Advanced Rename...")" Click="async _ => await this.HandleActionAsync(this.OnAdvancedRename)" />
+                }
+                <RadzenMenuItem id="context-new-file" class="bivium-menu-group-start" Text="New File" Icon="note_add" Disabled="@(!this.IsEnabled("new-file"))" Template="@this.CommandTemplate("new-file", "New File")" Click="async _ => await this.HandleActionAsync(this.OnNewFile)" />
+                <RadzenMenuItem id="context-new-folder" Text="New Folder" Icon="create_new_folder" Disabled="@(!this.IsEnabled("new-folder"))" Template="@this.CommandTemplate("new-folder", "New Folder")" Click="async _ => await this.HandleActionAsync(this.OnNewFolder)" />
+                <RadzenMenuItem id="context-upload" Text="Upload" Icon="upload" Disabled="@(!this.IsEnabled("upload"))" Template="@this.CommandTemplate("upload", "Upload")" Click="async _ => await this.HandleActionAsync(this.OnUpload)" />
+                <RadzenMenuItem id="context-refresh" class="bivium-menu-group-start" Text="Refresh" Icon="refresh" Disabled="@(!this.IsEnabled("refresh"))" Template="@this.CommandTemplate("refresh", "Refresh")" Click="async _ => await this.HandleActionAsync(this.OnRefresh)" />
+                @if (!this.IsMultiSelection)
+                {
+                    <RadzenMenuItem id="context-permissions" class="bivium-menu-group-start" Text="Permissions" Icon="admin_panel_settings" Disabled="@(!this.IsEnabled("permissions"))" Template="@this.CommandTemplate("permissions", "Permissions")" Click="async _ => await this.HandleActionAsync(this.OnPermissions)" />
                     <RadzenMenuItem id="context-properties" Text="Properties" Icon="info" Disabled="@(!this.IsEnabled("properties"))" Template="@this.CommandTemplate("properties", "Properties")" Click="async _ => await this.HandleActionAsync(this.OnProperties)" />
                 }
             </RadzenMenu></ContextMenuSurfaceHost>);

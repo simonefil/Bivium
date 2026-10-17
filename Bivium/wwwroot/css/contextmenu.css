@@ -4,3 +4,8 @@ body:has(.bivium-radzen) .rz-context-menu {
     max-height: calc(100dvh - 1rem);
     overflow: auto;
 }
+
+/* Sections in the Windows Explorer order: the first item of each group draws the separator */
+body:has(.bivium-radzen) .rz-context-menu .bivium-menu-group-start:not(:first-child) {
+    border-block-start: var(--rz-border-normal);
+}

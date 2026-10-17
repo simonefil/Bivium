@@ -109,6 +109,11 @@ namespace Bivium.Components.Pages
         private const int TYPE_SEARCH_TIMEOUT_MS = 1000;
 
         /// <summary>
+        /// Running time before an operation shows its progress and Cancel in the status bar
+        /// </summary>
+        private const int OPERATION_PROGRESS_DELAY_MS = 500;
+
+        /// <summary>
         /// Page jump size used until the browser reports the visible row count
         /// </summary>
         private const int DEFAULT_PAGE_SIZE = 20;
@@ -189,6 +194,10 @@ namespace Bivium.Components.Pages
         private WorkspaceTerminalDialog _terminalWorkflowDialog;
         /// <summary>Last result reconciled in the adapter, without re-running the operation</summary>
         private Guid _observedCompletedOperationId;
+        /// <summary>Running operation whose progress the status bar shows, after the delay</summary>
+        private Guid _shownOperationId;
+        /// <summary>Running operation waiting for the delay</summary>
+        private Guid _pendingOperationId;
 
         /// <summary>
         /// Reference to properties dialog component
@@ -489,6 +498,7 @@ namespace Bivium.Components.Pages
                     await this._jsModule.InvokeVoidAsync("scrollCursorIntoView", this.GetActivePanel().CursorIndex);
             }
 
+            this.ScheduleOperationProgress();
             this.PersistWorkspacePanels();
         }
 
@@ -3635,16 +3645,43 @@ namespace Bivium.Components.Pages
             WorkspaceOperationSnapshot operation = this._desktopWorkspace?.Operation;
             if (operation != null)
             {
-                if (operation.IsRunning)
+                if (this.IsOperationProgressShown())
                     return operation.Phase == WorkspaceOperationPhase.CancellationRequested ? "Cancelling..." : !string.IsNullOrEmpty(operation.Stage) ? operation.Stage + " " + operation.ProgressCurrent + (operation.ProgressTotal > 0 ? "/" + operation.ProgressTotal : "") : operation.Kind == WorkspaceWorkflowKind.DeleteEntries ? "Deleting... " + operation.FilesProcessed + " completed, " + operation.FilesFailed + " failed" : operation.Kind + "...";
-                if (!string.IsNullOrEmpty(operation.ErrorMessage))
+                if (!operation.IsRunning && !string.IsNullOrEmpty(operation.ErrorMessage))
                     return operation.ErrorMessage;
-                if (operation.Phase == WorkspaceOperationPhase.Succeeded)
-                    return operation.Kind + " completed";
             }
             if (!string.IsNullOrEmpty(this._workspaceWorkflow?.ErrorMessage))
                 return this._workspaceWorkflow.ErrorMessage;
             return this._progressText;
+        }
+
+        /// <summary>
+        /// Instant operations end before the delay and never show progress or Cancel
+        /// </summary>
+        /// <returns>True when the running operation has outlived the delay</returns>
+        private bool IsOperationProgressShown() => this._desktopWorkspace?.Operation is { IsRunning: true } operation && operation.Id == this._shownOperationId;
+
+        /// <summary>
+        /// Starts the delay for a running operation not yet shown
+        /// </summary>
+        private void ScheduleOperationProgress()
+        {
+            WorkspaceOperationSnapshot operation = this._desktopWorkspace?.Operation;
+            if (operation?.IsRunning != true || operation.Id == this._shownOperationId || operation.Id == this._pendingOperationId)
+                return;
+            Guid operationId = operation.Id;
+            this._pendingOperationId = operationId;
+
+            _ = this.InvokeAsync(async () =>
+            {
+                await System.Threading.Tasks.Task.Delay(OPERATION_PROGRESS_DELAY_MS);
+
+                if (this._isDisposed || this._desktopWorkspace?.Operation is not { IsRunning: true } current || current.Id != operationId)
+                    return;
+
+                this._shownOperationId = operationId;
+                this.StateHasChanged();
+            });
         }
 
         /// <summary>

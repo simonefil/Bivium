@@ -114,7 +114,7 @@ else
     <RadzenFooter>
     <Bivium.Components.Shared.StatusBar SelectedPaths="@this.GetActivePanel().SelectedPaths" CurrentPath="@this.GetActivePanel().CurrentPath"
         Windows="@this.GetOpenWindows()" CanActivateWindows="@this.CanActivateWindows()" OnWindowActivate="this.RestoreWindowAsync"
-        Entries="@this.GetActivePanel().Entries" ProgressText="@this.GetStatusCenterText()" CanCancelOperation="@(this._desktopWorkspace?.Operation?.IsRunning == true)"
+        Entries="@this.GetActivePanel().Entries" ProgressText="@this.GetStatusCenterText()" CanCancelOperation="@this.IsOperationProgressShown()"
         OnCancelOperation="this.CancelActiveOperation" />
 
     </RadzenFooter>
