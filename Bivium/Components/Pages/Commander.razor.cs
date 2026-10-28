@@ -912,6 +912,12 @@ namespace Bivium.Components.Pages
             WorkspacePanelSnapshot defaultPanel = new WorkspacePanelSnapshot(homePath, "", 0, new List<string>(), SortField.Name, SortDirection.Ascending);
             WorkspacePanelsSnapshot defaultPanels = new WorkspacePanelsSnapshot(defaultPanel, defaultPanel, 0, false);
             BiviumWorkspaceSnapshot workspace = this._workspaceService.InitializePanels(this.GetClientToken(), defaultPanels);
+            // Results finished before this page loaded were already reported: reopening Bivium does not repeat their toast
+            if (workspace?.Operation is { IsRunning: false } finishedOperation)
+                this._observedCompletedOperationId = finishedOperation.Id;
+            WorkspaceUploadSnapshot finishedUpload = this._workspaceService.GetUpload(this.GetClientToken());
+            if (finishedUpload?.Phase == WorkspaceUploadPhase.Succeeded)
+                this._observedCompletedUploadId = finishedUpload.Id;
             this.ApplyWorkspacePanels(workspace, homePath);
             this._panelsInitialized = true;
         }
